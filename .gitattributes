@@ -1,10 +1,9 @@
-# Auto-generated files — collapse diffs and exclude from language stats
-web/package-lock.json linguist-generated=true
+*.sh text eol=lf
+*.command text eol=lf
 
-# Enforce LF for scripts that run inside Linux containers.
-# Without this, Windows checkout converts to CRLF and breaks `exec` in the
-# container entrypoint with "no such file or directory".
-*.sh        text eol=lf
-Dockerfile  text eol=lf
-*.dockerfile text eol=lf
-docker/entrypoint.sh text eol=lf
+# User archives contain only the runnable product and install metadata.
+tests export-ignore
+docs export-ignore
+.python-version export-ignore
+.gitignore export-ignore
+.gitattributes export-ignore
