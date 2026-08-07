@@ -6,8 +6,8 @@ import os
 from collections.abc import Callable
 from pathlib import Path
 
-from honeyos import default_home
-from honeyos.migration.legacy_h2os import (
+from honeyos import PRODUCT_NAME, RUNTIME_ID, default_home
+from honeyos.migration.legacy import (
     default_legacy_home,
     migrate_legacy_home,
     stop_legacy_service,
@@ -39,5 +39,14 @@ def activate_home(
         destination.chmod(0o700)
     except OSError:
         pass
+    for legacy_variable in (
+        "HONEYOS_HOME",
+        "HONEYOS_HOME",
+        "HONEYOS_RUNTIME_ID",
+        "HONEYOS_PRODUCT_NAME",
+    ):
+        os.environ.pop(legacy_variable, None)
     os.environ["HONEYOS_HOME"] = str(destination)
+    os.environ["HONEYOS_RUNTIME_ID"] = RUNTIME_ID
+    os.environ["HONEYOS_PRODUCT_NAME"] = PRODUCT_NAME
     return destination

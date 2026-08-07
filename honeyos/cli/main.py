@@ -9,7 +9,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from honeyos import PRODUCT_NAME
+from honeyos import PRODUCT_NAME, RUNTIME_ID
 from honeyos.cli.bootstrap import activate_home
 from honeyos.cli.service import (
     ServiceIdentity,
@@ -60,22 +60,25 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _compatibility_environment(home: Path) -> dict[str, str]:
-    """Temporary bridge removed when the runtime modules move in Task 4."""
-
+def _runtime_environment(home: Path) -> dict[str, str]:
     environment = os.environ.copy()
+    for legacy_variable in (
+        "HONEYOS_HOME",
+        "HONEYOS_HOME",
+        "HONEYOS_RUNTIME_ID",
+        "HONEYOS_PRODUCT_NAME",
+    ):
+        environment.pop(legacy_variable, None)
     environment["HONEYOS_HOME"] = str(home)
-    environment["HERMES_HOME"] = str(home)
-    environment["H2OS_HOME"] = str(home)
-    environment["H2OS_RUNTIME_ID"] = "h2os-companion-v0.2"
-    environment["H2OS_PRODUCT_NAME"] = PRODUCT_NAME
+    environment["HONEYOS_RUNTIME_ID"] = RUNTIME_ID
+    environment["HONEYOS_PRODUCT_NAME"] = PRODUCT_NAME
     return environment
 
 
 def _run_embedded(arguments: Sequence[str], home: Path) -> int:
     completed = subprocess.run(
-        [sys.executable, "-m", "hermes_cli.main", *arguments],
-        env=_compatibility_environment(home),
+        [sys.executable, "-m", "honeyos.runtime.main", *arguments],
+        env=_runtime_environment(home),
         check=False,
     )
     return completed.returncode
@@ -83,10 +86,10 @@ def _run_embedded(arguments: Sequence[str], home: Path) -> int:
 
 def _initialize_embedded(home: Path) -> None:
     previous = os.environ.copy()
-    os.environ.update(_compatibility_environment(home))
+    os.environ.update(_runtime_environment(home))
     try:
-        from h2os_cli.config import initialize_home, upgrade_companion_capabilities
-        from h2os_cli.runtime import write_runtime_identity
+        from honeyos.companion.config import initialize_home, upgrade_companion_capabilities
+        from honeyos.companion.runtime import write_runtime_identity
 
         initialize_home(home)
         upgrade_companion_capabilities(home)
@@ -98,9 +101,9 @@ def _initialize_embedded(home: Path) -> None:
 
 def _run_setup(home: Path, identity: ServiceIdentity) -> int:
     previous = os.environ.copy()
-    os.environ.update(_compatibility_environment(home))
+    os.environ.update(_runtime_environment(home))
     try:
-        from h2os_cli.setup import run_setup
+        from honeyos.companion.setup import run_setup
 
         def lifecycle(command: str, **_kwargs) -> int:
             if command == "install":
@@ -151,9 +154,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "doctor":
         _initialize_embedded(home)
         previous = os.environ.copy()
-        os.environ.update(_compatibility_environment(home))
+        os.environ.update(_runtime_environment(home))
         try:
-            from h2os_cli.doctor import print_doctor
+            from honeyos.companion.doctor import print_doctor
 
             return print_doctor(home)
         finally:
@@ -161,7 +164,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             os.environ.update(previous)
     if args.command == "channel":
         _initialize_embedded(home)
-        return _run_embedded(["gateway", "setup"], home)
+        from honeyos.companion.channels import setup_feishu, setup_weixin
+
+        setup_channel = setup_weixin if args.platform == "weixin" else setup_feishu
+        return setup_channel(home)
     if args.command == "pairing":
         arguments = ["pairing", args.pairing_action]
         if args.pairing_action == "approve":
@@ -177,4 +183,3 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

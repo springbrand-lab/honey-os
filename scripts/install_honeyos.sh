@@ -33,5 +33,5 @@ fi
 
 cd "$REPO_DIR"
 echo "Preparing HoneyOS…"
-uv sync --quiet
+uv sync --quiet --extra honeyos
 exec uv run honeyos setup

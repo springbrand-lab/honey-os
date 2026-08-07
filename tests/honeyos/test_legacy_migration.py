@@ -9,11 +9,11 @@ import pytest
 
 def _migration_module():
     try:
-        spec = importlib.util.find_spec("honeyos.migration.legacy_h2os")
+        spec = importlib.util.find_spec("honeyos.migration.legacy")
     except ModuleNotFoundError:
         spec = None
     assert spec is not None, "the legacy home migrator must exist"
-    return importlib.import_module("honeyos.migration.legacy_h2os")
+    return importlib.import_module("honeyos.migration.legacy")
 
 
 def test_migrates_legacy_home_and_keeps_backup(tmp_path: Path) -> None:

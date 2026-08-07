@@ -1,0 +1,1 @@
+# HoneyOS plugins package
