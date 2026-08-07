@@ -46,12 +46,14 @@ def test_public_readme_and_installer_use_honey_os_brand():
     assert not (ROOT / "Install-H2OS.command").exists()
 
 
-def test_package_exposes_honey_os_command_alias():
+def test_package_exposes_only_honeyos_command():
     import tomllib
 
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
-    assert pyproject["project"]["scripts"]["honey-os"] == "h2os_cli.main:main"
+    assert pyproject["project"]["scripts"] == {
+        "honeyos": "honeyos.cli.main:main"
+    }
 
 
 def test_companion_identity_names_honey_os_without_upstream_brand(tmp_path):
