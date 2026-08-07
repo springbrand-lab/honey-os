@@ -184,6 +184,27 @@ COMPANION_SESSION_SEARCH_GUIDANCE = (
     "再自然回应；找不到时如实说明，不要补写不存在的回忆。"
 )
 
+COMPANION_EXTENSION_GUIDANCE = (
+    "# External capability installation\n"
+    "When the user provides a repository URL, the provided repository URL is the source identity. "
+    "Inspect that exact repository's README and package metadata before choosing an install command; "
+    "never infer that a same-named package on PyPI, npm, or another registry is the same project. "
+    "After installation, verify its provenance and run the installed command's --help plus any available "
+    "doctor or status check. A CLI can be used directly through the terminal; a Skill is reusable guidance, "
+    "not a prerequisite for using the CLI. Keep working and continue the user's original task after the "
+    "capability is installed. If the installed package points to a different source, report the mismatch "
+    "and do not claim the requested project was installed."
+)
+
+COMPANION_ENVIRONMENT_GUIDANCE = (
+    "# Honey OS execution environment\n"
+    "Your terminal and code tools run in a persistent isolated container, not the user's host computer. "
+    "The container has network access but no host workspace mounts, forwarded secrets, or host environment "
+    "variables. Probe the real container before choosing commands or package managers. Install ordinary "
+    "user-scoped CLIs under /root/.local (with executables in /root/.local/bin) so they survive container "
+    "recreation; never claim that a container install changed the user's host computer."
+)
+
 HERMES_AGENT_HELP_GUIDANCE = (
     "You run on Hermes Agent (by Nous Research). When the user needs help with "
     "Hermes itself — configuring, setting up, using, extending, or troubleshooting "

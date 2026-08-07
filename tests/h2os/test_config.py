@@ -13,12 +13,12 @@ def test_initialize_home_creates_companion_contract(tmp_path):
     config = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
 
     assert config["agent"]["mode"] == "companion"
-    assert config["agent"]["max_turns"] == 8
+    assert config["agent"]["max_turns"] == 24
     assert "max_iterations" not in config["agent"]
-    assert config["agent"]["tool_use_enforcement"] is False
-    assert config["agent"]["task_completion_guidance"] is False
-    assert config["agent"]["parallel_tool_call_guidance"] is False
-    assert config["agent"]["environment_probe"] is False
+    assert config["agent"]["tool_use_enforcement"] == "auto"
+    assert config["agent"]["task_completion_guidance"] is True
+    assert config["agent"]["parallel_tool_call_guidance"] is True
+    assert config["agent"]["environment_probe"] is True
     assert hasattr(config_module, "COMPANION_TOOLSETS")
     assert config["platform_toolsets"]["weixin"] == list(
         config_module.COMPANION_TOOLSETS
@@ -49,6 +49,9 @@ def test_initialize_home_creates_companion_contract(tmp_path):
     assert config["terminal"]["docker_volumes"] == []
     assert config["terminal"]["docker_forward_env"] == []
     assert config["terminal"]["env_passthrough"] == []
+    assert config["terminal"]["docker_env"]["PATH"].startswith(
+        "/root/.local/bin:"
+    )
     assert config["approvals"]["mode"] == "off"
     assert config["security"]["allow_proxy_fake_ips"] is True
     assert config["memory"]["memory_enabled"] is True
@@ -142,6 +145,15 @@ def test_upgrade_companion_capabilities_is_idempotent_and_preserves_user_state(t
     config["user_owned"] = {"keep": True}
     config["platform_toolsets"]["weixin"] = ["memory", "session_search"]
     config["terminal"]["backend"] = "local"
+    config["agent"].update(
+        {
+            "max_turns": 8,
+            "tool_use_enforcement": False,
+            "task_completion_guidance": False,
+            "parallel_tool_call_guidance": False,
+            "environment_probe": False,
+        }
+    )
     config_path.write_text(
         yaml.safe_dump(config, allow_unicode=True, sort_keys=False),
         encoding="utf-8",
@@ -168,9 +180,17 @@ def test_upgrade_companion_capabilities_is_idempotent_and_preserves_user_state(t
     assert migrated["platform_toolsets"]["feishu"] == list(
         config_module.COMPANION_TOOLSETS
     )
+    assert migrated["agent"]["max_turns"] == 24
+    assert migrated["agent"]["tool_use_enforcement"] == "auto"
+    assert migrated["agent"]["task_completion_guidance"] is True
+    assert migrated["agent"]["parallel_tool_call_guidance"] is True
+    assert migrated["agent"]["environment_probe"] is True
     assert migrated["platforms"]["feishu"]["extra"]["dm_policy"] == "pairing"
     assert migrated["platforms"]["feishu"]["extra"]["group_policy"] == "disabled"
     assert migrated["terminal"]["backend"] == "docker"
+    assert migrated["terminal"]["docker_env"]["PATH"].startswith(
+        "/root/.local/bin:"
+    )
     assert migrated["security"]["allow_proxy_fake_ips"] is True
     assert migrated["memory"]["distillation"]["trigger_messages"] == 20
     assert migrated["memory"]["distillation"]["max_daily_runs"] == 12
@@ -215,3 +235,22 @@ def test_upgrade_migrates_legacy_product_brand_without_touching_identity(tmp_pat
     assert "H2OS" not in (new_skill / "agents" / "openai.yaml").read_text(
         encoding="utf-8"
     )
+
+
+def test_upgrade_appends_extension_safety_contract_without_losing_customization(tmp_path):
+    initialize_home(tmp_path)
+    skill_path = tmp_path / "skills" / "honey-os-self-extension" / "SKILL.md"
+    original = skill_path.read_text(encoding="utf-8")
+    legacy = original.split("## Source Identity and Verification", 1)[0].rstrip()
+    skill_path.write_text(
+        legacy + "\n\nUser customization must survive.\n",
+        encoding="utf-8",
+    )
+
+    changed = config_module.upgrade_companion_capabilities(tmp_path)
+    upgraded = skill_path.read_text(encoding="utf-8")
+
+    assert changed is True
+    assert "## Source Identity and Verification" in upgraded
+    assert "用户提供的仓库 URL 是来源身份" in upgraded
+    assert "User customization must survive." in upgraded

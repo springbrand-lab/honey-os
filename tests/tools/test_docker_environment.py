@@ -375,6 +375,31 @@ def test_docker_env_appears_in_run_command(monkeypatch):
     assert "GNUPGHOME=/root/.gnupg" in run_args_str
 
 
+def test_login_snapshot_preserves_explicit_docker_path(monkeypatch):
+    """A login shell must not erase the PATH explicitly configured for Docker."""
+    captured = {}
+    env = docker_env.DockerEnvironment.__new__(docker_env.DockerEnvironment)
+    env._container_id = "container-id"
+    env._docker_exe = "/usr/bin/docker"
+    env._init_env_args = []
+    env._init_unset_passthrough_names = ()
+    env._env = {"PATH": "/root/.local/bin:/usr/local/bin:/usr/bin:/bin"}
+
+    def capture(command, stdin_data=None):
+        captured["command"] = command
+        captured["stdin_data"] = stdin_data
+        return object()
+
+    monkeypatch.setattr(docker_env, "_popen_bash", capture)
+
+    env._run_bash("command -v agent-reach", login=True)
+
+    shell_command = captured["command"][-1]
+    assert shell_command.startswith(
+        "export PATH=/root/.local/bin:/usr/local/bin:/usr/bin:/bin\n"
+    )
+
+
 def _node_options_from_run(calls):
     run_calls = [c for c in calls if isinstance(c[0], list) and len(c[0]) >= 2 and c[0][1] == "run"]
     assert run_calls, "docker run should have been called"

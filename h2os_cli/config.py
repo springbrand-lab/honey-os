@@ -17,6 +17,9 @@ from h2os_cli import PRODUCT_NAME
 
 DEFAULT_IM_PLATFORMS = ("weixin", "feishu")
 _SUPPORTED_PLATFORMS = frozenset(DEFAULT_IM_PLATFORMS)
+COMPANION_SANDBOX_PATH = (
+    "/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+)
 
 COMPANION_TOOLSETS = (
     "companion_memory",
@@ -130,11 +133,11 @@ def companion_config(platform: str | None = None) -> dict:
     return {
         "agent": {
             "mode": "companion",
-            "max_turns": 8,
-            "tool_use_enforcement": False,
-            "task_completion_guidance": False,
-            "parallel_tool_call_guidance": False,
-            "environment_probe": False,
+            "max_turns": 24,
+            "tool_use_enforcement": "auto",
+            "task_completion_guidance": True,
+            "parallel_tool_call_guidance": True,
+            "environment_probe": True,
         },
         "memory": {
             "memory_enabled": True,
@@ -174,6 +177,7 @@ def companion_config(platform: str | None = None) -> dict:
             "docker_mount_cwd_to_workspace": False,
             "docker_volumes": [],
             "docker_forward_env": [],
+            "docker_env": {"PATH": COMPANION_SANDBOX_PATH},
             "env_passthrough": [],
             "docker_network": True,
             "container_cpu": 1,
@@ -266,6 +270,21 @@ def upgrade_companion_capabilities(home: Path) -> bool:
         raise ValueError("config.yaml must contain a mapping")
     original_config = yaml.safe_dump(config, allow_unicode=True, sort_keys=False)
 
+    agent = config.setdefault("agent", {})
+    if not isinstance(agent, dict):
+        agent = {}
+        config["agent"] = agent
+    agent["mode"] = "companion"
+    try:
+        current_max_turns = int(agent.get("max_turns", 0) or 0)
+    except (TypeError, ValueError):
+        current_max_turns = 0
+    agent["max_turns"] = max(24, current_max_turns)
+    agent["tool_use_enforcement"] = "auto"
+    agent["task_completion_guidance"] = True
+    agent["parallel_tool_call_guidance"] = True
+    agent["environment_probe"] = True
+
     platform_toolsets = config.setdefault("platform_toolsets", {})
     if not isinstance(platform_toolsets, dict):
         platform_toolsets = {}
@@ -357,6 +376,7 @@ def upgrade_companion_capabilities(home: Path) -> bool:
             "docker_mount_cwd_to_workspace": False,
             "docker_volumes": [],
             "docker_forward_env": [],
+            "docker_env": {"PATH": COMPANION_SANDBOX_PATH},
             "env_passthrough": [],
             "docker_network": True,
             "container_cpu": 1,
@@ -442,6 +462,29 @@ def upgrade_companion_capabilities(home: Path) -> bool:
                     skill_text.replace("H2OS", PRODUCT_NAME),
                     mode=0o644,
                 )
+                changed = True
+
+    extension_skill = resolved / "skills" / "honey-os-self-extension" / "SKILL.md"
+    extension_marker = "## Source Identity and Verification"
+    if extension_skill.is_file():
+        extension_text = extension_skill.read_text(encoding="utf-8")
+        if extension_marker not in extension_text:
+            source_text = (
+                Path(__file__).parent
+                / "companion_skills"
+                / "honey-os-self-extension"
+                / "SKILL.md"
+            ).read_text(encoding="utf-8")
+            _prefix, separator, managed_section = source_text.partition(extension_marker)
+            if separator:
+                updated_extension = (
+                    extension_text.rstrip()
+                    + "\n\n"
+                    + extension_marker
+                    + managed_section.rstrip()
+                    + "\n"
+                )
+                _atomic_replace(extension_skill, updated_extension, mode=0o644)
                 changed = True
 
     marker = resolved / ".no-bundled-skills"

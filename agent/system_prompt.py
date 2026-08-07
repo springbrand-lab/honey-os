@@ -32,6 +32,8 @@ from typing import Any, Dict, List, Optional
 
 from agent.prompt_builder import (
     COMPANION_AGENT_IDENTITY,
+    COMPANION_ENVIRONMENT_GUIDANCE,
+    COMPANION_EXTENSION_GUIDANCE,
     COMPANION_MEMORY_GUIDANCE,
     COMPANION_STRUCTURED_MEMORY_GUIDANCE,
     COMPANION_SESSION_SEARCH_GUIDANCE,
@@ -159,7 +161,7 @@ def _build_companion_system_prompt_parts(
     context_length: Optional[int],
     system_message: Optional[str],
 ) -> Dict[str, str]:
-    """Build the deliberately narrow prompt used by H2OS companions."""
+    """Build the companion identity over the proven neutral execution core."""
 
     stable_parts: List[str] = []
     soul = ""
@@ -168,6 +170,44 @@ def _build_companion_system_prompt_parts(
     stable_parts.append(soul or COMPANION_AGENT_IDENTITY)
 
     valid_tools = set(agent.valid_tool_names or set())
+    if getattr(agent, "_task_completion_guidance", True) and valid_tools:
+        stable_parts.append(TASK_COMPLETION_GUIDANCE)
+    if getattr(agent, "_parallel_tool_call_guidance", True) and valid_tools:
+        stable_parts.append(PARALLEL_TOOL_CALL_GUIDANCE)
+
+    if valid_tools:
+        enforce = getattr(agent, "_tool_use_enforcement", "auto")
+        inject_enforcement = False
+        if enforce is True or (
+            isinstance(enforce, str)
+            and enforce.lower() in {"true", "always", "yes", "on"}
+        ):
+            inject_enforcement = True
+        elif isinstance(enforce, list):
+            model_lower = (agent.model or "").lower()
+            inject_enforcement = any(
+                pattern.lower() in model_lower
+                for pattern in enforce
+                if isinstance(pattern, str)
+            )
+        elif not (
+            enforce is False
+            or (
+                isinstance(enforce, str)
+                and enforce.lower() in {"false", "never", "no", "off"}
+            )
+        ):
+            model_lower = (agent.model or "").lower()
+            inject_enforcement = any(
+                pattern in model_lower for pattern in TOOL_USE_ENFORCEMENT_MODELS
+            )
+        if inject_enforcement:
+            stable_parts.append(TOOL_USE_ENFORCEMENT_GUIDANCE)
+
+    if "terminal" in valid_tools:
+        stable_parts.append(COMPANION_EXTENSION_GUIDANCE)
+        if getattr(agent, "_environment_probe", True):
+            stable_parts.append(COMPANION_ENVIRONMENT_GUIDANCE)
     if "memory" in valid_tools:
         stable_parts.append(COMPANION_MEMORY_GUIDANCE)
     if "companion_memory" in valid_tools:

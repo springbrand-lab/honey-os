@@ -1601,6 +1601,13 @@ class DockerEnvironment(BaseEnvironment):
             quoted_names = " ".join(shlex.quote(name) for name in unset_names)
             cmd_string = f"unset {quoted_names} 2>/dev/null || true\n{cmd_string}"
 
+        # ``bash -l`` is allowed to replace PATH while reading /etc/profile.
+        # Re-apply an explicitly configured Docker PATH after profile loading so
+        # the session snapshot preserves user-level CLIs such as ~/.local/bin.
+        configured_path = self._env.get("PATH") if login else None
+        if isinstance(configured_path, str) and configured_path.strip():
+            cmd_string = f"export PATH={shlex.quote(configured_path)}\n{cmd_string}"
+
         cmd.extend([self._container_id])
 
         if login:
