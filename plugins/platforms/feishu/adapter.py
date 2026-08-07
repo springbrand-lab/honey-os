@@ -5651,7 +5651,7 @@ async def _standalone_send(
         return {"error": f"Feishu send failed: {e}"}
 
 
-def interactive_setup() -> None:
+def interactive_setup(*, private_only: bool = False) -> None:
     """Interactive setup for Feishu / Lark — scan-to-create or manual creds.
 
     Replaces the central _setup_feishu in hermes_cli/gateway.py and the static
@@ -5766,47 +5766,55 @@ def interactive_setup() -> None:
     if bot_name:
         print_success(f"Bot created: {bot_name}")
 
-    access_idx = prompt_choice(
-        "How should direct messages be authorized?",
-        [
-            "Use DM pairing approval (recommended)",
-            "Allow all direct messages",
-            "Only allow listed user IDs",
-        ],
-        0,
-    )
-    if access_idx == 0:
+    if private_only:
         save_env_value("FEISHU_ALLOW_ALL_USERS", "false")
         save_env_value("FEISHU_ALLOWED_USERS", "")
         print_success("DM pairing enabled.")
-        print_info("Unknown users can request access; approve with `hermes pairing approve`.")
-    elif access_idx == 1:
-        save_env_value("FEISHU_ALLOW_ALL_USERS", "true")
-        save_env_value("FEISHU_ALLOWED_USERS", "")
-        print_warning("Open DM access enabled for Feishu / Lark.")
-    else:
-        save_env_value("FEISHU_ALLOW_ALL_USERS", "false")
-        default_allow = open_id or ""
-        allowlist = prompt(
-            "Allowed user IDs (comma-separated)", default_allow, password=False
-        ).replace(" ", "")
-        save_env_value("FEISHU_ALLOWED_USERS", allowlist)
-        print_success("Allowlist saved.")
-
-    group_idx = prompt_choice(
-        "How should group chats be handled?",
-        [
-            "Respond only when @mentioned in groups (recommended)",
-            "Disable group chats",
-        ],
-        0,
-    )
-    if group_idx == 0:
-        save_env_value("FEISHU_GROUP_POLICY", "open")
-        print_info("Group chats enabled (bot must be @mentioned).")
-    else:
+        print_info("The first private chat must be approved by the companion owner.")
         save_env_value("FEISHU_GROUP_POLICY", "disabled")
-        print_info("Group chats disabled.")
+        print_info("Group chats disabled for this private companion.")
+    else:
+        access_idx = prompt_choice(
+            "How should direct messages be authorized?",
+            [
+                "Use DM pairing approval (recommended)",
+                "Allow all direct messages",
+                "Only allow listed user IDs",
+            ],
+            0,
+        )
+        if access_idx == 0:
+            save_env_value("FEISHU_ALLOW_ALL_USERS", "false")
+            save_env_value("FEISHU_ALLOWED_USERS", "")
+            print_success("DM pairing enabled.")
+            print_info("Unknown users can request access; approve with `hermes pairing approve`.")
+        elif access_idx == 1:
+            save_env_value("FEISHU_ALLOW_ALL_USERS", "true")
+            save_env_value("FEISHU_ALLOWED_USERS", "")
+            print_warning("Open DM access enabled for Feishu / Lark.")
+        else:
+            save_env_value("FEISHU_ALLOW_ALL_USERS", "false")
+            default_allow = open_id or ""
+            allowlist = prompt(
+                "Allowed user IDs (comma-separated)", default_allow, password=False
+            ).replace(" ", "")
+            save_env_value("FEISHU_ALLOWED_USERS", allowlist)
+            print_success("Allowlist saved.")
+
+        group_idx = prompt_choice(
+            "How should group chats be handled?",
+            [
+                "Respond only when @mentioned in groups (recommended)",
+                "Disable group chats",
+            ],
+            0,
+        )
+        if group_idx == 0:
+            save_env_value("FEISHU_GROUP_POLICY", "open")
+            print_info("Group chats enabled (bot must be @mentioned).")
+        else:
+            save_env_value("FEISHU_GROUP_POLICY", "disabled")
+            print_info("Group chats disabled.")
 
     print_info(
         "Leave blank to clear a previously saved home channel "

@@ -54,6 +54,17 @@ def test_channel_setup_weixin_routes_through_h2os_wrapper(monkeypatch, tmp_path)
     assert observed == [tmp_path.resolve()]
 
 
+def test_channel_setup_feishu_routes_through_h2os_wrapper(monkeypatch, tmp_path):
+    observed = []
+    monkeypatch.setattr(
+        "h2os_cli.channels.setup_feishu",
+        lambda home: observed.append(home) or 0,
+    )
+
+    assert main(["--home", str(tmp_path), "channel", "setup", "feishu"]) == 0
+    assert observed == [tmp_path.resolve()]
+
+
 def test_pairing_approve_stays_inside_h2os_home(monkeypatch, tmp_path):
     observed = []
     monkeypatch.setattr(
@@ -76,6 +87,31 @@ def test_pairing_approve_stays_inside_h2os_home(monkeypatch, tmp_path):
     )
     assert observed == [
         (["pairing", "approve", "weixin", "ABC123"], tmp_path.resolve())
+    ]
+
+
+def test_pairing_approve_accepts_feishu(monkeypatch, tmp_path):
+    observed = []
+    monkeypatch.setattr(
+        "h2os_cli.runtime.run_hermes_module",
+        lambda arguments, *, home: observed.append((arguments, home)) or 0,
+    )
+
+    assert (
+        main(
+            [
+                "--home",
+                str(tmp_path),
+                "pairing",
+                "approve",
+                "feishu",
+                "ABC123",
+            ]
+        )
+        == 0
+    )
+    assert observed == [
+        (["pairing", "approve", "feishu", "ABC123"], tmp_path.resolve())
     ]
 
 

@@ -172,6 +172,31 @@ def _has_weixin_credentials(home: Path) -> bool:
     return {"WEIXIN_ACCOUNT_ID", "WEIXIN_TOKEN"}.issubset(keys)
 
 
+def _has_feishu_credentials(home: Path) -> bool:
+    env_path = home / ".env"
+    if not env_path.exists():
+        return False
+    keys = {
+        line.split("=", 1)[0].strip()
+        for line in env_path.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#") and "=" in line
+    }
+    return {"FEISHU_APP_ID", "FEISHU_APP_SECRET"}.issubset(keys)
+
+
+def _choose_im_platforms(input_fn: Callable[[str], str]) -> tuple[str, ...]:
+    choice = input_fn(
+        "连接 IM：1) 微信  2) 飞书  3) 微信 + 飞书（默认）[3]: "
+    ).strip()
+    if choice in {"", "3"}:
+        return ("weixin", "feishu")
+    if choice == "1":
+        return ("weixin",)
+    if choice == "2":
+        return ("feishu",)
+    raise ValueError("请选择 1、2 或 3")
+
+
 def run_setup(
     home: Path,
     *,
@@ -179,6 +204,7 @@ def run_setup(
     secret_fn: Callable[[str], str] = getpass.getpass,
     validate_fn: Callable[[ModelChoice, str], None] = validate_model_key,
     weixin_setup_fn=None,
+    feishu_setup_fn=None,
     gateway_run_fn=None,
     ready_check_fn=None,
 ) -> int:
@@ -189,6 +215,10 @@ def run_setup(
         from h2os_cli.channels import setup_weixin
 
         weixin_setup_fn = setup_weixin
+    if feishu_setup_fn is None:
+        from h2os_cli.channels import setup_feishu
+
+        feishu_setup_fn = setup_feishu
     if gateway_run_fn is None:
         from h2os_cli.runtime import run_gateway_command
 
@@ -198,7 +228,7 @@ def run_setup(
 
         ready_check_fn = print_first_start_report
 
-    print(f"{PRODUCT_NAME} 设置：Base URL / 模型 / API Key → 微信 → 启动")
+    print(f"{PRODUCT_NAME} 设置：Base URL / 模型 / API Key → IM → 启动")
     try:
         choice = _choose_model(input_fn)
         api_key = secret_fn("API Key（输入不会显示）: ").strip()
@@ -208,22 +238,31 @@ def run_setup(
         validate_fn(choice, api_key)
         configure_model(resolved, choice, api_key)
         print(f"✓ 模型已连接：{choice.model}")
+        selected_platforms = _choose_im_platforms(input_fn)
     except (ValueError, KeyboardInterrupt) as exc:
         message = str(exc) if str(exc) else "设置已取消"
         print(f"{PRODUCT_NAME} 设置失败：{message}", file=os.sys.stderr)
         return 1
 
-    if _has_weixin_credentials(resolved):
-        reuse = input_fn("检测到已绑定微信，继续使用？[Y/n]: ").strip().lower()
-        if reuse not in {"", "y", "yes"}:
-            channel_result = weixin_setup_fn(resolved)
+    for platform in selected_platforms:
+        if platform == "weixin":
+            has_credentials = _has_weixin_credentials(resolved)
+            setup_fn = weixin_setup_fn
+            label = "微信"
         else:
-            channel_result = 0
-            print("✓ 继续使用已绑定的微信")
-    else:
-        channel_result = weixin_setup_fn(resolved)
-    if channel_result != 0:
-        return channel_result
+            has_credentials = _has_feishu_credentials(resolved)
+            setup_fn = feishu_setup_fn
+            label = "飞书"
+        if has_credentials:
+            reuse = input_fn(
+                f"检测到已连接{label}，继续使用？[Y/n]: "
+            ).strip().lower()
+            if reuse in {"", "y", "yes"}:
+                print(f"✓ 继续使用已连接的{label}")
+                continue
+        channel_result = setup_fn(resolved)
+        if channel_result != 0:
+            return channel_result
 
     installed = gateway_run_fn(
         "install", home=resolved, arguments=("--no-start-now",)
@@ -238,5 +277,5 @@ def run_setup(
                 file=os.sys.stderr,
             )
             return 1
-        print(f"✓ {PRODUCT_NAME} 已启动，现在可以去微信聊天。")
+        print(f"✓ {PRODUCT_NAME} 已启动，现在可以去微信或飞书聊天。")
     return started

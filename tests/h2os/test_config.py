@@ -9,7 +9,7 @@ from h2os_cli.config import initialize_home
 
 
 def test_initialize_home_creates_companion_contract(tmp_path):
-    result = initialize_home(tmp_path, platform="weixin")
+    result = initialize_home(tmp_path)
     config = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
 
     assert config["agent"]["mode"] == "companion"
@@ -21,6 +21,9 @@ def test_initialize_home_creates_companion_contract(tmp_path):
     assert config["agent"]["environment_probe"] is False
     assert hasattr(config_module, "COMPANION_TOOLSETS")
     assert config["platform_toolsets"]["weixin"] == list(
+        config_module.COMPANION_TOOLSETS
+    )
+    assert config["platform_toolsets"]["feishu"] == list(
         config_module.COMPANION_TOOLSETS
     )
     assert config["platform_toolsets"]["weixin"] == [
@@ -71,6 +74,13 @@ def test_initialize_home_creates_companion_contract(tmp_path):
     assert config["mcp_servers"] == {}
     assert config["platforms"]["weixin"]["extra"]["dm_policy"] == "pairing"
     assert config["platforms"]["weixin"]["extra"]["group_policy"] == "disabled"
+    assert config["platforms"]["feishu"]["extra"]["dm_policy"] == "pairing"
+    assert config["platforms"]["feishu"]["extra"]["group_policy"] == "disabled"
+    assert config["display"]["platforms"]["feishu"]["tool_progress"] == "new"
+    assert (
+        config["display"]["platforms"]["feishu"]["tool_progress_grouping"]
+        == "accumulate"
+    )
     assert (tmp_path / ".no-bundled-skills").exists()
     assert "亲密关系伴侣" in (tmp_path / "SOUL.md").read_text(encoding="utf-8")
     assert (tmp_path / "memories" / "USER.md").exists()
@@ -119,6 +129,7 @@ def test_initialize_home_rejects_unsupported_platform(tmp_path):
         initialize_home(tmp_path, platform="telegram")
     except ValueError as exc:
         assert "weixin" in str(exc)
+        assert "feishu" in str(exc)
     else:
         raise AssertionError("unsupported platform was accepted")
 
@@ -154,6 +165,11 @@ def test_upgrade_companion_capabilities_is_idempotent_and_preserves_user_state(t
     assert migrated["platform_toolsets"]["weixin"] == list(
         config_module.COMPANION_TOOLSETS
     )
+    assert migrated["platform_toolsets"]["feishu"] == list(
+        config_module.COMPANION_TOOLSETS
+    )
+    assert migrated["platforms"]["feishu"]["extra"]["dm_policy"] == "pairing"
+    assert migrated["platforms"]["feishu"]["extra"]["group_policy"] == "disabled"
     assert migrated["terminal"]["backend"] == "docker"
     assert migrated["security"]["allow_proxy_fake_ips"] is True
     assert migrated["memory"]["distillation"]["trigger_messages"] == 20

@@ -87,6 +87,10 @@ def first_start_report(
         env_values.get(key)
         for key in ("WEIXIN_ACCOUNT_ID", "WEIXIN_TOKEN", "WEIXIN_ALLOWED_USERS")
     )
+    feishu_ready = all(
+        env_values.get(key) for key in ("FEISHU_APP_ID", "FEISHU_APP_SECRET")
+    )
+    im_ready = weixin_ready or feishu_ready
     storage_ready = resolved.exists() and os.access(resolved, os.W_OK)
     docker_ready = command_lookup("docker") is not None
     computer_ready = command_lookup("cua-driver") is not None
@@ -95,7 +99,24 @@ def first_start_report(
         (
             HealthItem(storage_ready, True, "本地数据目录可写", "本地数据目录不可写"),
             HealthItem(model_ready, True, "模型与 API Key 已验证", "模型或 API Key 尚未配置"),
-            HealthItem(weixin_ready, True, "微信已绑定扫码本人", "微信尚未绑定扫码本人"),
+            HealthItem(
+                im_ready,
+                True,
+                "至少一个 IM 已连接",
+                "微信和飞书均未连接",
+            ),
+            HealthItem(
+                weixin_ready,
+                False,
+                "微信已绑定扫码本人",
+                "微信尚未绑定扫码本人",
+            ),
+            HealthItem(
+                feishu_ready,
+                False,
+                "飞书已连接",
+                "飞书尚未连接",
+            ),
             HealthItem(
                 docker_ready,
                 False,

@@ -15,7 +15,8 @@ import yaml
 from h2os_cli import PRODUCT_NAME
 
 
-_SUPPORTED_PLATFORMS = frozenset({"weixin"})
+DEFAULT_IM_PLATFORMS = ("weixin", "feishu")
+_SUPPORTED_PLATFORMS = frozenset(DEFAULT_IM_PLATFORMS)
 
 COMPANION_TOOLSETS = (
     "companion_memory",
@@ -109,12 +110,22 @@ def _atomic_replace(path: Path, content: str, *, mode: int) -> None:
             pass
 
 
-def companion_config(platform: str = "weixin") -> dict:
-    """Return the deterministic MVP configuration for *platform*."""
+def companion_config(platform: str | None = None) -> dict:
+    """Return the deterministic companion configuration for the default IMs.
 
-    normalized = platform.strip().lower()
-    if normalized not in _SUPPORTED_PLATFORMS:
-        raise ValueError(f"{PRODUCT_NAME} v0.2 supports the weixin platform only")
+    Passing a platform remains useful for focused tests and custom installers;
+    the product default enables both private Weixin and Feishu lanes.
+    """
+
+    if platform is None:
+        platforms = DEFAULT_IM_PLATFORMS
+    else:
+        normalized = platform.strip().lower()
+        if normalized not in _SUPPORTED_PLATFORMS:
+            raise ValueError(
+                f"{PRODUCT_NAME} v0.2 supports the weixin and feishu platforms"
+            )
+        platforms = (normalized,)
 
     return {
         "agent": {
@@ -151,7 +162,9 @@ def companion_config(platform: str = "weixin") -> dict:
         },
         "skills": {"creation_nudge_interval": 0},
         "compression": {"enabled": True, "in_place": True},
-        "platform_toolsets": {normalized: list(COMPANION_TOOLSETS)},
+        "platform_toolsets": {
+            name: list(COMPANION_TOOLSETS) for name in platforms
+        },
         "web": {
             "backend": "ddgs",
         },
@@ -171,15 +184,24 @@ def companion_config(platform: str = "weixin") -> dict:
         "approvals": {"mode": "off"},
         "security": {"allow_proxy_fake_ips": True},
         "platforms": {
-            normalized: {
+            name: {
                 "extra": {
                     "dm_policy": "pairing",
                     "group_policy": "disabled",
                 }
             }
+            for name in platforms
         },
         "mcp_servers": {},
-        "display": {"memory_notifications": "off"},
+        "display": {
+            "memory_notifications": "off",
+            "platforms": ({
+                "feishu": {
+                    "tool_progress": "new",
+                    "tool_progress_grouping": "accumulate",
+                }
+            } if "feishu" in platforms else {}),
+        },
     }
 
 
@@ -196,7 +218,7 @@ def _create_file(path: Path, content: str, *, mode: int | None = None) -> bool:
     return True
 
 
-def initialize_home(home: Path, *, platform: str = "weixin") -> InitResult:
+def initialize_home(home: Path, *, platform: str | None = None) -> InitResult:
     """Create a safe H2OS home without overwriting user-owned state."""
 
     resolved = home.expanduser().resolve()
@@ -248,7 +270,40 @@ def upgrade_companion_capabilities(home: Path) -> bool:
     if not isinstance(platform_toolsets, dict):
         platform_toolsets = {}
         config["platform_toolsets"] = platform_toolsets
-    platform_toolsets["weixin"] = list(COMPANION_TOOLSETS)
+    for platform in DEFAULT_IM_PLATFORMS:
+        platform_toolsets[platform] = list(COMPANION_TOOLSETS)
+
+    platforms = config.setdefault("platforms", {})
+    if not isinstance(platforms, dict):
+        platforms = {}
+        config["platforms"] = platforms
+    for platform in DEFAULT_IM_PLATFORMS:
+        platform_config = platforms.setdefault(platform, {})
+        if not isinstance(platform_config, dict):
+            platform_config = {}
+            platforms[platform] = platform_config
+        extra = platform_config.setdefault("extra", {})
+        if not isinstance(extra, dict):
+            extra = {}
+            platform_config["extra"] = extra
+        extra.setdefault("dm_policy", "pairing")
+        extra.setdefault("group_policy", "disabled")
+
+    display = config.setdefault("display", {})
+    if not isinstance(display, dict):
+        display = {}
+        config["display"] = display
+    display.setdefault("memory_notifications", "off")
+    display_platforms = display.setdefault("platforms", {})
+    if not isinstance(display_platforms, dict):
+        display_platforms = {}
+        display["platforms"] = display_platforms
+    feishu_display = display_platforms.setdefault("feishu", {})
+    if not isinstance(feishu_display, dict):
+        feishu_display = {}
+        display_platforms["feishu"] = feishu_display
+    feishu_display.setdefault("tool_progress", "new")
+    feishu_display.setdefault("tool_progress_grouping", "accumulate")
 
     memory = config.setdefault("memory", {})
     if not isinstance(memory, dict):

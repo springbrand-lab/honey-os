@@ -10,7 +10,7 @@ from pathlib import Path
 import yaml
 
 from h2os_cli import PRODUCT_NAME
-from h2os_cli.config import COMPANION_TOOLSETS
+from h2os_cli.config import COMPANION_TOOLSETS, DEFAULT_IM_PLATFORMS
 from h2os_cli.runtime import gateway_argv
 
 
@@ -77,12 +77,15 @@ def run_doctor(home: Path) -> DoctorReport:
     runtime = _read_runtime(resolved / "runtime.json")
     agent = config.get("agent", {}) if isinstance(config.get("agent", {}), dict) else {}
     platform_toolsets = config.get("platform_toolsets", {})
-    configured_tools = (
-        platform_toolsets.get("weixin", [])
-        if isinstance(platform_toolsets, dict)
-        else []
-    )
     expected_tools = list(COMPANION_TOOLSETS)
+    configured_tools = {
+        platform: platform_toolsets.get(platform, [])
+        for platform in DEFAULT_IM_PLATFORMS
+    } if isinstance(platform_toolsets, dict) else {}
+    tool_allowlist_ok = all(
+        configured_tools.get(platform) == expected_tools
+        for platform in DEFAULT_IM_PLATFORMS
+    )
     terminal = config.get("terminal", {}) if isinstance(config.get("terminal"), dict) else {}
     sandbox_ok = (
         terminal.get("backend") == "docker"
@@ -123,7 +126,7 @@ def run_doctor(home: Path) -> DoctorReport:
         ),
         DoctorCheck(
             "tool-allowlist",
-            configured_tools == expected_tools,
+            tool_allowlist_ok,
             repr(configured_tools),
         ),
         DoctorCheck(

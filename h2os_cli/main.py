@@ -23,7 +23,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--home", help=argparse.SUPPRESS)
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser(
-        "setup", help=f"Set up model, Weixin, and start {PRODUCT_NAME}"
+        "setup", help=f"Set up model, IM channels, and start {PRODUCT_NAME}"
     )
     subparsers.add_parser("init", help="Initialize the private companion")
     subparsers.add_parser("start", help="Start the background message service")
@@ -35,15 +35,15 @@ def _parser() -> argparse.ArgumentParser:
     channel = subparsers.add_parser("channel", help="Configure the chat channel")
     channel_commands = channel.add_subparsers(dest="channel_command", required=True)
     channel_setup = channel_commands.add_parser("setup", help="Connect a chat channel")
-    channel_setup.add_argument("platform", choices=("weixin",))
+    channel_setup.add_argument("platform", choices=("weixin", "feishu"))
     pairing = subparsers.add_parser("pairing", help="Manage private-chat access")
     pairing_commands = pairing.add_subparsers(dest="pairing_action", required=True)
     pairing_commands.add_parser("list", help="List pending and approved users")
     pairing_approve = pairing_commands.add_parser("approve", help="Approve access")
-    pairing_approve.add_argument("platform", choices=("weixin",))
+    pairing_approve.add_argument("platform", choices=("weixin", "feishu"))
     pairing_approve.add_argument("code")
     pairing_revoke = pairing_commands.add_parser("revoke", help="Revoke access")
-    pairing_revoke.add_argument("platform", choices=("weixin",))
+    pairing_revoke.add_argument("platform", choices=("weixin", "feishu"))
     pairing_revoke.add_argument("user_id")
     pairing_commands.add_parser("clear-pending", help="Clear pending requests")
     return parser
@@ -89,6 +89,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             from h2os_cli.channels import setup_weixin
 
             return setup_weixin(home)
+        if args.channel_command == "setup" and args.platform == "feishu":
+            from h2os_cli.channels import setup_feishu
+
+            return setup_feishu(home)
         print("honey-os: error: unsupported channel command", file=sys.stderr)
         return 2
 

@@ -126,10 +126,10 @@ def test_model_validation_rejects_string_instead_of_openai_response(monkeypatch)
         raise AssertionError("invalid provider response was accepted")
 
 
-def test_setup_orders_key_validation_before_weixin_and_start(tmp_path):
+def test_setup_defaults_to_weixin_and_feishu_before_start(tmp_path):
     initialize_home(tmp_path)
     events = []
-    answers = iter(["", "https://api.example.com/v1", "test-model"])
+    answers = iter(["", "https://api.example.com/v1", "test-model", ""])
 
     result = run_setup(
         tmp_path,
@@ -139,6 +139,7 @@ def test_setup_orders_key_validation_before_weixin_and_start(tmp_path):
             ("validate", choice.provider, key)
         ),
         weixin_setup_fn=lambda home: events.append(("weixin", home)) or 0,
+        feishu_setup_fn=lambda home: events.append(("feishu", home)) or 0,
         gateway_run_fn=lambda command, *, home, arguments=(): events.append(
             ("gateway", command, tuple(arguments), home)
         )
@@ -150,6 +151,7 @@ def test_setup_orders_key_validation_before_weixin_and_start(tmp_path):
     assert events == [
         ("validate", "custom", "valid-key"),
         ("weixin", tmp_path.resolve()),
+        ("feishu", tmp_path.resolve()),
         ("gateway", "install", ("--no-start-now",), tmp_path.resolve()),
         ("gateway", "start", (), tmp_path.resolve()),
         ("ready", tmp_path.resolve()),
@@ -169,6 +171,7 @@ def test_setup_stops_before_weixin_when_key_validation_fails(tmp_path, capsys):
             ValueError("API Key 无效")
         ),
         weixin_setup_fn=lambda home: events.append(home) or 0,
+        feishu_setup_fn=lambda home: events.append(home) or 0,
         gateway_run_fn=lambda command, *, home, arguments=(): 0,
         ready_check_fn=lambda _home: True,
     )
@@ -176,3 +179,23 @@ def test_setup_stops_before_weixin_when_key_validation_fails(tmp_path, capsys):
     assert result == 1
     assert events == []
     assert "API Key 无效" in capsys.readouterr().err
+
+
+def test_setup_can_select_feishu_only(tmp_path):
+    initialize_home(tmp_path)
+    events = []
+    answers = iter(["", "https://api.example.com/v1", "test-model", "2"])
+
+    result = run_setup(
+        tmp_path,
+        input_fn=lambda _prompt: next(answers),
+        secret_fn=lambda _prompt: "valid-key",
+        validate_fn=lambda _choice, _key: None,
+        weixin_setup_fn=lambda home: events.append(("weixin", home)) or 0,
+        feishu_setup_fn=lambda home: events.append(("feishu", home)) or 0,
+        gateway_run_fn=lambda _command, *, home, arguments=(): 0,
+        ready_check_fn=lambda _home: True,
+    )
+
+    assert result == 0
+    assert events == [("feishu", tmp_path.resolve())]
