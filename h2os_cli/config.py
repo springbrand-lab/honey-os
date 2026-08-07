@@ -18,6 +18,7 @@ from h2os_cli import PRODUCT_NAME
 _SUPPORTED_PLATFORMS = frozenset({"weixin"})
 
 COMPANION_TOOLSETS = (
+    "companion_memory",
     "memory",
     "session_search",
     "web",

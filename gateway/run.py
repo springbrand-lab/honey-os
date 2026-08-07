@@ -16460,6 +16460,23 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # (staged below, consumed in run_sync → build_turn_context).
         turn_sidecar_notes: List[str] = []
 
+        # Honey OS working memory is lane-scoped and read from the local
+        # continuity database on every turn.  It rides the user-message
+        # sidecar so the cached system prompt stays byte-stable and the raw
+        # user message remains clean in the transcript.
+        try:
+            from h2os_cli.continuity import structured_memory_note
+
+            _h2os_memory_note = structured_memory_note(
+                lane_key=session_key,
+                chat_type=str(getattr(source, "chat_type", "") or ""),
+            )
+        except Exception:
+            logger.debug("Honey OS structured memory load failed", exc_info=True)
+            _h2os_memory_note = None
+        if _h2os_memory_note:
+            turn_sidecar_notes.append(_h2os_memory_note)
+
         # A manual Honey OS /new starts a clean transcript without severing the
         # companion relationship.  Deliver the exact handoff bound to this
         # target session once, alongside the first user message.  Keeping it

@@ -13,6 +13,7 @@ from h2os_cli.doctor import DoctorCheck, run_doctor
 
 
 _REQUIRED_COMPANION_TOOL_NAMES = {
+    "companion_memory",
     "memory",
     "session_search",
     "browser_navigate",

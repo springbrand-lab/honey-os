@@ -34,6 +34,7 @@ def test_distribution_contract_exposes_companion_action_tools_without_orchestrat
     names = {definition["function"]["name"] for definition in definitions}
 
     assert {
+        "companion_memory",
         "memory",
         "session_search",
         "browser_navigate",

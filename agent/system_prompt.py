@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Optional
 from agent.prompt_builder import (
     COMPANION_AGENT_IDENTITY,
     COMPANION_MEMORY_GUIDANCE,
+    COMPANION_STRUCTURED_MEMORY_GUIDANCE,
     COMPANION_SESSION_SEARCH_GUIDANCE,
     DEFAULT_AGENT_IDENTITY,
     GOOGLE_MODEL_OPERATIONAL_GUIDANCE,
@@ -169,6 +170,8 @@ def _build_companion_system_prompt_parts(
     valid_tools = set(agent.valid_tool_names or set())
     if "memory" in valid_tools:
         stable_parts.append(COMPANION_MEMORY_GUIDANCE)
+    if "companion_memory" in valid_tools:
+        stable_parts.append(COMPANION_STRUCTURED_MEMORY_GUIDANCE)
     if "session_search" in valid_tools:
         stable_parts.append(COMPANION_SESSION_SEARCH_GUIDANCE)
 

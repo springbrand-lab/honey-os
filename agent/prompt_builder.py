@@ -167,6 +167,16 @@ COMPANION_MEMORY_GUIDANCE = (
     "不要保存未确认的人格标签、短暂情绪、一次性闲聊细节，也不要虚构过去。"
 )
 
+COMPANION_STRUCTURED_MEMORY_GUIDANCE = (
+    "你还有 companion_memory 工具，用于维持关系对话的近期连续性。对明确未聊完的话题使用 "
+    "open_loop；对用户明确说出的短期状态使用 temporary_state；对你明确答应的事情使用 "
+    "commitment；对真实发生、值得以后回忆的共同事件使用 episode。符合条件时必须在当前对话中"
+    "主动记录，不必反复向用户确认，但必须以用户原话、你的明确承诺或当前真实事件为依据。"
+    "短期状态不写入长期 memory。事项完成时 resolve；用户纠正时 update；用户要求忘记时 forget。"
+    "绝不根据语气推断或保存身份、感情、关系、依赖、诊断与长期边界；这些仍只按用户明确确认"
+    "后进入长期 memory。工具是内部机制，除非用户询问，不要机械汇报每次读写。"
+)
+
 COMPANION_SESSION_SEARCH_GUIDANCE = (
     "当用户提到过去对话、之前的约定或共同经历时，先使用 session_search 查找真实历史，"
     "再自然回应；找不到时如实说明，不要补写不存在的回忆。"

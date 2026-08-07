@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -20,6 +21,22 @@ from typing import Iterable, Mapping
 DEFAULT_TTL = timedelta(days=7)
 DEFAULT_MAX_MESSAGES = 8
 DEFAULT_MAX_CHARS = 3000
+STRUCTURED_MEMORY_KINDS = frozenset(
+    {"open_loop", "temporary_state", "commitment", "episode"}
+)
+STRUCTURED_MEMORY_EVIDENCE = frozenset(
+    {"user_stated", "assistant_committed", "conversation_event"}
+)
+STRUCTURED_MEMORY_EVIDENCE_BY_KIND = {
+    "open_loop": frozenset({"user_stated", "conversation_event"}),
+    "temporary_state": frozenset({"user_stated"}),
+    "commitment": frozenset({"assistant_committed"}),
+    "episode": frozenset({"user_stated", "conversation_event"}),
+}
+DEFAULT_TEMPORARY_STATE_TTL = timedelta(days=3)
+DEFAULT_PENDING_ITEM_TTL = timedelta(days=30)
+DEFAULT_MAX_MEMORY_ITEMS = 16
+DEFAULT_MAX_MEMORY_CHARS = 4000
 
 
 def _utc_now() -> datetime:
@@ -46,6 +63,301 @@ class ContinuityHandoff:
     recent_exchange: tuple[HandoffMessage, ...]
     created_at: datetime
     expires_at: datetime
+
+
+@dataclass(frozen=True)
+class StructuredMemoryItem:
+    id: str
+    lane_key: str
+    kind: str
+    content: str
+    status: str
+    evidence: str
+    source_session_id: str
+    created_at: datetime
+    updated_at: datetime
+    expires_at: datetime | None
+
+
+class StructuredMemoryStore:
+    """Source-backed companion working memory in the H2OS local database."""
+
+    def __init__(
+        self,
+        home: Path,
+        *,
+        temporary_state_ttl: timedelta = DEFAULT_TEMPORARY_STATE_TTL,
+        pending_item_ttl: timedelta = DEFAULT_PENDING_ITEM_TTL,
+        max_items: int = DEFAULT_MAX_MEMORY_ITEMS,
+        max_chars: int = DEFAULT_MAX_MEMORY_CHARS,
+    ) -> None:
+        self.home = Path(home).expanduser().resolve()
+        self.db_path = self.home / "continuity.db"
+        self.temporary_state_ttl = temporary_state_ttl
+        self.pending_item_ttl = pending_item_ttl
+        self.max_items = max(1, int(max_items))
+        self.max_chars = max(1, int(max_chars))
+
+    def _connect(self) -> sqlite3.Connection:
+        self.home.mkdir(parents=True, exist_ok=True)
+        connection = sqlite3.connect(self.db_path, timeout=1.0)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS structured_memories (
+                id TEXT PRIMARY KEY,
+                lane_key TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                content TEXT NOT NULL,
+                normalized_content TEXT NOT NULL,
+                status TEXT NOT NULL,
+                evidence TEXT NOT NULL,
+                source_session_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                expires_at TEXT
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_structured_memories_active
+            ON structured_memories (lane_key, status, updated_at DESC)
+            """
+        )
+        try:
+            os.chmod(self.db_path, 0o600)
+        except OSError:
+            pass
+        return connection
+
+    @staticmethod
+    def _clean_content(content: str) -> str:
+        if not isinstance(content, str):
+            return ""
+        return " ".join(content.replace("\x00", "").split()).strip()[:500]
+
+    @staticmethod
+    def _row_to_item(row: sqlite3.Row) -> StructuredMemoryItem:
+        expires_at = datetime.fromisoformat(row["expires_at"]) if row["expires_at"] else None
+        return StructuredMemoryItem(
+            id=row["id"],
+            lane_key=row["lane_key"],
+            kind=row["kind"],
+            content=row["content"],
+            status=row["status"],
+            evidence=row["evidence"],
+            source_session_id=row["source_session_id"],
+            created_at=_as_utc(datetime.fromisoformat(row["created_at"])),
+            updated_at=_as_utc(datetime.fromisoformat(row["updated_at"])),
+            expires_at=_as_utc(expires_at) if expires_at else None,
+        )
+
+    def _expiry_for(
+        self,
+        *,
+        kind: str,
+        now: datetime,
+        expires_in_days: int | None,
+    ) -> datetime | None:
+        if kind == "episode" and expires_in_days is None:
+            return None
+        default_ttl = (
+            self.temporary_state_ttl
+            if kind == "temporary_state"
+            else self.pending_item_ttl
+        )
+        if expires_in_days is None:
+            return now + default_ttl
+        maximum = 14 if kind == "temporary_state" else 365
+        days = max(1, min(int(expires_in_days), maximum))
+        return now + timedelta(days=days)
+
+    @staticmethod
+    def _purge_expired(connection: sqlite3.Connection, now: datetime) -> None:
+        connection.execute(
+            "DELETE FROM structured_memories WHERE expires_at IS NOT NULL AND expires_at <= ?",
+            (now.isoformat(),),
+        )
+
+    def record(
+        self,
+        *,
+        lane_key: str,
+        kind: str,
+        content: str,
+        evidence: str,
+        source_session_id: str,
+        expires_in_days: int | None = None,
+        now: datetime | None = None,
+    ) -> StructuredMemoryItem | None:
+        """Record one explicit/factual item; inferred and unknown lanes fail closed."""
+
+        normalized_kind = str(kind or "").strip().lower()
+        normalized_evidence = str(evidence or "").strip().lower()
+        cleaned = self._clean_content(content)
+        if (
+            not lane_key
+            or not source_session_id
+            or normalized_kind not in STRUCTURED_MEMORY_KINDS
+            or normalized_evidence not in STRUCTURED_MEMORY_EVIDENCE
+            or normalized_evidence
+            not in STRUCTURED_MEMORY_EVIDENCE_BY_KIND.get(normalized_kind, ())
+            or not cleaned
+        ):
+            return None
+        normalized_content = cleaned.casefold()
+        timestamp = _as_utc(now or _utc_now())
+        expires_at = self._expiry_for(
+            kind=normalized_kind,
+            now=timestamp,
+            expires_in_days=expires_in_days,
+        )
+        try:
+            with self._connect() as connection:
+                self._purge_expired(connection, timestamp)
+                existing = connection.execute(
+                    """
+                    SELECT * FROM structured_memories
+                    WHERE lane_key = ? AND kind = ? AND normalized_content = ?
+                          AND status = 'active'
+                    LIMIT 1
+                    """,
+                    (lane_key, normalized_kind, normalized_content),
+                ).fetchone()
+                item_id = existing["id"] if existing is not None else uuid.uuid4().hex[:12]
+                created_at = (
+                    existing["created_at"] if existing is not None else timestamp.isoformat()
+                )
+                connection.execute(
+                    """
+                    INSERT OR REPLACE INTO structured_memories (
+                        id, lane_key, kind, content, normalized_content, status,
+                        evidence, source_session_id, created_at, updated_at, expires_at
+                    ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        item_id,
+                        lane_key,
+                        normalized_kind,
+                        cleaned,
+                        normalized_content,
+                        normalized_evidence,
+                        source_session_id,
+                        created_at,
+                        timestamp.isoformat(),
+                        expires_at.isoformat() if expires_at else None,
+                    ),
+                )
+                row = connection.execute(
+                    "SELECT * FROM structured_memories WHERE id = ?", (item_id,)
+                ).fetchone()
+            return self._row_to_item(row) if row is not None else None
+        except (OSError, sqlite3.Error, ValueError, TypeError):
+            return None
+
+    def list_active(
+        self, *, lane_key: str, now: datetime | None = None
+    ) -> tuple[StructuredMemoryItem, ...]:
+        if not lane_key:
+            return ()
+        timestamp = _as_utc(now or _utc_now())
+        try:
+            with self._connect() as connection:
+                self._purge_expired(connection, timestamp)
+                rows = connection.execute(
+                    """
+                    SELECT * FROM structured_memories
+                    WHERE lane_key = ? AND status = 'active'
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                    """,
+                    (lane_key, self.max_items),
+                ).fetchall()
+            return tuple(self._row_to_item(row) for row in rows)
+        except (OSError, sqlite3.Error, ValueError, TypeError):
+            return ()
+
+    def change_status(
+        self,
+        *,
+        lane_key: str,
+        item_id: str,
+        action: str,
+        now: datetime | None = None,
+    ) -> bool:
+        status = {"resolve": "resolved", "forget": "forgotten"}.get(
+            str(action or "").strip().lower()
+        )
+        if not lane_key or not item_id or status is None:
+            return False
+        timestamp = _as_utc(now or _utc_now())
+        try:
+            with self._connect() as connection:
+                cursor = connection.execute(
+                    """
+                    UPDATE structured_memories
+                    SET status = ?, updated_at = ?
+                    WHERE id = ? AND lane_key = ? AND status = 'active'
+                    """,
+                    (status, timestamp.isoformat(), item_id, lane_key),
+                )
+            return cursor.rowcount == 1
+        except (OSError, sqlite3.Error):
+            return False
+
+    def update_content(
+        self,
+        *,
+        lane_key: str,
+        item_id: str,
+        content: str,
+        now: datetime | None = None,
+    ) -> bool:
+        cleaned = self._clean_content(content)
+        if not lane_key or not item_id or not cleaned:
+            return False
+        timestamp = _as_utc(now or _utc_now())
+        try:
+            with self._connect() as connection:
+                cursor = connection.execute(
+                    """
+                    UPDATE structured_memories
+                    SET content = ?, normalized_content = ?, updated_at = ?
+                    WHERE id = ? AND lane_key = ? AND status = 'active'
+                    """,
+                    (cleaned, cleaned.casefold(), timestamp.isoformat(), item_id, lane_key),
+                )
+            return cursor.rowcount == 1
+        except (OSError, sqlite3.Error):
+            return False
+
+    def context_for_lane(
+        self, *, lane_key: str, now: datetime | None = None
+    ) -> str | None:
+        items = self.list_active(lane_key=lane_key, now=now)
+        if not items:
+            return None
+        labels = {
+            "open_loop": "未聊完/待继续",
+            "temporary_state": "近期临时状态",
+            "commitment": "伴侣已做承诺",
+            "episode": "真实共同经历",
+        }
+        lines = [
+            "[Honey OS 关系连续性记忆：以下条目来自本地记录，仅在与当前消息相关时自然使用。",
+            "不得据此推断或升级用户的身份、感情、关系、依赖、诊断或长期边界。",
+            "条目 ID 可用于完成、纠正或忘记记忆。]",
+        ]
+        remaining = self.max_chars
+        for item in items:
+            line = f"- [{item.id}] {labels[item.kind]}：{item.content}"
+            if len(line) > remaining:
+                break
+            lines.append(line)
+            remaining -= len(line)
+        return "\n".join(lines) if len(lines) > 3 else None
 
 
 class ContinuityStore:
@@ -298,3 +610,17 @@ def note_for_reset_session(
         target_session_id=target_session_id,
         now=now,
     )
+
+
+def structured_memory_note(
+    *,
+    lane_key: str,
+    chat_type: str,
+    now: datetime | None = None,
+) -> str | None:
+    """Best-effort per-turn adapter for private Honey OS working memory."""
+
+    home = _active_h2os_home(chat_type)
+    if home is None:
+        return None
+    return StructuredMemoryStore(home).context_for_lane(lane_key=lane_key, now=now)

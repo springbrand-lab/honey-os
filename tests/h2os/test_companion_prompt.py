@@ -13,7 +13,13 @@ def _agent(mode: str):
         _agent_mode=mode,
         load_soul_identity=True,
         skip_context_files=False,
-        valid_tool_names={"memory", "session_search", "skills_list", "terminal"},
+        valid_tool_names={
+            "memory",
+            "companion_memory",
+            "session_search",
+            "skills_list",
+            "terminal",
+        },
         _task_completion_guidance=True,
         _parallel_tool_call_guidance=True,
         _tool_use_enforcement=True,
@@ -73,6 +79,11 @@ def test_companion_prompt_uses_confirmation_only_memory_guidance():
     assert "明确" in prompt
     assert "不要根据语气推断" in prompt
     assert "过去对话" in prompt
+    assert "open_loop" in prompt
+    assert "temporary_state" in prompt
+    assert "commitment" in prompt
+    assert "episode" in prompt
+    assert "身份、感情、关系" in prompt
 
 
 def test_companion_fallback_identity_never_names_hermes():
