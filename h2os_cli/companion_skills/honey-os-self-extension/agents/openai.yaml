@@ -1,4 +1,0 @@
-interface:
-  display_name: "Honey OS Self Extension"
-  short_description: "Extend Honey OS with safe user-directed skills"
-  default_prompt: "Use this skill when Honey OS needs to inspect or extend its capabilities."

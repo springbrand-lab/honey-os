@@ -1,9 +1,9 @@
 
 
 [project]
-name = "hermes-agent"
-version = "0.20.0"
-description = "The self-improving AI agent — creates skills from experience, improves them during use, and runs anywhere"
+name = "honeyos"
+version = "0.3.0"
+description = "A private, local-first AI companion for Weixin and Feishu"
 readme = "README.md"
 # Upper bound is load-bearing, not cosmetic. uv resolves the project's
 # Python from `requires-python`, and an inherited `UV_PYTHON` env var (or a
@@ -13,7 +13,7 @@ readme = "README.md"
 # <3.14 makes uv refuse 3.14 with a clear error instead of attempting that
 # build. Raise the ceiling once our Rust transitives ship cp314 wheels.
 requires-python = ">=3.11,<3.14"
-authors = [{ name = "Nous Research" }]
+authors = [{ name = "HoneyOS Contributors" }]
 license = "MIT"
 license-files = ["LICENSE"]
 dependencies = [
@@ -31,7 +31,7 @@ dependencies = [
   # `uv lock` so the transitive resolution stays consistent. Don't
   # introduce ranges back without a written justification.
   #
-  # Scope rule: only packages used by EVERY hermes session belong here.
+  # Scope rule: only packages used by EVERY honeyos session belong here.
   # Anything that's provider-specific (`anthropic`, `firecrawl-py`,
   # `exa-py`, `fal-client`, `edge-tts`, `parallel-web`) belongs in an
   # extra and gets lazy-installed via `tools/lazy_deps.py` when the
@@ -63,7 +63,7 @@ dependencies = [
   # try/except-ImportError fallbacks silently degrade: Hindsight's
   # ``_meets_minimum_version`` disables update_mode='append' (#40503),
   # tools/lazy_deps.py treats every version constraint as satisfied, and
-  # hermes_cli/main.py drops to naive requirement parsing. Pure-Python
+  # honeyos.runtime/main.py drops to naive requirement parsing. Pure-Python
   # py3-none-any wheel, no compiled extensions — safe to ship everywhere.
   # Pinned to the version already resolved in uv.lock (no resolution churn).
   "packaging==26.0",
@@ -111,7 +111,7 @@ dependencies = [
   "python-multipart>=0.0.9,<1",
   "ptyprocess>=0.7.0,<1; sys_platform != 'win32'",
   "pywinpty>=2.0.0,<3; sys_platform == 'win32'",
-  # Desktop SSH's Windows remote runtime (hermes_cli/windows_ssh_runtime.py)
+  # Desktop SSH's Windows remote runtime (honeyos.runtime/windows_ssh_runtime.py)
   # imports win32security/win32file/etc. directly — declare pywin32 rather than
   # relying on the concurrent-log-handler → portalocker transitive chain.
   "pywin32>=306,<312; sys_platform == 'win32'",
@@ -126,12 +126,12 @@ dependencies = [
   # Windows log rotation. Stdlib ``RotatingFileHandler.doRollover()`` uses
   # ``os.rename()`` which fails with ``PermissionError [WinError 32]`` on
   # Windows whenever any other process holds an append-mode handle on
-  # ``agent.log`` (always the case in Hermes — TUI, gateway, ``hy_memory``
+  # ``agent.log`` (always the case in HoneyOS — TUI, gateway, ``hy_memory``
   # server, MCP servers, and on-demand CLI commands all log from separate
   # processes), pinning ``agent.log`` at the 5 MiB threshold and spamming
   # stderr on every emit (see #44873). ``concurrent-log-handler`` wraps the
   # rename in a cross-process file lock (via ``portalocker``: pywin32 on
-  # Windows) so only one process rotates at a time. ``hermes_logging.py``
+  # Windows) so only one process rotates at a time. ``honeyos.core.logging.py``
   # aliases it ONLY on Windows — POSIX renames an open file fine, so stdlib
   # already works there and managed-mode perms depend on its exact lifecycle.
   # Hence the ``sys_platform == 'win32'`` marker: the dep (and its portalocker
@@ -159,7 +159,7 @@ dependencies = [
 # OpenRouter or other aggregators).
 anthropic = ["anthropic==0.87.0"]  # CVE-2026-34450, CVE-2026-34452
 # Web search backends — each only loaded when the user picks it as their
-# search provider (configured via `hermes tools` or config.yaml).
+# search provider (configured via `honeyos tools` or config.yaml).
 exa = ["exa-py==2.10.2"]
 firecrawl = ["firecrawl-py==4.17.0"]
 parallel-web = ["parallel-web==0.4.2"]
@@ -173,7 +173,7 @@ daytona = ["daytona==0.155.0"]
 vercel = ["vercel==0.7.2"]
 hindsight = ["hindsight-client==0.6.1"]
 dev = ["debugpy==1.8.20", "pytest==9.1.1", "pytest-asyncio==1.3.0", "mcp==1.28.1", "starlette==1.3.1", "ty==0.0.21", "ruff==0.15.10", "setuptools==83.0.0"]  # starlette: CVE-2026-48710; setuptools: 83 (torch >=2.13 requires setuptools 83)
-h2os = ["aiohttp==3.14.1", "ddgs==9.14.4", "lark-oapi==1.6.8", "qrcode==7.4.2"]
+honeyos = ["aiohttp==3.14.1", "ddgs==9.14.4", "lark-oapi==1.6.8", "qrcode==7.4.2"]
 messaging = ["python-telegram-bot[webhooks]==22.6", "discord.py[voice]==2.7.1", "aiohttp==3.14.1", "brotlicffi==1.2.0.1", "slack-bolt==1.29.0", "slack-sdk==3.43.0", "qrcode==7.4.2"]  # aiohttp 3.14.1: CVE-2026-34513/34518/34519/34520/34525 + 34993(RCE)/47265
 cron = []  # croniter is now a core dependency; this extra kept for back-compat
 slack = ["slack-bolt==1.29.0", "slack-sdk==3.43.0", "aiohttp==3.14.1"]
@@ -192,26 +192,12 @@ voice = [
   "sounddevice==0.5.5",
   "numpy==2.4.3",
 ]
-# "Hey Hermes" wake word — on-device hotword detection. All engines are
+# "Hey HoneyOS" wake word — on-device hotword detection. All engines are
 # optional; openWakeWord (ONNX) is the free default, sherpa-onnx adds
 # open-vocabulary phrases (any typed phrase, zero training), Porcupine is
 # the premium alternative. Desktop installs ([--include-desktop]) eager-install
 # [wake]+[voice] so the ear works instantly; CLI-only installs lazy-install on
 # first /wake; mirrored in tools/lazy_deps.py.
-wake = [
-  "openwakeword==0.6.0",
-  "onnxruntime==1.27.0",
-  "sherpa-onnx==1.13.4",
-  "sentencepiece==0.2.2",
-  "pvporcupine==4.0.3",
-  "sounddevice==0.5.5",
-  "numpy==2.4.3",
-  # openWakeWord's onnx embedding model scores near-zero on macOS ARM64
-  # (dscripka/openWakeWord#336), so the wake word runs on tflite there.
-  # Upstream declares tflite-runtime for Linux only; ai-edge-litert is the
-  # macOS equivalent, bridged in tools/wake_word.py.
-  "ai-edge-litert==2.1.6; platform_system == 'Darwin'",
-]
 honcho = ["honcho-ai==2.2.0"]
 # Cloud memory providers — opt-in, lazy-installed via tools/lazy_deps.py
 # (memory.supermemory / memory.mem0) at first use. Exact pins MUST match the
@@ -246,7 +232,7 @@ homeassistant = ["aiohttp==3.14.1"]
 sms = ["aiohttp==3.14.1"]
 teams = ["microsoft-teams-apps==2.0.13.4", "aiohttp==3.14.1"]  # aiohttp 3.14.1: CVE-2026-34993(RCE)/47265 + 34513/34518/34519/34520/34525
 # Computer use — macOS background desktop control via cua-driver (MCP stdio).
-# The cua-driver binary itself is installed via `hermes tools` post-setup
+# The cua-driver binary itself is installed via `honeyos tools` post-setup
 # (curl install script); this extra just pins the MCP client used to talk
 # to it, which is already provided by the `mcp` extra.
 computer-use = ["mcp==1.28.1", "starlette==1.3.1"]  # starlette: CVE-2026-48710
@@ -271,23 +257,23 @@ azure-identity = ["azure-identity==1.25.3"]
 termux = [
   # Baseline Android / Termux path for reliable fresh installs.
   "python-telegram-bot[webhooks]==22.6",
-  "hermes-agent[cron]",
-  "hermes-agent[cli]",
-  "hermes-agent[mcp]",
-  "hermes-agent[honcho]",
-  "hermes-agent[acp]",
+  "honeyos[cron]",
+  "honeyos[cli]",
+  "honeyos[mcp]",
+  "honeyos[honcho]",
+  "honeyos[acp]",
 ]
 termux-all = [
   # Best-effort "install all" profile for Termux. Same policy as [all]:
   # only includes extras that aren't covered by `tools/lazy_deps.py`.
   # Backends like telegram/slack/dingtalk/feishu/honcho lazy-install at
   # first use, so they're no longer eager-installed here.
-  "hermes-agent[termux]",
-  "hermes-agent[google]",
-  "hermes-agent[homeassistant]",
-  "hermes-agent[sms]",
-  "hermes-agent[web]",
-  "hermes-agent[pty]",
+  "honeyos[termux]",
+  "honeyos[google]",
+  "honeyos[homeassistant]",
+  "honeyos[sms]",
+  "honeyos[web]",
+  "honeyos[pty]",
 ]
 dingtalk = ["dingtalk-stream==0.24.3", "alibabacloud-dingtalk==2.2.42", "qrcode==7.4.2"]
 feishu = ["lark-oapi==1.6.8", "qrcode==7.4.2"]
@@ -314,7 +300,7 @@ youtube = [
   # at first invocation with ModuleNotFoundError (issue #22243).
   "youtube-transcript-api==1.2.4",
 ]
-# `hermes dashboard` (localhost SPA + API).  Not in core to keep the default install lean.
+# `honeyos dashboard` (localhost SPA + API).  Not in core to keep the default install lean.
 # starlette==1.3.1 pinned for CVE-2026-48710 (BadHost) — fastapi pulls Starlette
 # transitively and pre-1.0.1 is the vulnerable range. See the mcp extra above.
 web = ["fastapi==0.133.1", "uvicorn[standard]==0.41.0", "starlette==1.3.1", "python-multipart==0.0.32"]
@@ -340,16 +326,16 @@ all = [
   # [all], `uv sync --locked` on Windows tried to build it from sdist
   # and failed on `make`. Lazy-install routes that build to first use,
   # where the user is expected to have a toolchain available.
-  "hermes-agent[cron]",
-  "hermes-agent[cli]",
-  "hermes-agent[pty]",
-  "hermes-agent[mcp]",
-  "hermes-agent[homeassistant]",
-  "hermes-agent[sms]",
-  "hermes-agent[acp]",
-  "hermes-agent[google]",
-  "hermes-agent[web]",
-  "hermes-agent[youtube]",
+  "honeyos[cron]",
+  "honeyos[cli]",
+  "honeyos[pty]",
+  "honeyos[mcp]",
+  "honeyos[homeassistant]",
+  "honeyos[sms]",
+  "honeyos[acp]",
+  "honeyos[google]",
+  "honeyos[web]",
+  "honeyos[youtube]",
 ]
 
 [build-system]
@@ -357,11 +343,7 @@ requires = ["setuptools==83.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project.scripts]
-hermes = "hermes_cli.main:main"
-hermes-agent = "run_agent:main"
-hermes-acp = "acp_adapter.entry:main"
-h2os = "h2os_cli.main:main"
-honey-os = "h2os_cli.main:main"
+honeyos = "honeyos.cli.main:main"
 
 [tool.uv]
 override-dependencies = [
@@ -374,50 +356,26 @@ override-dependencies = [
 exclude-newer = "14 days"
 exclude-newer-package = { vercel = false, nemo-relay = false, huggingface_hub = false }
 
-[tool.setuptools]
-# Top-level single-file modules (not packages). Without this, uv2nix's
-# sealed venv is missing hermes_constants, run_agent, etc.
-py-modules = [
-  "run_agent",
-  "model_tools",
-  "toolsets",
-  "batch_runner",
-  "trajectory_compressor",
-  "toolset_distributions",
-  "cli",
-  "hermes_bootstrap",
-  "hermes_constants",
-  "hermes_state",
-  "hermes_state_common",
-  "hermes_state_portability",
-  "hermes_state_schema",
-  "hermes_state_search",
-  "hermes_time",
-  "hermes_logging",
-  "utils",
-  "mcp_serve",
-]
-
 [tool.setuptools.packages.find]
-include = ["agent", "agent.*", "tools", "tools.*", "hermes_cli", "hermes_cli.*", "h2os_cli", "h2os_cli.*", "gateway", "gateway.*", "tui_gateway", "tui_gateway.*", "cron", "cron.*", "acp_adapter", "plugins", "plugins.*", "providers", "providers.*"]
+include = ["honeyos", "honeyos.*"]
 
 [tool.setuptools.package-data]
-hermes_cli = ["observability/schemas/*.json"]
-h2os_cli = ["templates/*.md", "companion_skills/**/*.md", "companion_skills/**/*.yaml"]
+"honeyos.runtime" = ["observability/schemas/*.json"]
+"honeyos.companion" = ["templates/*.md", "companion_skills/**/*.md", "companion_skills/**/*.yaml"]
 # gateway/assets/ ships status_phrases.yaml and the Telegram BotFather
 # screenshot. Without this, sealed venvs (uv2nix) silently lose both —
 # status phrases fall back to the tiny hardcoded set and the Telegram
 # topic-setup image disappears. Loaded via Path(__file__).parent / "assets"
 # in gateway/status_phrases.py and gateway/run.py.
-gateway = ["assets/**/*"]
+"honeyos.gateway" = ["assets/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
     "integration: marks tests requiring external services (API keys, Modal, etc.)",
-    "real_concurrent_gate: opt out of the autouse stub that disables _detect_concurrent_hermes_instances",
+    "real_concurrent_gate: opt out of the autouse stub that disables _detect_concurrent_honeyos_instances",
     "real_agent_prewarm: opt out of the autouse stub that disables the tui_gateway deferred agent pre-warm timer",
-    "requires_wal: needs the runtime to actually enable SQLite WAL mode (skipped where Hermes falls back to journal_mode=DELETE)",
+    "requires_wal: needs the runtime to actually enable SQLite WAL mode (skipped where HoneyOS falls back to journal_mode=DELETE)",
     "no_isolate: opt out of per-file subprocess isolation (tests share mutable module-level state)",
     "ssh: marks tests requiring a reachable SSH server (skipped in normal CI)",
 ]

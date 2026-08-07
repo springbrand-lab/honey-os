@@ -1,0 +1,4 @@
+interface:
+  display_name: "HoneyOS Self Extension"
+  short_description: "Extend HoneyOS with safe user-directed skills"
+  default_prompt: "Use this skill when HoneyOS needs to inspect or extend its capabilities."
