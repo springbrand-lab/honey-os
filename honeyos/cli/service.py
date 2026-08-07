@@ -30,7 +30,7 @@ class ServiceIdentity:
 
     def command_argv(self) -> tuple[str, ...]:
         return (
-            str(Path(sys.executable).resolve()),
+            str(Path(sys.executable)),
             "-m",
             "honeyos",
             "gateway",
@@ -159,4 +159,3 @@ def service_status(identity: ServiceIdentity, runner: Runner = _run) -> int:
             runner(["launchctl", "print", f"gui/{os.getuid()}/{identity.macos_label}"])
         )
     return _returncode(runner(["systemctl", "--user", "is-active", identity.linux_unit]))
-

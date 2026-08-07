@@ -30,7 +30,7 @@ def test_service_command_uses_current_python_and_honeyos_module(tmp_path: Path) 
     identity = service.ServiceIdentity.default(home=tmp_path / ".honeyos")
 
     assert identity.command_argv() == (
-        str(Path(sys.executable).resolve()),
+        str(Path(sys.executable)),
         "-m",
         "honeyos",
         "gateway",
@@ -38,10 +38,31 @@ def test_service_command_uses_current_python_and_honeyos_module(tmp_path: Path) 
     )
 
 
-def test_generated_service_definitions_contain_only_honeyos_runtime(
-    tmp_path: Path,
+def test_service_command_preserves_virtualenv_interpreter_symlink(
+    monkeypatch, tmp_path: Path
 ) -> None:
     service = _service_module()
+    base_python = tmp_path / "managed-python" / "bin" / "python3.11"
+    base_python.parent.mkdir(parents=True)
+    base_python.touch()
+    virtualenv_python = tmp_path / "project" / ".venv" / "bin" / "python3"
+    virtualenv_python.parent.mkdir(parents=True)
+    virtualenv_python.symlink_to(base_python)
+    monkeypatch.setattr(service.sys, "executable", str(virtualenv_python))
+
+    identity = service.ServiceIdentity.default(home=tmp_path / ".honeyos")
+
+    assert identity.command_argv()[0] == str(virtualenv_python)
+    assert identity.command_argv()[0] != str(base_python)
+
+
+def test_generated_service_definitions_contain_only_honeyos_runtime(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    service = _service_module()
+    monkeypatch.setattr(
+        service.sys, "executable", "/opt/honeyos/.venv/bin/python3"
+    )
     identity = service.ServiceIdentity.default(home=tmp_path / ".honeyos")
 
     launchd = service.render_launchd_plist(identity)
@@ -72,4 +93,3 @@ def test_lifecycle_addresses_only_exact_honeyos_service(monkeypatch, tmp_path: P
         ("launchctl", "kickstart", f"gui/{service.os.getuid()}/{identity.macos_label}"),
         ("launchctl", "bootout", f"gui/{service.os.getuid()}/{identity.macos_label}"),
     ]
-
