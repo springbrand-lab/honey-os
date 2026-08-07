@@ -5484,6 +5484,9 @@ class TurnRunner:
             _output_toks = getattr(_agent, "session_completion_tokens", 0)
             _context_length = getattr(_agent.context_compressor, "context_length", 0) or 0
         _resolved_model = getattr(_agent, "model", None) if _agent else None
+        _resolved_provider = getattr(_agent, "provider", None) if _agent else None
+        _resolved_base_url = getattr(_agent, "base_url", None) if _agent else None
+        _resolved_api_mode = getattr(_agent, "api_mode", None) if _agent else None
 
         # Sync session_id immediately after run_conversation(). Compression
         # can rotate before a follow-up model call fails; the failure return
@@ -5619,6 +5622,9 @@ class TurnRunner:
                 "input_tokens": _input_toks,
                 "output_tokens": _output_toks,
                 "model": _resolved_model,
+                "provider": _resolved_provider,
+                "base_url": _resolved_base_url,
+                "api_mode": _resolved_api_mode,
                 "context_length": _context_length,
             }
 
@@ -5757,6 +5763,9 @@ class TurnRunner:
             "input_tokens": _input_toks,
             "output_tokens": _output_toks,
             "model": _resolved_model,
+            "provider": _resolved_provider,
+            "base_url": _resolved_base_url,
+            "api_mode": _resolved_api_mode,
             "context_length": _context_length,
             "session_id": effective_session_id,
             "response_previewed": result.get("response_previewed", False),
@@ -5793,6 +5802,65 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
     _restart_via_service: bool = False
     _detached_restart_helper_started: bool = False
     _restart_command_source: Optional[SessionSource] = None
+
+    def _schedule_h2os_memory_distillation(
+        self,
+        *,
+        lane_key: str,
+        chat_type: str,
+        session_id: str,
+        messages: Optional[List[Dict[str, Any]]],
+        reason: str,
+        main_runtime: Optional[Dict[str, Any]],
+    ) -> bool:
+        """Track a best-effort Honey OS review without delaying chat delivery."""
+
+        if str(chat_type or "").strip().lower() != "dm":
+            return False
+        from h2os_cli.distillation import active_h2os_distiller
+
+        distiller = active_h2os_distiller()
+        if distiller is None:
+            return False
+
+        async def _run() -> None:
+            try:
+                review_messages = messages
+                if review_messages is None:
+                    review_messages = await self.async_session_store.load_transcript(
+                        session_id,
+                        include_row_ids=True,
+                    )
+                result = await distiller.distill_if_due(
+                    lane_key=lane_key,
+                    session_id=session_id,
+                    messages=review_messages,
+                    reason=reason,
+                    main_runtime=main_runtime,
+                )
+                if result is not None and result.status == "failed":
+                    logger.debug(
+                        "Honey OS memory distillation failed for %s: %s",
+                        session_id,
+                        result.error,
+                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.debug(
+                    "Honey OS memory distillation task crashed for %s",
+                    session_id,
+                    exc_info=True,
+                )
+
+        task = asyncio.create_task(_run())
+        background_tasks = getattr(self, "_background_tasks", None)
+        if not isinstance(background_tasks, set):
+            background_tasks = set()
+            self._background_tasks = background_tasks
+        background_tasks.add(task)
+        task.add_done_callback(background_tasks.discard)
+        return True
     _stop_task: Optional[asyncio.Task] = None
     _restart_task: Optional[asyncio.Task] = None
     _profile_failed_platforms: Optional[Dict[str, Dict[Platform, asyncio.Task]]] = None
@@ -18141,6 +18209,40 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 session_entry.session_key,
                 last_prompt_tokens=agent_result.get("last_prompt_tokens", 0),
             )
+
+            # Review persisted Honey OS messages after the foreground turn has
+            # completed.  The scheduler returns immediately; threshold checks,
+            # model calls, retries, and SQLite writes stay in the distillation
+            # module and cannot delay this response.
+            if (
+                not agent_failed_early
+                and not hidden_reasoning_incomplete
+                and _is_h2os_runtime()
+                and str(getattr(source, "chat_type", "") or "").lower() == "dm"
+            ):
+                try:
+                    self._schedule_h2os_memory_distillation(
+                        lane_key=session_key,
+                        chat_type="dm",
+                        session_id=session_entry.session_id,
+                        messages=None,
+                        reason="periodic",
+                        main_runtime={
+                            key: value
+                            for key, value in {
+                                "provider": agent_result.get("provider"),
+                                "model": agent_result.get("model"),
+                                "base_url": agent_result.get("base_url"),
+                                "api_mode": agent_result.get("api_mode"),
+                            }.items()
+                            if isinstance(value, str) and value.strip()
+                        },
+                    )
+                except Exception:
+                    logger.debug(
+                        "Honey OS periodic memory distillation scheduling failed",
+                        exc_info=True,
+                    )
 
             # Re-baseline the cached agent's message_count snapshot now that
             # ALL of this turn's transcript writes are done — the agent's

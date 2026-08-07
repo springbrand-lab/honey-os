@@ -77,6 +77,10 @@ class StructuredMemoryItem:
     created_at: datetime
     updated_at: datetime
     expires_at: datetime | None
+    source_message_ids: tuple[int, ...] = ()
+    importance: str = "medium"
+    created_by: str = "foreground"
+    distillation_run_id: str | None = None
 
 
 class StructuredMemoryStore:
@@ -120,6 +124,20 @@ class StructuredMemoryStore:
             )
             """
         )
+        existing_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(structured_memories)")
+        }
+        migrations = {
+            "source_message_ids": "TEXT NOT NULL DEFAULT '[]'",
+            "importance": "TEXT NOT NULL DEFAULT 'medium'",
+            "created_by": "TEXT NOT NULL DEFAULT 'foreground'",
+            "distillation_run_id": "TEXT",
+        }
+        for column, declaration in migrations.items():
+            if column not in existing_columns:
+                connection.execute(
+                    f"ALTER TABLE structured_memories ADD COLUMN {column} {declaration}"
+                )
         connection.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_structured_memories_active
@@ -141,6 +159,12 @@ class StructuredMemoryStore:
     @staticmethod
     def _row_to_item(row: sqlite3.Row) -> StructuredMemoryItem:
         expires_at = datetime.fromisoformat(row["expires_at"]) if row["expires_at"] else None
+        try:
+            source_message_ids = tuple(
+                int(value) for value in json.loads(row["source_message_ids"] or "[]")
+            )
+        except (TypeError, ValueError, json.JSONDecodeError):
+            source_message_ids = ()
         return StructuredMemoryItem(
             id=row["id"],
             lane_key=row["lane_key"],
@@ -152,6 +176,10 @@ class StructuredMemoryStore:
             created_at=_as_utc(datetime.fromisoformat(row["created_at"])),
             updated_at=_as_utc(datetime.fromisoformat(row["updated_at"])),
             expires_at=_as_utc(expires_at) if expires_at else None,
+            source_message_ids=source_message_ids,
+            importance=row["importance"],
+            created_by=row["created_by"],
+            distillation_run_id=row["distillation_run_id"],
         )
 
     def _expiry_for(
@@ -160,7 +188,21 @@ class StructuredMemoryStore:
         kind: str,
         now: datetime,
         expires_in_days: int | None,
+        explicit_expires_at: datetime | str | None,
     ) -> datetime | None:
+        if explicit_expires_at is not None:
+            if isinstance(explicit_expires_at, str):
+                parsed = datetime.fromisoformat(
+                    explicit_expires_at.strip().replace("Z", "+00:00")
+                )
+            elif isinstance(explicit_expires_at, datetime):
+                parsed = explicit_expires_at
+            else:
+                raise ValueError("expires_at must be an ISO timestamp")
+            parsed = _as_utc(parsed)
+            if parsed <= now:
+                raise ValueError("expires_at must be in the future")
+            return parsed
         if kind == "episode" and expires_in_days is None:
             return None
         default_ttl = (
@@ -190,6 +232,11 @@ class StructuredMemoryStore:
         evidence: str,
         source_session_id: str,
         expires_in_days: int | None = None,
+        expires_at: datetime | str | None = None,
+        source_message_ids: Iterable[int] = (),
+        importance: str = "medium",
+        created_by: str = "foreground",
+        distillation_run_id: str | None = None,
         now: datetime | None = None,
     ) -> StructuredMemoryItem | None:
         """Record one explicit/factual item; inferred and unknown lanes fail closed."""
@@ -209,12 +256,22 @@ class StructuredMemoryStore:
             return None
         normalized_content = cleaned.casefold()
         timestamp = _as_utc(now or _utc_now())
-        expires_at = self._expiry_for(
-            kind=normalized_kind,
-            now=timestamp,
-            expires_in_days=expires_in_days,
-        )
         try:
+            resolved_expires_at = self._expiry_for(
+                kind=normalized_kind,
+                now=timestamp,
+                expires_in_days=expires_in_days,
+                explicit_expires_at=expires_at,
+            )
+            normalized_source_ids = tuple(
+                dict.fromkeys(int(value) for value in source_message_ids)
+            )
+            normalized_importance = str(importance or "medium").strip().lower()
+            if normalized_importance not in {"low", "medium", "high"}:
+                normalized_importance = "medium"
+            normalized_created_by = str(created_by or "foreground").strip().lower()
+            if normalized_created_by not in {"foreground", "background"}:
+                return None
             with self._connect() as connection:
                 self._purge_expired(connection, timestamp)
                 existing = connection.execute(
@@ -230,12 +287,45 @@ class StructuredMemoryStore:
                 created_at = (
                     existing["created_at"] if existing is not None else timestamp.isoformat()
                 )
+                effective_source_ids = normalized_source_ids
+                effective_importance = normalized_importance
+                effective_created_by = normalized_created_by
+                effective_run_id = distillation_run_id
+                if existing is not None:
+                    try:
+                        previous_ids = tuple(
+                            int(value)
+                            for value in json.loads(existing["source_message_ids"] or "[]")
+                        )
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        previous_ids = ()
+                    effective_source_ids = tuple(
+                        dict.fromkeys((*previous_ids, *normalized_source_ids))
+                    )
+                    importance_rank = {"low": 0, "medium": 1, "high": 2}
+                    previous_importance = str(existing["importance"] or "medium")
+                    if importance_rank.get(previous_importance, 1) > importance_rank[
+                        normalized_importance
+                    ]:
+                        effective_importance = previous_importance
+                    if existing["created_by"] == "foreground":
+                        effective_created_by = "foreground"
+                        effective_run_id = existing["distillation_run_id"]
+                    previous_expiry = existing["expires_at"]
+                    if previous_expiry is None:
+                        resolved_expires_at = None
+                    elif resolved_expires_at is not None:
+                        resolved_expires_at = max(
+                            _as_utc(datetime.fromisoformat(previous_expiry)),
+                            resolved_expires_at,
+                        )
                 connection.execute(
                     """
                     INSERT OR REPLACE INTO structured_memories (
                         id, lane_key, kind, content, normalized_content, status,
-                        evidence, source_session_id, created_at, updated_at, expires_at
-                    ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)
+                        evidence, source_session_id, created_at, updated_at, expires_at,
+                        source_message_ids, importance, created_by, distillation_run_id
+                    ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         item_id,
@@ -247,7 +337,11 @@ class StructuredMemoryStore:
                         source_session_id,
                         created_at,
                         timestamp.isoformat(),
-                        expires_at.isoformat() if expires_at else None,
+                        resolved_expires_at.isoformat() if resolved_expires_at else None,
+                        json.dumps(effective_source_ids, separators=(",", ":")),
+                        effective_importance,
+                        effective_created_by,
+                        effective_run_id,
                     ),
                 )
                 row = connection.execute(
@@ -278,6 +372,48 @@ class StructuredMemoryStore:
             return tuple(self._row_to_item(row) for row in rows)
         except (OSError, sqlite3.Error, ValueError, TypeError):
             return ()
+
+    def prune_background(self, *, lane_key: str, max_items: int = 50) -> int:
+        """Remove oldest low-priority automatic items, never foreground ones."""
+
+        if not lane_key:
+            return 0
+        limit = max(1, int(max_items))
+        try:
+            with self._connect() as connection:
+                count = int(
+                    connection.execute(
+                        """
+                        SELECT COUNT(*) FROM structured_memories
+                        WHERE lane_key = ? AND status = 'active'
+                              AND created_by = 'background'
+                        """,
+                        (lane_key,),
+                    ).fetchone()[0]
+                )
+                excess = max(0, count - limit)
+                if excess == 0:
+                    return 0
+                rows = connection.execute(
+                    """
+                    SELECT id FROM structured_memories
+                    WHERE lane_key = ? AND status = 'active'
+                          AND created_by = 'background'
+                    ORDER BY
+                        CASE importance WHEN 'low' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
+                        updated_at ASC
+                    LIMIT ?
+                    """,
+                    (lane_key, excess),
+                ).fetchall()
+                ids = [row["id"] for row in rows]
+                connection.executemany(
+                    "DELETE FROM structured_memories WHERE id = ?",
+                    ((item_id,) for item_id in ids),
+                )
+            return len(ids)
+        except (OSError, sqlite3.Error, ValueError, TypeError):
+            return 0
 
     def change_status(
         self,
@@ -313,6 +449,9 @@ class StructuredMemoryStore:
         lane_key: str,
         item_id: str,
         content: str,
+        expires_at: datetime | str | None = None,
+        source_message_ids: Iterable[int] = (),
+        distillation_run_id: str | None = None,
         now: datetime | None = None,
     ) -> bool:
         cleaned = self._clean_content(content)
@@ -321,16 +460,62 @@ class StructuredMemoryStore:
         timestamp = _as_utc(now or _utc_now())
         try:
             with self._connect() as connection:
+                existing = connection.execute(
+                    """
+                    SELECT kind, expires_at, source_message_ids, created_by,
+                           distillation_run_id
+                    FROM structured_memories
+                    WHERE id = ? AND lane_key = ? AND status = 'active'
+                    """,
+                    (item_id, lane_key),
+                ).fetchone()
+                if existing is None:
+                    return False
+                resolved_expires_at = existing["expires_at"]
+                if expires_at is not None:
+                    parsed_expiry = self._expiry_for(
+                        kind=existing["kind"],
+                        now=timestamp,
+                        expires_in_days=None,
+                        explicit_expires_at=expires_at,
+                    )
+                    resolved_expires_at = (
+                        parsed_expiry.isoformat() if parsed_expiry is not None else None
+                    )
+                try:
+                    previous_source_ids = tuple(
+                        int(value)
+                        for value in json.loads(existing["source_message_ids"] or "[]")
+                    )
+                    new_source_ids = tuple(int(value) for value in source_message_ids)
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    return False
+                merged_source_ids = tuple(
+                    dict.fromkeys((*previous_source_ids, *new_source_ids))
+                )
+                effective_run_id = existing["distillation_run_id"]
+                if existing["created_by"] == "background" and distillation_run_id:
+                    effective_run_id = distillation_run_id
                 cursor = connection.execute(
                     """
                     UPDATE structured_memories
-                    SET content = ?, normalized_content = ?, updated_at = ?
+                    SET content = ?, normalized_content = ?, updated_at = ?, expires_at = ?,
+                        source_message_ids = ?, distillation_run_id = ?
                     WHERE id = ? AND lane_key = ? AND status = 'active'
                     """,
-                    (cleaned, cleaned.casefold(), timestamp.isoformat(), item_id, lane_key),
+                    (
+                        cleaned,
+                        cleaned.casefold(),
+                        timestamp.isoformat(),
+                        resolved_expires_at,
+                        json.dumps(merged_source_ids, separators=(",", ":")),
+                        effective_run_id,
+                        item_id,
+                        lane_key,
+                    ),
                 )
             return cursor.rowcount == 1
-        except (OSError, sqlite3.Error):
+        except (OSError, sqlite3.Error, ValueError, TypeError):
             return False
 
     def context_for_lane(

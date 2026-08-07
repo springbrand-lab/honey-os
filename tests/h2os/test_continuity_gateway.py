@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -89,6 +90,7 @@ async def test_new_records_old_to_new_handoff_without_blocking_reset(
     monkeypatch.setenv("H2OS_HOME", str(tmp_path))
     monkeypatch.setenv("H2OS_RUNTIME_ID", "h2os-companion-v0.2")
     runner = _runner()
+    runner._schedule_h2os_memory_distillation = MagicMock(return_value=True)
 
     await runner._handle_reset_command(_event())
 
@@ -98,3 +100,42 @@ async def test_new_records_old_to_new_handoff_without_blocking_reset(
     assert call["target_session_id"] == "new-session"
     assert call["chat_type"] == "dm"
     assert call["messages"][-1]["content"] == "好，我答应你。"
+    runner.session_store.load_transcript.assert_called_once_with(
+        "old-session", include_row_ids=True
+    )
+    runner._schedule_h2os_memory_distillation.assert_called_once()
+    distill_call = runner._schedule_h2os_memory_distillation.call_args.kwargs
+    assert distill_call["reason"] == "new"
+    assert distill_call["session_id"] == "old-session"
+
+
+@pytest.mark.asyncio
+async def test_gateway_tracks_distillation_as_non_blocking_background_work(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("H2OS_HOME", str(tmp_path))
+    monkeypatch.setenv("H2OS_RUNTIME_ID", "h2os-companion-v0.2")
+    completed = []
+
+    class FakeDistiller:
+        async def distill_if_due(self, **kwargs):
+            completed.append(kwargs)
+
+    monkeypatch.setattr(
+        "h2os_cli.distillation.active_h2os_distiller", lambda: FakeDistiller()
+    )
+    runner = _runner()
+
+    scheduled = runner._schedule_h2os_memory_distillation(
+        lane_key="agent:main:weixin:dm:user-a",
+        chat_type="dm",
+        session_id="session-a",
+        messages=[{"_row_id": 1, "role": "user", "content": "hi"}],
+        reason="periodic",
+        main_runtime={"provider": "test", "model": "test-model"},
+    )
+    await asyncio.gather(*runner._background_tasks)
+
+    assert scheduled is True
+    assert completed[0]["reason"] == "periodic"
+    assert completed[0]["main_runtime"]["model"] == "test-model"

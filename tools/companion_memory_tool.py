@@ -60,6 +60,14 @@ COMPANION_MEMORY_SCHEMA = {
                 "maximum": 365,
                 "description": "Optional. Temporary state defaults to 3 days; pending items to 30 days.",
             },
+            "expires_at": {
+                "type": "string",
+                "description": (
+                    "Optional ISO-8601 expiry inferred only from an explicit user time "
+                    "phrase such as today, this week, Friday, or until an event date. "
+                    "Prefer this over the fallback duration when the user supplied time semantics."
+                ),
+            },
         },
         "required": ["action"],
     },
@@ -94,6 +102,7 @@ def companion_memory_tool(
     evidence: str | None = None,
     item_id: str | None = None,
     expires_in_days: int | None = None,
+    expires_at: str | None = None,
     session_id: str = "",
 ) -> str:
     scope = _tool_scope()
@@ -111,6 +120,7 @@ def companion_memory_tool(
             evidence=evidence or "",
             source_session_id=session_id,
             expires_in_days=expires_in_days,
+            expires_at=expires_at,
         )
         if item is None:
             return _json_result(False, error="item was invalid, inferred, or could not be stored")
@@ -122,7 +132,10 @@ def companion_memory_tool(
 
     if normalized_action == "update":
         success = store.update_content(
-            lane_key=lane_key, item_id=item_id or "", content=content or ""
+            lane_key=lane_key,
+            item_id=item_id or "",
+            content=content or "",
+            expires_at=expires_at,
         )
     elif normalized_action in {"resolve", "forget"}:
         success = store.change_status(
@@ -141,6 +154,7 @@ def _handler(args: dict, **kwargs: object) -> str:
         evidence=args.get("evidence"),
         item_id=args.get("item_id"),
         expires_in_days=args.get("expires_in_days"),
+        expires_at=args.get("expires_at"),
         session_id=str(kwargs.get("session_id") or ""),
     )
 

@@ -131,6 +131,23 @@ def companion_config(platform: str = "weixin") -> dict:
             "nudge_interval": 0,
             "write_approval": False,
             "provider": "",
+            "distillation": {
+                "enabled": True,
+                "trigger_messages": 20,
+                "min_tail_messages": 6,
+                "max_batch_messages": 40,
+                "max_operations": 6,
+                "max_attempts": 3,
+                "max_daily_runs": 12,
+            },
+        },
+        "auxiliary": {
+            "memory_distillation": {
+                "provider": "auto",
+                "model": "auto",
+                "timeout": 60,
+                "max_concurrency": 1,
+            }
         },
         "skills": {"creation_nudge_interval": 0},
         "compression": {"enabled": True, "in_place": True},
@@ -232,6 +249,41 @@ def upgrade_companion_capabilities(home: Path) -> bool:
         platform_toolsets = {}
         config["platform_toolsets"] = platform_toolsets
     platform_toolsets["weixin"] = list(COMPANION_TOOLSETS)
+
+    memory = config.setdefault("memory", {})
+    if not isinstance(memory, dict):
+        memory = {}
+        config["memory"] = memory
+    distillation = memory.setdefault("distillation", {})
+    if not isinstance(distillation, dict):
+        distillation = {}
+        memory["distillation"] = distillation
+    for key, value in {
+        "enabled": True,
+        "trigger_messages": 20,
+        "min_tail_messages": 6,
+        "max_batch_messages": 40,
+        "max_operations": 6,
+        "max_attempts": 3,
+        "max_daily_runs": 12,
+    }.items():
+        distillation.setdefault(key, value)
+
+    auxiliary = config.setdefault("auxiliary", {})
+    if not isinstance(auxiliary, dict):
+        auxiliary = {}
+        config["auxiliary"] = auxiliary
+    memory_aux = auxiliary.setdefault("memory_distillation", {})
+    if not isinstance(memory_aux, dict):
+        memory_aux = {}
+        auxiliary["memory_distillation"] = memory_aux
+    for key, value in {
+        "provider": "auto",
+        "model": "auto",
+        "timeout": 60,
+        "max_concurrency": 1,
+    }.items():
+        memory_aux.setdefault(key, value)
 
     web = config.setdefault("web", {})
     if not isinstance(web, dict):

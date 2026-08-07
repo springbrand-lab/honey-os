@@ -123,6 +123,54 @@ def test_temporary_state_expires_while_episode_remains(tmp_path):
     assert "双方一起完成了产品原型" in note
 
 
+def test_explicit_semantic_expiry_overrides_three_day_fallback(tmp_path):
+    store = StructuredMemoryStore(tmp_path)
+    item = store.record(
+        lane_key=LANE,
+        kind="temporary_state",
+        content="用户这周都在出差",
+        evidence="user_stated",
+        source_session_id="session-a",
+        expires_at="2026-08-10T16:00:00+00:00",
+        now=NOW,
+    )
+
+    assert item is not None
+    assert item.expires_at == datetime(2026, 8, 10, 16, 0, tzinfo=timezone.utc)
+    assert store.context_for_lane(
+        lane_key=LANE, now=datetime(2026, 8, 10, 15, 59, tzinfo=timezone.utc)
+    ) is not None
+    assert store.context_for_lane(
+        lane_key=LANE, now=datetime(2026, 8, 10, 16, 1, tzinfo=timezone.utc)
+    ) is None
+
+
+def test_user_can_extend_a_temporary_state_to_a_new_explicit_date(tmp_path):
+    store = StructuredMemoryStore(tmp_path)
+    item = store.record(
+        lane_key=LANE,
+        kind="temporary_state",
+        content="用户本周在赶上线",
+        evidence="user_stated",
+        source_session_id="session-a",
+        expires_at="2026-08-10T16:00:00+00:00",
+        now=NOW,
+    )
+    assert item is not None
+
+    assert store.update_content(
+        lane_key=LANE,
+        item_id=item.id,
+        content="用户赶上线延期到下周三",
+        expires_at="2026-08-19T16:00:00+00:00",
+        now=NOW,
+    ) is True
+
+    updated = store.list_active(lane_key=LANE, now=NOW)[0]
+    assert updated.expires_at == datetime(2026, 8, 19, 16, 0, tzinfo=timezone.utc)
+
+
+
 def test_open_loop_can_be_resolved_and_memory_can_be_forgotten(tmp_path):
     store = StructuredMemoryStore(tmp_path)
     loop = store.record(
@@ -174,6 +222,70 @@ def test_exact_duplicate_updates_existing_item_instead_of_growing(tmp_path):
     assert first is not None and second is not None
     assert second.id == first.id
     assert len(store.list_active(lane_key=LANE, now=NOW + timedelta(hours=1))) == 1
+
+
+def test_background_duplicate_never_downgrades_foreground_memory(tmp_path):
+    store = StructuredMemoryStore(tmp_path)
+    foreground = store.record(
+        lane_key=LANE,
+        kind="episode",
+        content="双方一起完成了第一版原型",
+        evidence="user_stated",
+        source_session_id="session-a",
+        source_message_ids=(1,),
+        importance="high",
+        created_by="foreground",
+        now=NOW,
+    )
+    duplicate = store.record(
+        lane_key=LANE,
+        kind="episode",
+        content="双方一起完成了第一版原型",
+        evidence="conversation_event",
+        source_session_id="session-a",
+        source_message_ids=(3,),
+        importance="low",
+        created_by="background",
+        distillation_run_id="run-a",
+        now=NOW + timedelta(hours=1),
+    )
+
+    assert foreground is not None and duplicate is not None
+    assert duplicate.id == foreground.id
+    assert duplicate.created_by == "foreground"
+    assert duplicate.importance == "high"
+    assert duplicate.source_message_ids == (1, 3)
+    assert duplicate.distillation_run_id is None
+
+
+def test_background_memory_cap_prunes_old_low_priority_items_only(tmp_path):
+    store = StructuredMemoryStore(tmp_path, max_items=100)
+    protected = store.record(
+        lane_key=LANE,
+        kind="episode",
+        content="用户明确保存的共同经历",
+        evidence="user_stated",
+        source_session_id="session-a",
+        created_by="foreground",
+        now=NOW,
+    )
+    for index in range(51):
+        store.record(
+            lane_key=LANE,
+            kind="episode",
+            content=f"后台共同经历 {index}",
+            evidence="conversation_event",
+            source_session_id="session-a",
+            importance="low",
+            created_by="background",
+            now=NOW + timedelta(minutes=index + 1),
+        )
+
+    assert store.prune_background(lane_key=LANE, max_items=50) == 1
+    items = store.list_active(lane_key=LANE, now=NOW + timedelta(hours=2))
+    assert len(items) == 51
+    assert any(item.id == protected.id for item in items if protected is not None)
+    assert all(item.content != "后台共同经历 0" for item in items)
 
 
 def test_companion_memory_tool_uses_current_private_lane(tmp_path, monkeypatch):

@@ -52,6 +52,21 @@ def test_initialize_home_creates_companion_contract(tmp_path):
     assert config["memory"]["user_profile_enabled"] is True
     assert config["memory"]["nudge_interval"] == 0
     assert config["memory"]["provider"] == ""
+    assert config["memory"]["distillation"] == {
+        "enabled": True,
+        "trigger_messages": 20,
+        "min_tail_messages": 6,
+        "max_batch_messages": 40,
+        "max_operations": 6,
+        "max_attempts": 3,
+        "max_daily_runs": 12,
+    }
+    assert config["auxiliary"]["memory_distillation"] == {
+        "provider": "auto",
+        "model": "auto",
+        "timeout": 60,
+        "max_concurrency": 1,
+    }
     assert config["skills"]["creation_nudge_interval"] == 0
     assert config["mcp_servers"] == {}
     assert config["platforms"]["weixin"]["extra"]["dm_policy"] == "pairing"
@@ -141,6 +156,9 @@ def test_upgrade_companion_capabilities_is_idempotent_and_preserves_user_state(t
     )
     assert migrated["terminal"]["backend"] == "docker"
     assert migrated["security"]["allow_proxy_fake_ips"] is True
+    assert migrated["memory"]["distillation"]["trigger_messages"] == 20
+    assert migrated["memory"]["distillation"]["max_daily_runs"] == 12
+    assert migrated["auxiliary"]["memory_distillation"]["provider"] == "auto"
     assert first_soul.startswith("# My formed identity")
     assert first_soul.count("# Capability Growth") == 1
     assert (tmp_path / "skills" / "relationship-continuity" / "SKILL.md").exists()

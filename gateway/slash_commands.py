@@ -159,7 +159,8 @@ class GatewaySlashCommandsMixin:
         ):
             try:
                 _h2os_continuity_messages = await self.async_session_store.load_transcript(
-                    old_entry.session_id
+                    old_entry.session_id,
+                    include_row_ids=True,
                 )
             except Exception:
                 logger.debug("Honey OS continuity transcript capture failed", exc_info=True)
@@ -308,6 +309,17 @@ class GatewaySlashCommandsMixin:
                 )
             except Exception:
                 logger.debug("Honey OS continuity handoff save failed", exc_info=True)
+            try:
+                self._schedule_h2os_memory_distillation(
+                    lane_key=session_key,
+                    chat_type=str(getattr(source, "chat_type", "") or ""),
+                    session_id=old_entry.session_id,
+                    messages=_h2os_continuity_messages,
+                    reason="new",
+                    main_runtime=None,
+                )
+            except Exception:
+                logger.debug("Honey OS /new memory distillation scheduling failed", exc_info=True)
 
         # Set session title if provided with /new <title>
         _title_arg = event.get_command_args().strip()
