@@ -12,7 +12,7 @@ def test_init_command_activates_requested_home(tmp_path, capsys):
     output = capsys.readouterr().out
     assert os.environ["HERMES_HOME"] == str(tmp_path.resolve())
     assert (tmp_path / "runtime.json").exists()
-    assert "Honey OS" in output
+    assert "HoneyOS" in output
     assert "Hermes" not in output
     assert str(tmp_path.resolve()) in output
 

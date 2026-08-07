@@ -531,7 +531,7 @@ class StructuredMemoryStore:
             "episode": "真实共同经历",
         }
         lines = [
-            "[Honey OS 关系连续性记忆：以下条目来自本地记录，仅在与当前消息相关时自然使用。",
+            "[HoneyOS 关系连续性记忆：以下条目来自本地记录，仅在与当前消息相关时自然使用。",
             "不得据此推断或升级用户的身份、感情、关系、依赖、诊断或长期边界。",
             "条目 ID 可用于完成、纠正或忘记记忆。]",
         ]
@@ -730,7 +730,7 @@ class ContinuityStore:
         if handoff is None:
             return None
         lines = [
-            "[Honey OS 连续性交接：以下是上一段真实对话的有界摘录，不是永久记忆。",
+            "[HoneyOS 连续性交接：以下是上一段真实对话的有界摘录，不是永久记忆。",
             f"来源 Session：{handoff.source_session_id}。",
             "仅在与用户当前消息相关时自然使用；不要主动复述，不要强迫继续旧话题，"
             "不要从中推断或升级身份、感情、关系与长期边界。]",
@@ -803,7 +803,7 @@ def structured_memory_note(
     chat_type: str,
     now: datetime | None = None,
 ) -> str | None:
-    """Best-effort per-turn adapter for private Honey OS working memory."""
+    """Best-effort per-turn adapter for private HoneyOS working memory."""
 
     home = _active_h2os_home(chat_type)
     if home is None:

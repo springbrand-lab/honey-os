@@ -147,7 +147,7 @@ class GatewaySlashCommandsMixin:
         # expiring session id before reset_session() rotates it.
         old_entry = self.session_store._entries.get(session_key)
 
-        # Honey OS keeps a small source-backed handoff across an explicit /new.
+        # HoneyOS keeps a small source-backed handoff across an explicit /new.
         # Read the old transcript before reset rotates the route.  This is a
         # best-effort H2OS-only seam: generic Hermes sessions do no extra I/O,
         # and any read/store failure must never block the reset itself.
@@ -163,7 +163,7 @@ class GatewaySlashCommandsMixin:
                     include_row_ids=True,
                 )
             except Exception:
-                logger.debug("Honey OS continuity transcript capture failed", exc_info=True)
+                logger.debug("HoneyOS continuity transcript capture failed", exc_info=True)
 
         # Close tool resources on the old agent (terminal sandboxes, browser
         # daemons, background processes) before evicting from cache.
@@ -308,7 +308,7 @@ class GatewaySlashCommandsMixin:
                     messages=_h2os_continuity_messages,
                 )
             except Exception:
-                logger.debug("Honey OS continuity handoff save failed", exc_info=True)
+                logger.debug("HoneyOS continuity handoff save failed", exc_info=True)
             try:
                 self._schedule_h2os_memory_distillation(
                     lane_key=session_key,
@@ -319,7 +319,7 @@ class GatewaySlashCommandsMixin:
                     main_runtime=None,
                 )
             except Exception:
-                logger.debug("Honey OS /new memory distillation scheduling failed", exc_info=True)
+                logger.debug("HoneyOS /new memory distillation scheduling failed", exc_info=True)
 
         # Set session title if provided with /new <title>
         _title_arg = event.get_command_args().strip()

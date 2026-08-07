@@ -1,20 +1,20 @@
 ---
-name: honey-os-self-extension
+name: honeyos-self-extension
 description: "检查真实能力，并按用户需要安全地安装或创建 Skill。"
 version: 1.0.0
-author: Honey OS
+author: HoneyOS
 license: MIT
 platforms: [linux, macos, windows]
 metadata:
   hermes:
-    tags: [honey-os, skills, capability, extension]
+    tags: [honeyos, skills, capability, extension]
     category: companion
     requires_toolsets: [skills, terminal]
 ---
 
-# Honey OS Self Extension Skill
+# HoneyOS Self Extension Skill
 
-让 Honey OS 在能力不足时先检查现状，再选择已有工具、安装普通 Skill 或创建小型 Skill。它扩展边缘能力，不改写核心 Runtime、安全边界或伴侣数据规则。
+让 HoneyOS 在能力不足时先检查现状，再选择已有工具、安装普通 Skill 或创建小型 Skill。它扩展边缘能力，不改写核心 Runtime、安全边界或伴侣数据规则。
 
 ## When to Use
 
@@ -65,7 +65,7 @@ metadata:
 - 不把 GitHub 项目直接等同于可安装 Skill。
 - 不运行任意远程脚本，不保存秘密，不绕过隔离环境。
 - 不把同名注册表包当成用户指定的 GitHub 项目；来源不一致时立即报告并停止使用错误包。
-- 不为了扩展能力修改 Honey OS 核心代码。
+- 不为了扩展能力修改 HoneyOS 核心代码。
 
 ## Verification
 

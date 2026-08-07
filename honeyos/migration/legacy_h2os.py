@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import shutil
 import sqlite3
+import subprocess
+import platform
+import os
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -25,6 +28,27 @@ class MigrationResult:
     migrated: bool
     new_home: Path
     backup_home: Path | None
+
+
+def default_legacy_home() -> Path:
+    return Path.home() / ".h2os"
+
+
+def stop_legacy_service() -> None:
+    """Stop only the exact service used by the previous companion build."""
+
+    if platform.system() == "Darwin":
+        subprocess.run(
+            ["launchctl", "bootout", f"gui/{os.getuid()}/ai.springbrand.h2os"],
+            check=False,
+            capture_output=True,
+        )
+    elif platform.system() == "Linux":
+        subprocess.run(
+            ["systemctl", "--user", "stop", "h2os-gateway"],
+            check=False,
+            capture_output=True,
+        )
 
 
 def _reject_symlinks(root: Path) -> None:
@@ -101,7 +125,7 @@ def migrate_legacy_home(
     """
 
     destination = new_home.expanduser().resolve()
-    legacy = (legacy_home or (Path.home() / ".h2os")).expanduser().resolve()
+    legacy = (legacy_home or default_legacy_home()).expanduser().resolve()
     if destination.exists() or not legacy.exists():
         return MigrationResult(False, destination, None)
     if not legacy.is_dir():

@@ -16,7 +16,7 @@ def test_installer_bootstraps_uv_then_runs_setup(tmp_path):
     curl.write_text(
         "#!/bin/sh\n"
         "printf '%s\\n' '#!/bin/sh' "
-        "'printf \"%s\\n\" \"$*\" >> \"$H2OS_TEST_UV_LOG\"' "
+        "'printf \"%s\\n\" \"$*\" >> \"$HONEYOS_TEST_UV_LOG\"' "
         "> \"$UV_INSTALL_DIR/uv\"\n"
         "chmod +x \"$UV_INSTALL_DIR/uv\"\n"
         "printf ':\\n'\n",
@@ -29,11 +29,11 @@ def test_installer_bootstraps_uv_then_runs_setup(tmp_path):
         {
             "PATH": f"{fake_bin}:/usr/bin:/bin",
             "UV_INSTALL_DIR": str(uv_bin),
-            "H2OS_TEST_UV_LOG": str(log),
+            "HONEYOS_TEST_UV_LOG": str(log),
         }
     )
     result = subprocess.run(
-        ["/bin/sh", str(repo / "scripts" / "install_honey_os.sh")],
+        ["/bin/sh", str(repo / "scripts" / "install_honeyos.sh")],
         cwd=repo,
         env=env,
         text=True,
@@ -43,6 +43,6 @@ def test_installer_bootstraps_uv_then_runs_setup(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert log.read_text(encoding="utf-8").splitlines() == [
-        "sync --quiet --extra h2os",
-        "run honey-os setup",
+        "sync --quiet",
+        "run honeyos setup",
     ]

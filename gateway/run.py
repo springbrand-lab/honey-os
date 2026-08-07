@@ -94,12 +94,12 @@ def _is_h2os_runtime() -> bool:
 
 def _gateway_product_name() -> str:
     if _is_h2os_runtime():
-        return os.environ.get("H2OS_PRODUCT_NAME", "Honey OS").strip() or "Honey OS"
+        return os.environ.get("H2OS_PRODUCT_NAME", "HoneyOS").strip() or "HoneyOS"
     return "Hermes"
 
 
 def _pairing_cli_prefix() -> str:
-    return "honey-os" if _is_h2os_runtime() else "hermes"
+    return "honeyos" if _is_h2os_runtime() else "hermes"
 
 _TELEGRAM_NOISY_STATUS_RE = re.compile(
     r"("  # transient/auxiliary status that should stay in logs, not gateway chats
@@ -5813,7 +5813,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         reason: str,
         main_runtime: Optional[Dict[str, Any]],
     ) -> bool:
-        """Track a best-effort Honey OS review without delaying chat delivery."""
+        """Track a best-effort HoneyOS review without delaying chat delivery."""
 
         if str(chat_type or "").strip().lower() != "dm":
             return False
@@ -5840,7 +5840,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 )
                 if result is not None and result.status == "failed":
                     logger.debug(
-                        "Honey OS memory distillation failed for %s: %s",
+                        "HoneyOS memory distillation failed for %s: %s",
                         session_id,
                         result.error,
                     )
@@ -5848,7 +5848,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 raise
             except Exception:
                 logger.debug(
-                    "Honey OS memory distillation task crashed for %s",
+                    "HoneyOS memory distillation task crashed for %s",
                     session_id,
                     exc_info=True,
                 )
@@ -16528,7 +16528,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # (staged below, consumed in run_sync → build_turn_context).
         turn_sidecar_notes: List[str] = []
 
-        # Honey OS working memory is lane-scoped and read from the local
+        # HoneyOS working memory is lane-scoped and read from the local
         # continuity database on every turn.  It rides the user-message
         # sidecar so the cached system prompt stays byte-stable and the raw
         # user message remains clean in the transcript.
@@ -16540,12 +16540,12 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 chat_type=str(getattr(source, "chat_type", "") or ""),
             )
         except Exception:
-            logger.debug("Honey OS structured memory load failed", exc_info=True)
+            logger.debug("HoneyOS structured memory load failed", exc_info=True)
             _h2os_memory_note = None
         if _h2os_memory_note:
             turn_sidecar_notes.append(_h2os_memory_note)
 
-        # A manual Honey OS /new starts a clean transcript without severing the
+        # A manual HoneyOS /new starts a clean transcript without severing the
         # companion relationship.  Deliver the exact handoff bound to this
         # target session once, alongside the first user message.  Keeping it
         # out of the system prompt preserves prompt-cache stability and role
@@ -16560,7 +16560,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     target_session_id=session_entry.session_id,
                 )
             except Exception:
-                logger.debug("Honey OS continuity handoff load failed", exc_info=True)
+                logger.debug("HoneyOS continuity handoff load failed", exc_info=True)
                 _h2os_continuity_note = None
             if _h2os_continuity_note:
                 turn_sidecar_notes.append(_h2os_continuity_note)
@@ -18210,7 +18210,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 last_prompt_tokens=agent_result.get("last_prompt_tokens", 0),
             )
 
-            # Review persisted Honey OS messages after the foreground turn has
+            # Review persisted HoneyOS messages after the foreground turn has
             # completed.  The scheduler returns immediately; threshold checks,
             # model calls, retries, and SQLite writes stay in the distillation
             # module and cannot delay this response.
@@ -18240,7 +18240,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     )
                 except Exception:
                     logger.debug(
-                        "Honey OS periodic memory distillation scheduling failed",
+                        "HoneyOS periodic memory distillation scheduling failed",
                         exc_info=True,
                     )
 

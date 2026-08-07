@@ -1,4 +1,4 @@
-"""Asynchronous, source-backed memory distillation for Honey OS.
+"""Asynchronous, source-backed memory distillation for HoneyOS.
 
 The gateway only asks whether a persisted transcript is due for review and
 runs the returned coroutine in its existing background-task pool.  Trigger
@@ -186,7 +186,7 @@ async def extract_with_auxiliary_model(
         local_now = job.now.astimezone(get_timezone())
     except Exception:
         local_now = job.now
-    system_prompt = f"""You distill Honey OS companion conversations into strict JSON.
+    system_prompt = f"""You distill HoneyOS companion conversations into strict JSON.
 Current local time: {local_now.isoformat()}
 Return one object with an operations array, maximum {job.max_operations} operations.
 Allowed kinds: open_loop, temporary_state, commitment, episode.
@@ -569,7 +569,7 @@ class MemoryDistiller:
 
 
 def active_h2os_distiller() -> MemoryDistiller | None:
-    """Return the active local distiller, fail-closed outside Honey OS."""
+    """Return the active local distiller, fail-closed outside HoneyOS."""
 
     runtime_id = os.environ.get("H2OS_RUNTIME_ID", "")
     raw_home = os.environ.get("H2OS_HOME", "").strip()

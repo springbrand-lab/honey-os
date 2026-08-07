@@ -14,11 +14,11 @@ ROOT = Path(__file__).parents[2]
 
 
 def test_public_cli_uses_honey_os_brand(capsys):
-    assert PRODUCT_NAME == "Honey OS"
+    assert PRODUCT_NAME == "HoneyOS"
     assert main(["--help"]) == 0
 
     output = capsys.readouterr().out
-    assert "Honey OS" in output
+    assert "HoneyOS" in output
     assert "H2OS" not in output
     assert "Hermes" not in output
 
@@ -26,23 +26,23 @@ def test_public_cli_uses_honey_os_brand(capsys):
 def test_first_start_report_uses_honey_os_brand():
     output = FirstStartReport(()).render()
 
-    assert output == "Honey OS 首次启动检查"
+    assert output == "HoneyOS 首次启动检查"
 
 
 def test_public_readme_and_installer_use_honey_os_brand():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    installer = (ROOT / "scripts" / "install_honey_os.sh").read_text(
+    installer = (ROOT / "scripts" / "install_honeyos.sh").read_text(
         encoding="utf-8"
     )
 
-    assert readme.startswith("# 🍯 Honey OS")
+    assert readme.startswith("# 🍯 HoneyOS")
     assert "H2OS" not in readme
     assert "Hermes" not in readme
-    assert "uv run honey-os" in readme
+    assert "uv run honeyos" in readme
     assert "uv run h2os" not in readme
-    assert "Honey OS" in installer
+    assert "HoneyOS" in installer
     assert 'echo "H2OS' not in installer
-    assert (ROOT / "Install-Honey-OS.command").is_file()
+    assert (ROOT / "Install-HoneyOS.command").is_file()
     assert not (ROOT / "Install-H2OS.command").exists()
 
 
@@ -62,10 +62,10 @@ def test_companion_identity_names_honey_os_without_upstream_brand(tmp_path):
     initialize_home(tmp_path)
     soul = (tmp_path / "SOUL.md").read_text(encoding="utf-8")
 
-    assert "Honey OS" in soul
+    assert "HoneyOS" in soul
     assert "H2OS" not in soul
     assert "Hermes" not in soul
-    assert (tmp_path / "skills" / "honey-os-self-extension").is_dir()
+    assert (tmp_path / "skills" / "honeyos-self-extension").is_dir()
     assert not (tmp_path / "skills" / "h2os-self-extension").exists()
 
 
@@ -82,7 +82,7 @@ def test_honey_os_pairing_instruction_uses_public_command(monkeypatch):
 
     prefix = getattr(gateway_run, "_pairing_cli_prefix", lambda: "missing")()
 
-    assert prefix == "honey-os"
+    assert prefix == "honeyos"
 
 
 def test_weixin_egress_removes_inherited_product_names(monkeypatch):
@@ -94,5 +94,5 @@ def test_weixin_egress_removes_inherited_product_names(monkeypatch):
     )
 
     assert output == (
-        "Honey OS is Honey OS. Run `honey-os gateway restart` when needed."
+        "HoneyOS is HoneyOS. Run `honeyos gateway restart` when needed."
     )

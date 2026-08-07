@@ -79,7 +79,7 @@ def setup_feishu(home: Path) -> int:
         ):
             raise RuntimeError("飞书机器人设置没有完成，请重新运行连接流程")
 
-        # Honey OS is a private companion. Keep the richer Feishu transport,
+        # HoneyOS is a private companion. Keep the richer Feishu transport,
         # but never inherit the upstream wizard's open-DM or group defaults.
         save_env_value("FEISHU_ALLOW_ALL_USERS", "false")
         save_env_value("FEISHU_ALLOWED_USERS", "")

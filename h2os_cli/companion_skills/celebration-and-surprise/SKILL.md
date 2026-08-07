@@ -2,7 +2,7 @@
 name: celebration-and-surprise
 description: "为生日、纪念日、成果与日常时刻准备心意。"
 version: 1.0.0
-author: Honey OS
+author: HoneyOS
 license: MIT
 platforms: [linux, macos, windows]
 metadata:

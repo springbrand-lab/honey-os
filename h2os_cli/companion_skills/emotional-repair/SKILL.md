@@ -2,7 +2,7 @@
 name: emotional-repair
 description: "处理误解、争执、受伤、道歉与关系修复。"
 version: 1.0.0
-author: Honey OS
+author: HoneyOS
 license: MIT
 platforms: [linux, macos, windows]
 metadata:

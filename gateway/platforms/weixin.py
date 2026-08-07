@@ -37,14 +37,14 @@ WEIXIN_COPY_LINE_WIDTH = 120
 
 
 def _productize_outbound_text(content: str) -> str:
-    """Hide inherited product names on the Honey OS Weixin surface."""
+    """Hide inherited product names on the HoneyOS Weixin surface."""
 
     if not os.environ.get("H2OS_RUNTIME_ID", "").startswith("h2os-companion-"):
         return content
-    branded = content.replace("`hermes ", "`honey-os ")
-    branded = branded.replace("Hermes Agent", "Honey OS")
-    branded = branded.replace("Hermes", "Honey OS")
-    return branded.replace("H2OS", "Honey OS")
+    branded = content.replace("`hermes ", "`honeyos ")
+    branded = branded.replace("Hermes Agent", "HoneyOS")
+    branded = branded.replace("Hermes", "HoneyOS")
+    return branded.replace("H2OS", "HoneyOS")
 
 try:
     import aiohttp

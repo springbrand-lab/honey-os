@@ -16,7 +16,7 @@ from h2os_cli.bootstrap import activate_h2os_home, resolve_h2os_home
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="honey-os",
+        prog="honeyos",
         description=f"Run your private {PRODUCT_NAME} AI companion.",
         exit_on_error=False,
     )
@@ -64,7 +64,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         args = parser.parse_args(list(argv) if argv is not None else None)
     except argparse.ArgumentError as exc:
-        print(f"honey-os: error: {exc}", file=sys.stderr)
+        print(f"honeyos: error: {exc}", file=sys.stderr)
         return 2
     except SystemExit as exc:
         return int(exc.code or 0)
@@ -93,7 +93,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             from h2os_cli.channels import setup_feishu
 
             return setup_feishu(home)
-        print("honey-os: error: unsupported channel command", file=sys.stderr)
+        print("honeyos: error: unsupported channel command", file=sys.stderr)
         return 2
 
     from h2os_cli.runtime import run_gateway_command, run_hermes_module
@@ -126,7 +126,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1
         return print_doctor(home)
 
-    print(f"honey-os: error: unknown command {args.command!r}", file=sys.stderr)
+    print(f"honeyos: error: unknown command {args.command!r}", file=sys.stderr)
     return 2
 
 

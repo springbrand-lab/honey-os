@@ -15,7 +15,7 @@ NOW = datetime(2026, 8, 7, 8, 0, tzinfo=timezone.utc)
 def _messages() -> list[dict]:
     return [
         {"role": "system", "content": "internal prompt"},
-        {"role": "user", "content": "我今天开发 Honey OS 搞得很乱。"},
+        {"role": "user", "content": "我今天开发 HoneyOS 搞得很乱。"},
         {"role": "assistant", "content": "听起来你已经被这件事耗了一整天。"},
         {"role": "tool", "content": "private tool output"},
         {"role": "user", "content": "明天继续聊跨窗口记忆吧。"},

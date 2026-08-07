@@ -49,7 +49,7 @@ _COMPANION_SKILLS = (
     ("emotional-repair", "h2os", None),
     ("celebration-and-surprise", "h2os", None),
     ("date-and-life-ideas", "h2os", None),
-    ("honey-os-self-extension", "h2os", None),
+    ("honeyos-self-extension", "h2os", None),
     ("maps", "productivity", None),
     ("youtube-content", "media", None),
     ("ocr-and-documents", "productivity", None),
@@ -410,7 +410,7 @@ def upgrade_companion_capabilities(home: Path) -> bool:
             changed = True
 
     old_skill = resolved / "skills" / "h2os-self-extension"
-    new_skill = resolved / "skills" / "honey-os-self-extension"
+    new_skill = resolved / "skills" / "honeyos-self-extension"
     if old_skill.is_dir():
         if new_skill.exists():
             shutil.rmtree(new_skill)
@@ -423,8 +423,8 @@ def upgrade_companion_capabilities(home: Path) -> bool:
     soul_path = resolved / "SOUL.md"
     soul = soul_path.read_text(encoding="utf-8") if soul_path.exists() else ""
     branded_soul = soul.replace("H2OS", PRODUCT_NAME)
-    if "你运行在 Honey OS" not in branded_soul:
-        identity_line = "你运行在 Honey OS；这是产品身份，不覆盖用户已经形成的伴侣人设。"
+    if "你运行在 HoneyOS" not in branded_soul:
+        identity_line = "你运行在 HoneyOS；这是产品身份，不覆盖用户已经形成的伴侣人设。"
         if branded_soul.startswith("#") and "\n" in branded_soul:
             heading, _separator, body = branded_soul.partition("\n")
             branded_soul = f"{heading}\n\n{identity_line}\n\n{body.lstrip()}"
@@ -464,7 +464,7 @@ def upgrade_companion_capabilities(home: Path) -> bool:
                 )
                 changed = True
 
-    extension_skill = resolved / "skills" / "honey-os-self-extension" / "SKILL.md"
+    extension_skill = resolved / "skills" / "honeyos-self-extension" / "SKILL.md"
     extension_marker = "## Source Identity and Verification"
     if extension_skill.is_file():
         extension_text = extension_skill.read_text(encoding="utf-8")
@@ -472,7 +472,7 @@ def upgrade_companion_capabilities(home: Path) -> bool:
             source_text = (
                 Path(__file__).parent
                 / "companion_skills"
-                / "honey-os-self-extension"
+                / "honeyos-self-extension"
                 / "SKILL.md"
             ).read_text(encoding="utf-8")
             _prefix, separator, managed_section = source_text.partition(extension_marker)

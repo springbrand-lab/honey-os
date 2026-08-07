@@ -96,7 +96,7 @@ def test_initialize_home_creates_companion_contract(tmp_path):
         "emotional-repair",
         "celebration-and-surprise",
         "date-and-life-ideas",
-        "honey-os-self-extension",
+        "honeyos-self-extension",
         "maps",
         "youtube-content",
         "ocr-and-documents",
@@ -225,12 +225,12 @@ def test_upgrade_migrates_legacy_product_brand_without_touching_identity(tmp_pat
         encoding="utf-8",
     )
     old_skill = tmp_path / "skills" / "h2os-self-extension"
-    new_skill = tmp_path / "skills" / "honey-os-self-extension"
+    new_skill = tmp_path / "skills" / "honeyos-self-extension"
     shutil.copytree(new_skill, old_skill)
     for relative in ("SKILL.md", "agents/openai.yaml"):
         path = old_skill / relative
         path.write_text(
-            path.read_text(encoding="utf-8").replace("Honey OS", "H2OS"),
+            path.read_text(encoding="utf-8").replace("HoneyOS", "H2OS"),
             encoding="utf-8",
         )
     with (old_skill / "SKILL.md").open("a", encoding="utf-8") as handle:
@@ -240,8 +240,8 @@ def test_upgrade_migrates_legacy_product_brand_without_touching_identity(tmp_pat
 
     assert changed is True
     assert "Keep me." in soul_path.read_text(encoding="utf-8")
-    assert "你运行在 Honey OS" in soul_path.read_text(encoding="utf-8")
-    assert "Honey OS" in soul_path.read_text(encoding="utf-8")
+    assert "你运行在 HoneyOS" in soul_path.read_text(encoding="utf-8")
+    assert "HoneyOS" in soul_path.read_text(encoding="utf-8")
     assert "H2OS" not in soul_path.read_text(encoding="utf-8")
     assert new_skill.is_dir()
     assert not old_skill.exists()
@@ -256,7 +256,7 @@ def test_upgrade_migrates_legacy_product_brand_without_touching_identity(tmp_pat
 
 def test_upgrade_appends_extension_safety_contract_without_losing_customization(tmp_path):
     initialize_home(tmp_path)
-    skill_path = tmp_path / "skills" / "honey-os-self-extension" / "SKILL.md"
+    skill_path = tmp_path / "skills" / "honeyos-self-extension" / "SKILL.md"
     original = skill_path.read_text(encoding="utf-8")
     legacy = original.split("## Source Identity and Verification", 1)[0].rstrip()
     skill_path.write_text(

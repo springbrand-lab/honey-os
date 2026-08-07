@@ -2,7 +2,7 @@
 name: relationship-continuity
 description: "延续双方明确形成的身份、关系、边界与共同经历。"
 version: 1.0.0
-author: Honey OS
+author: HoneyOS
 license: MIT
 platforms: [linux, macos, windows]
 metadata:

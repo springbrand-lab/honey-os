@@ -97,7 +97,7 @@ def test_companion_fallback_identity_never_names_hermes():
     prompt = _prompt("companion", soul="")
 
     assert "亲密关系伴侣" in prompt
-    assert "Honey OS" in prompt
+    assert "HoneyOS" in prompt
     assert "H2OS" not in prompt
     assert "Hermes Agent" not in prompt
 
@@ -105,7 +105,7 @@ def test_companion_fallback_identity_never_names_hermes():
 def test_self_extension_skill_requires_source_and_runtime_verification(tmp_path):
     initialize_home(tmp_path)
     skill = (
-        tmp_path / "skills" / "honey-os-self-extension" / "SKILL.md"
+        tmp_path / "skills" / "honeyos-self-extension" / "SKILL.md"
     ).read_text(encoding="utf-8")
 
     assert "用户提供的仓库 URL 是来源身份" in skill
@@ -138,7 +138,7 @@ def test_companion_soul_defines_intimate_identity_and_controlled_growth(tmp_path
     assert "无需确认" in soul
     assert "普通 Skill" in soul
     assert "系统软件" in soul and "明确确认" in soul
-    assert "不得修改 Honey OS 核心" in soul
+    assert "不得修改 HoneyOS 核心" in soul
     assert "不要声称已经搜索、读取、安装或执行" in soul
 
 

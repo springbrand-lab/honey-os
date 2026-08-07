@@ -2,7 +2,7 @@
 name: date-and-life-ideas
 description: "结合地点、时间、预算和偏好设计约会与共同活动。"
 version: 1.0.0
-author: Honey OS
+author: HoneyOS
 license: MIT
 platforms: [linux, macos, windows]
 metadata:

@@ -7,17 +7,17 @@ REPO_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 case "$(uname -s)" in
     Darwin|Linux) ;;
     *)
-        echo "Honey OS currently supports macOS and Linux." >&2
+        echo "HoneyOS currently supports macOS and Linux." >&2
         exit 1
         ;;
 esac
 
 if ! command -v uv >/dev/null 2>&1; then
     if ! command -v curl >/dev/null 2>&1; then
-        echo "Honey OS needs curl to install its runtime automatically." >&2
+        echo "HoneyOS needs curl to install its runtime automatically." >&2
         exit 1
     fi
-    echo "Installing the Honey OS runtime…"
+    echo "Installing the HoneyOS runtime…"
     UV_INSTALL_DIR=${UV_INSTALL_DIR:-"${HOME}/.local/bin"}
     export UV_INSTALL_DIR
     mkdir -p "$UV_INSTALL_DIR"
@@ -27,11 +27,11 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 
 if ! command -v uv >/dev/null 2>&1; then
-    echo "Honey OS could not install uv automatically." >&2
+    echo "HoneyOS could not install uv automatically." >&2
     exit 1
 fi
 
 cd "$REPO_DIR"
-echo "Preparing Honey OS…"
-uv sync --quiet --extra h2os
-exec uv run honey-os setup
+echo "Preparing HoneyOS…"
+uv sync --quiet
+exec uv run honeyos setup
