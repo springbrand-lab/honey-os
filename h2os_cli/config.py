@@ -199,12 +199,10 @@ def companion_config(platform: str | None = None) -> dict:
         "mcp_servers": {},
         "display": {
             "memory_notifications": "off",
-            "platforms": ({
-                "feishu": {
-                    "tool_progress": "new",
-                    "tool_progress_grouping": "accumulate",
-                }
-            } if "feishu" in platforms else {}),
+            "platforms": {
+                name: {"tool_progress": "off"}
+                for name in platforms
+            },
         },
     }
 
@@ -317,12 +315,14 @@ def upgrade_companion_capabilities(home: Path) -> bool:
     if not isinstance(display_platforms, dict):
         display_platforms = {}
         display["platforms"] = display_platforms
-    feishu_display = display_platforms.setdefault("feishu", {})
-    if not isinstance(feishu_display, dict):
-        feishu_display = {}
-        display_platforms["feishu"] = feishu_display
-    feishu_display.setdefault("tool_progress", "new")
-    feishu_display.setdefault("tool_progress_grouping", "accumulate")
+    for platform in DEFAULT_IM_PLATFORMS:
+        platform_display = display_platforms.setdefault(platform, {})
+        if not isinstance(platform_display, dict):
+            platform_display = {}
+            display_platforms[platform] = platform_display
+        current_progress = platform_display.get("tool_progress")
+        if current_progress in {None, "new"}:
+            platform_display["tool_progress"] = "off"
 
     memory = config.setdefault("memory", {})
     if not isinstance(memory, dict):

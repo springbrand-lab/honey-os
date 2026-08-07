@@ -26,6 +26,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from agent.codex_responses_adapter import _summarize_user_message_for_log
+from agent.companion_handback import append_companion_handback
 from agent.conversation_compression import (
     COMPRESSION_RETRY_CONTEXT_REDUCED_STATUS_TEMPLATE,
     COMPRESSION_RETRY_MESSAGES_STATUS_TEMPLATE,
@@ -1709,6 +1710,12 @@ def run_conversation(
         effective_system = active_system_prompt or ""
         if agent.ephemeral_system_prompt:
             effective_system = (effective_system + "\n\n" + agent.ephemeral_system_prompt).strip()
+        effective_system = append_companion_handback(
+            effective_system,
+            agent,
+            messages,
+            current_turn_user_idx,
+        )
         if effective_system:
             api_messages = [{"role": "system", "content": effective_system}] + api_messages
 
