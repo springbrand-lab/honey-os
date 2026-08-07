@@ -16460,6 +16460,26 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # (staged below, consumed in run_sync → build_turn_context).
         turn_sidecar_notes: List[str] = []
 
+        # A manual Honey OS /new starts a clean transcript without severing the
+        # companion relationship.  Deliver the exact handoff bound to this
+        # target session once, alongside the first user message.  Keeping it
+        # out of the system prompt preserves prompt-cache stability and role
+        # alternation.  The adapter is fail-closed for non-H2OS/group chats.
+        if _is_new_session:
+            try:
+                from h2os_cli.continuity import note_for_reset_session
+
+                _h2os_continuity_note = note_for_reset_session(
+                    lane_key=session_key,
+                    chat_type=str(getattr(source, "chat_type", "") or ""),
+                    target_session_id=session_entry.session_id,
+                )
+            except Exception:
+                logger.debug("Honey OS continuity handoff load failed", exc_info=True)
+                _h2os_continuity_note = None
+            if _h2os_continuity_note:
+                turn_sidecar_notes.append(_h2os_continuity_note)
+
         # If the previous session expired and was auto-reset, deliver a notice
         # so the agent knows this is a fresh conversation (not an intentional /reset).
         if _was_auto_reset:

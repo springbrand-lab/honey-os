@@ -147,6 +147,23 @@ class GatewaySlashCommandsMixin:
         # expiring session id before reset_session() rotates it.
         old_entry = self.session_store._entries.get(session_key)
 
+        # Honey OS keeps a small source-backed handoff across an explicit /new.
+        # Read the old transcript before reset rotates the route.  This is a
+        # best-effort H2OS-only seam: generic Hermes sessions do no extra I/O,
+        # and any read/store failure must never block the reset itself.
+        _h2os_continuity_messages = []
+        if (
+            old_entry is not None
+            and os.environ.get("H2OS_RUNTIME_ID", "").startswith("h2os-companion-")
+            and str(getattr(source, "chat_type", "") or "").lower() == "dm"
+        ):
+            try:
+                _h2os_continuity_messages = await self.async_session_store.load_transcript(
+                    old_entry.session_id
+                )
+            except Exception:
+                logger.debug("Honey OS continuity transcript capture failed", exc_info=True)
+
         # Close tool resources on the old agent (terminal sandboxes, browser
         # daemons, background processes) before evicting from cache.
         # Guard with getattr because test fixtures may skip __init__.
@@ -277,6 +294,20 @@ class GatewaySlashCommandsMixin:
             # No existing session, just create one
             new_entry = await self.async_session_store.get_or_create_session(source, force_new=True)
             header = await asyncio.to_thread(self._telegram_topic_new_header, source) or t("gateway.reset.header_new")
+
+        if old_entry is not None and new_entry is not None and _h2os_continuity_messages:
+            try:
+                from h2os_cli.continuity import record_reset_handoff
+
+                record_reset_handoff(
+                    lane_key=session_key,
+                    chat_type=str(getattr(source, "chat_type", "") or ""),
+                    source_session_id=old_entry.session_id,
+                    target_session_id=new_entry.session_id,
+                    messages=_h2os_continuity_messages,
+                )
+            except Exception:
+                logger.debug("Honey OS continuity handoff save failed", exc_info=True)
 
         # Set session title if provided with /new <title>
         _title_arg = event.get_command_args().strip()
