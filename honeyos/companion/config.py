@@ -14,6 +14,7 @@ from pathlib import Path
 import yaml
 
 from honeyos.migration.legacy import (
+    migrate_legacy_model_credentials,
     migrate_legacy_skill_directory,
     rewrite_legacy_product_text,
 )
@@ -302,6 +303,11 @@ def upgrade_companion_capabilities(home: Path) -> bool:
     if not isinstance(config, dict):
         raise ValueError("config.yaml must contain a mapping")
     original_config = yaml.safe_dump(config, allow_unicode=True, sort_keys=False)
+    credential_migrated, migrated_env = migrate_legacy_model_credentials(
+        resolved, config
+    )
+    if migrated_env is not None:
+        _atomic_replace(resolved / ".env", migrated_env, mode=0o600)
 
     agent = config.setdefault("agent", {})
     if not isinstance(agent, dict):
@@ -444,7 +450,7 @@ def upgrade_companion_capabilities(home: Path) -> bool:
     security["allow_proxy_fake_ips"] = True
 
     rendered_config = yaml.safe_dump(config, allow_unicode=True, sort_keys=False)
-    changed = rendered_config != original_config
+    changed = credential_migrated or rendered_config != original_config
     if changed:
         _atomic_replace(config_path, rendered_config, mode=0o600)
 

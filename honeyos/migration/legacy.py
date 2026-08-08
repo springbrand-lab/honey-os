@@ -22,6 +22,10 @@ import yaml
 _LEGACY_PRODUCT_NAME = "H2OS"
 _LEGACY_SKILL_DIRECTORY = "h2os-self-extension"
 _CURRENT_SKILL_DIRECTORY = "honeyos-self-extension"
+_LEGACY_MODEL_PROVIDER = "h2os-model"
+_MODEL_PROVIDER = "honeyos-model"
+_LEGACY_MODEL_KEY_ENV = "H2OS_MODEL_API_KEY"
+_MODEL_KEY_ENV = "HONEYOS_MODEL_API_KEY"
 
 
 class MigrationError(RuntimeError):
@@ -52,6 +56,54 @@ def migrate_legacy_skill_directory(home: Path) -> bool:
         shutil.rmtree(new_skill)
     old_skill.rename(new_skill)
     return True
+
+
+def migrate_legacy_model_credentials(
+    home: Path, config: dict
+) -> tuple[bool, str | None]:
+    """Rename the previous product-scoped provider without changing its secret."""
+
+    changed = False
+    model = config.get("model")
+    if isinstance(model, dict) and model.get("provider") == _LEGACY_MODEL_PROVIDER:
+        model["provider"] = _MODEL_PROVIDER
+        changed = True
+
+    providers = config.get("providers")
+    if isinstance(providers, dict) and _LEGACY_MODEL_PROVIDER in providers:
+        legacy = providers.pop(_LEGACY_MODEL_PROVIDER)
+        current = providers.get(_MODEL_PROVIDER)
+        if not isinstance(current, dict) and isinstance(legacy, dict):
+            current = legacy
+            providers[_MODEL_PROVIDER] = current
+        if isinstance(current, dict):
+            if current.get("name") == _LEGACY_MODEL_PROVIDER:
+                current["name"] = _MODEL_PROVIDER
+            if current.get("key_env") == _LEGACY_MODEL_KEY_ENV:
+                current["key_env"] = _MODEL_KEY_ENV
+        changed = True
+
+    env_path = home / ".env"
+    try:
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        lines = []
+    has_current = any(
+        line.startswith(f"{_MODEL_KEY_ENV}=") and line.split("=", 1)[1].strip()
+        for line in lines
+    )
+    rendered_lines: list[str] = []
+    env_changed = False
+    for line in lines:
+        if line.startswith(f"{_LEGACY_MODEL_KEY_ENV}="):
+            if not has_current:
+                rendered_lines.append(f"{_MODEL_KEY_ENV}={line.split('=', 1)[1]}")
+                has_current = True
+            env_changed = True
+            continue
+        rendered_lines.append(line)
+    rendered_env = "\n".join(rendered_lines) + "\n" if env_changed else None
+    return changed or env_changed, rendered_env
 
 
 def default_legacy_home() -> Path:

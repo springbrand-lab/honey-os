@@ -254,6 +254,43 @@ def test_upgrade_migrates_legacy_product_brand_without_touching_identity(tmp_pat
     )
 
 
+def test_upgrade_migrates_legacy_model_provider_and_key_without_exposing_value(tmp_path):
+    initialize_home(tmp_path)
+    config_path = tmp_path / "config.yaml"
+    config = __import__("yaml").safe_load(config_path.read_text(encoding="utf-8"))
+    config["model"] = {
+        "default": "deepseek-v4-flash",
+        "provider": "h2os-model",
+        "base_url": "https://api.example.com/v1",
+        "api_mode": "chat_completions",
+    }
+    config["providers"] = {
+        "h2os-model": {
+            "name": "h2os-model",
+            "base_url": "https://api.example.com/v1",
+            "key_env": "H2OS_MODEL_API_KEY",
+            "default_model": "deepseek-v4-flash",
+        }
+    }
+    config_path.write_text(
+        __import__("yaml").safe_dump(config, sort_keys=False), encoding="utf-8"
+    )
+    (tmp_path / ".env").write_text(
+        "H2OS_MODEL_API_KEY=secret-value\nAPI_SERVER_KEY=local-key\n",
+        encoding="utf-8",
+    )
+
+    assert config_module.upgrade_companion_capabilities(tmp_path) is True
+
+    migrated = __import__("yaml").safe_load(config_path.read_text(encoding="utf-8"))
+    env_text = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert migrated["model"]["provider"] == "honeyos-model"
+    assert "h2os-model" not in migrated["providers"]
+    assert migrated["providers"]["honeyos-model"]["key_env"] == "HONEYOS_MODEL_API_KEY"
+    assert "HONEYOS_MODEL_API_KEY=secret-value" in env_text
+    assert "H2OS_MODEL_API_KEY=" not in env_text
+
+
 def test_upgrade_appends_extension_safety_contract_without_losing_customization(tmp_path):
     initialize_home(tmp_path)
     skill_path = tmp_path / "skills" / "honeyos-self-extension" / "SKILL.md"
