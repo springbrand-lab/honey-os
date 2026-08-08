@@ -468,6 +468,13 @@ button {
   cursor: pointer;
 }
 
+.error-note-copy small {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
 .file-mode-notice {
   width: min(100% - 56px, 760px);
   margin: 0 auto 16px;
@@ -495,6 +502,12 @@ button {
   color: var(--accent);
   font-weight: 620;
   text-decoration: none;
+}
+
+html[data-file-mode="true"] .composer,
+html[data-file-mode="true"] .turn-status,
+html[data-file-mode="true"] .scroll-to-latest {
+  display: none;
 }
 
 .sr-only {
@@ -659,4 +672,3 @@ button {
       inset 0 1px 0 rgba(240, 237, 241, 0.06);
   }
 }
-

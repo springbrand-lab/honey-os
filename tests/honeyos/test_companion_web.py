@@ -250,6 +250,19 @@ def test_companion_styles_are_full_window_and_accessible():
     assert "linear-gradient(145deg, var(--ambient-a), var(--ambient-b))" not in css
 
 
+def test_file_mode_and_provider_recovery_have_human_copy():
+    assets = Path(__file__).parents[2] / "honeyos" / "companion" / "web_assets"
+    index = (assets / "index.html").read_text(encoding="utf-8")
+    app = (assets / "app.js").read_text(encoding="utf-8")
+    file_guard = (assets / "file-open.js").read_text(encoding="utf-8")
+
+    assert 'id="file-mode-notice"' in index
+    assert "打开 HoneyOS" in index
+    assert "honeyos setup" in app
+    assert "No LLM provider configured" not in index
+    assert "file-mode-notice" in file_guard
+
+
 def _api_adapter() -> APIServerAdapter:
     return APIServerAdapter(
         PlatformConfig(

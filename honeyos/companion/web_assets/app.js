@@ -146,15 +146,47 @@ function renderTurnState(state) {
   scrollToLatest();
 }
 
-function safeErrorMessage() {
-  return "刚才没有连上。你可以再发一次，我也会在这里。";
+function normalizeError(rawMessage) {
+  const message = String(rawMessage || "");
+  const lower = message.toLowerCase();
+  if (lower.includes("no llm provider configured")) {
+    return {
+      message: "还差一步模型配置，配置好我们就能说话了。",
+      action: "请在终端运行 honeyos setup",
+    };
+  }
+  if (lower.includes("authentication") || lower.includes("credentials")) {
+    return {
+      message: "模型的连接信息没有通过验证。",
+      action: "检查 API Key 后，再来找我。",
+    };
+  }
+  if (lower.includes("failed after retries") || lower.includes("retry")) {
+    return {
+      message: "刚才连续几次都没连上。",
+      action: "等一会儿再试，我会在这里。",
+    };
+  }
+  return {
+    message: "刚才没有连上。你可以再发一次，我也会在这里。",
+    action: "",
+  };
 }
 
-function showError() {
+function showError(rawMessage) {
+  const safe = normalizeError(rawMessage);
   const note = document.createElement("div");
   note.className = "error-note";
+  const copy = document.createElement("div");
+  copy.className = "error-note-copy";
   const message = document.createElement("span");
-  message.textContent = safeErrorMessage();
+  message.textContent = safe.message;
+  copy.append(message);
+  if (safe.action) {
+    const action = document.createElement("small");
+    action.textContent = safe.action;
+    copy.append(action);
+  }
   const retry = document.createElement("button");
   retry.type = "button";
   retry.textContent = "再试一次";
@@ -162,7 +194,7 @@ function showError() {
     note.remove();
     elements.input.focus();
   });
-  note.append(message, retry);
+  note.append(copy, retry);
   elements.messages.append(note);
   keepAtLatest = true;
   scrollToLatest(true);
@@ -200,12 +232,21 @@ function handleStreamEvent(name, payload) {
     activeAssistantBubble.textContent = turnState.content;
   }
 
-  if (name === "error") showError();
+  if (name === "error") showError(payload.message);
   renderTurnState(turnState);
 }
 
 async function consumeSse(response) {
-  if (!response.ok || !response.body) throw new Error("chat_unavailable");
+  if (!response.ok || !response.body) {
+    let message = "chat_unavailable";
+    try {
+      const data = await response.json();
+      message = data.error?.message || data.message || message;
+    } catch {
+      // The response may not contain JSON. Keep the safe fallback code.
+    }
+    throw new Error(message);
+  }
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -264,13 +305,14 @@ async function sendMessage(text) {
       },
     );
     await consumeSse(response);
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "chat_unavailable";
     turnState = HoneyOSRunState.reduce(
       turnState,
-      { name: "error", payload: { message: "chat_unavailable" } },
+      { name: "error", payload: { message } },
       Date.now(),
     );
-    showError();
+    showError(message);
     renderTurnState(turnState);
   } finally {
     sending = false;
@@ -310,6 +352,8 @@ elements.messages.addEventListener("scroll", () => {
 elements.scrollLatest.addEventListener("click", () => scrollToLatest(true));
 
 if (window.location.protocol !== "file:") {
-  bootstrap().catch(() => showError());
+  bootstrap().catch((error) => {
+    const message = error instanceof Error ? error.message : "bootstrap_unavailable";
+    showError(message);
+  });
 }
-
