@@ -186,7 +186,7 @@ def _has_feishu_credentials(home: Path) -> bool:
 
 def _choose_im_platforms(input_fn: Callable[[str], str]) -> tuple[str, ...]:
     choice = input_fn(
-        "连接 IM：1) 微信  2) 飞书  3) 微信 + 飞书（默认）[3]: "
+        "连接渠道：1) 微信  2) 飞书  3) 微信 + 飞书（默认）  4) 暂时只用网页 [3]: "
     ).strip()
     if choice in {"", "3"}:
         return ("weixin", "feishu")
@@ -194,7 +194,9 @@ def _choose_im_platforms(input_fn: Callable[[str], str]) -> tuple[str, ...]:
         return ("weixin",)
     if choice == "2":
         return ("feishu",)
-    raise ValueError("请选择 1、2 或 3")
+    if choice == "4":
+        return ()
+    raise ValueError("请选择 1、2、3 或 4")
 
 
 def run_setup(
@@ -277,5 +279,10 @@ def run_setup(
                 file=os.sys.stderr,
             )
             return 1
-        print(f"✓ {PRODUCT_NAME} 已启动，现在可以去微信或飞书聊天。")
+        from honeyos.companion.web import companion_web_url
+
+        print(f"✓ {PRODUCT_NAME} 已启动。")
+        print(f"  本地聊天：{companion_web_url()}")
+        if selected_platforms:
+            print("  已连接的微信或飞书也可以继续聊天。")
     return started

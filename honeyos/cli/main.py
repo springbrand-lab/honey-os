@@ -32,6 +32,7 @@ def _parser() -> argparse.ArgumentParser:
     commands.add_parser("setup", help="Connect a model and private chat channel")
     commands.add_parser("init", help="Initialize the private companion")
     commands.add_parser("start", help="Start the background companion")
+    commands.add_parser("web", help="Open the private local chat")
     commands.add_parser("stop", help="Stop the background companion")
     commands.add_parser("restart", help="Restart the background companion")
     commands.add_parser("status", help="Show companion status")
@@ -143,6 +144,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         _initialize_embedded(home)
         installed = install_service(identity)
         return start_service(identity) if installed == 0 else installed
+    if args.command == "web":
+        _initialize_embedded(home)
+        installed = install_service(identity)
+        started = start_service(identity) if installed == 0 else installed
+        if started != 0:
+            return started
+        from honeyos.companion.web import (
+            companion_web_url,
+            open_companion_web,
+            wait_for_companion_web,
+        )
+
+        url = companion_web_url()
+        print(f"{PRODUCT_NAME} 本地聊天：{url}")
+        wait_for_companion_web()
+        open_companion_web()
+        return 0
     if args.command == "stop":
         return stop_service(identity)
     if args.command == "restart":

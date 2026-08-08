@@ -36,7 +36,7 @@ def test_first_start_report_checks_required_state_and_keeps_optional_tools_optio
     assert "Computer Use 未安装" in rendered
 
 
-def test_first_start_report_fails_when_weixin_credentials_are_missing(tmp_path):
+def test_first_start_report_accepts_local_web_without_im(tmp_path):
     initialize_home(tmp_path)
     configure_model(
         tmp_path,
@@ -51,7 +51,8 @@ def test_first_start_report_fails_when_weixin_credentials_are_missing(tmp_path):
 
     report = first_start_report(tmp_path, command_lookup=lambda _name: "/bin/tool")
 
-    assert report.ready is False
+    assert report.ready is True
+    assert "本地网页聊天可用" in report.render()
     assert "微信和飞书均未连接" in report.render()
 
 

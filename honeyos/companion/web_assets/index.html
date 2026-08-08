@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>HoneyOS</title>
+    <link rel="stylesheet" href="/honeyos/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell" aria-label="HoneyOS 私人聊天">
+      <section class="chat" aria-live="polite">
+        <header class="chat-header">
+          <div class="avatar" id="avatar" aria-hidden="true">H</div>
+          <div class="identity">
+            <h1 id="companion-name">Honey</h1>
+            <p id="companion-status">在这儿</p>
+          </div>
+        </header>
+
+        <div class="messages" id="messages">
+          <div class="empty-state" id="empty-state">
+            <p>想说什么都可以。</p>
+            <span>我在这儿听着。</span>
+          </div>
+        </div>
+
+        <form class="composer" id="composer">
+          <label class="sr-only" for="message-input">消息</label>
+          <textarea id="message-input" rows="1" maxlength="12000" placeholder="想说点什么…"></textarea>
+          <button class="send-button" id="send-button" type="submit">发送</button>
+        </form>
+      </section>
+    </main>
+    <script src="/honeyos/app.js" defer></script>
+  </body>
+</html>

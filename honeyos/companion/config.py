@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import hashlib
+import secrets
 import shutil
 import sys
 import tempfile
@@ -21,6 +22,7 @@ from honeyos.companion import PRODUCT_NAME
 
 
 DEFAULT_IM_PLATFORMS = ("weixin", "feishu")
+COMPANION_WEB_PLATFORM = "api_server"
 _SUPPORTED_PLATFORMS = frozenset(DEFAULT_IM_PLATFORMS)
 COMPANION_SANDBOX_PATH = (
     "/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -171,7 +173,8 @@ def companion_config(platform: str | None = None) -> dict:
         "skills": {"creation_nudge_interval": 0},
         "compression": {"enabled": True, "in_place": True},
         "platform_toolsets": {
-            name: list(COMPANION_TOOLSETS) for name in platforms
+            name: list(COMPANION_TOOLSETS)
+            for name in (*platforms, COMPANION_WEB_PLATFORM)
         },
         "web": {
             "backend": "ddgs",
@@ -193,13 +196,22 @@ def companion_config(platform: str | None = None) -> dict:
         "approvals": {"mode": "off"},
         "security": {"allow_proxy_fake_ips": True},
         "platforms": {
-            name: {
-                "extra": {
-                    "dm_policy": "pairing",
-                    "group_policy": "disabled",
+            **{
+                name: {
+                    "extra": {
+                        "dm_policy": "pairing",
+                        "group_policy": "disabled",
+                    }
                 }
-            }
-            for name in platforms
+                for name in platforms
+            },
+            COMPANION_WEB_PLATFORM: {
+                "enabled": True,
+                "extra": {
+                    "host": "127.0.0.1",
+                    "port": 8642,
+                }
+            },
         },
         "mcp_servers": {},
         "display": {
@@ -222,6 +234,23 @@ def _create_file(path: Path, content: str, *, mode: int | None = None) -> bool:
         return False
     with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
         handle.write(content)
+    return True
+
+
+def _ensure_local_web_secret(home: Path) -> bool:
+    """Create the loopback API secret once without replacing user secrets."""
+
+    env_path = home / ".env"
+    existing = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
+    for line in existing.splitlines():
+        if line.strip().startswith("API_SERVER_KEY=") and line.split("=", 1)[1].strip():
+            return False
+    suffix = "" if not existing or existing.endswith("\n") else "\n"
+    _atomic_replace(
+        env_path,
+        existing + suffix + f"API_SERVER_KEY={secrets.token_hex(32)}\n",
+        mode=0o600,
+    )
     return True
 
 
@@ -259,6 +288,7 @@ def initialize_home(home: Path, *, platform: str | None = None) -> InitResult:
     created_files = tuple(
         path for path, content, mode in candidates if _create_file(path, content, mode=mode)
     )
+    _ensure_local_web_secret(resolved)
     created = created_files + seed_companion_skills(resolved)
     return InitResult(home=resolved, created=created)
 
@@ -292,7 +322,7 @@ def upgrade_companion_capabilities(home: Path) -> bool:
     if not isinstance(platform_toolsets, dict):
         platform_toolsets = {}
         config["platform_toolsets"] = platform_toolsets
-    for platform in DEFAULT_IM_PLATFORMS:
+    for platform in (*DEFAULT_IM_PLATFORMS, COMPANION_WEB_PLATFORM):
         platform_toolsets[platform] = list(COMPANION_TOOLSETS)
 
     platforms = config.setdefault("platforms", {})
@@ -310,6 +340,17 @@ def upgrade_companion_capabilities(home: Path) -> bool:
             platform_config["extra"] = extra
         extra.setdefault("dm_policy", "pairing")
         extra.setdefault("group_policy", "disabled")
+    web_platform = platforms.setdefault(COMPANION_WEB_PLATFORM, {})
+    if not isinstance(web_platform, dict):
+        web_platform = {}
+        platforms[COMPANION_WEB_PLATFORM] = web_platform
+    web_platform["enabled"] = True
+    web_extra = web_platform.setdefault("extra", {})
+    if not isinstance(web_extra, dict):
+        web_extra = {}
+        web_platform["extra"] = web_extra
+    web_extra["host"] = "127.0.0.1"
+    web_extra.setdefault("port", 8642)
 
     display = config.setdefault("display", {})
     if not isinstance(display, dict):
@@ -406,6 +447,9 @@ def upgrade_companion_capabilities(home: Path) -> bool:
     changed = rendered_config != original_config
     if changed:
         _atomic_replace(config_path, rendered_config, mode=0o600)
+
+    if _ensure_local_web_secret(resolved):
+        changed = True
 
     for directory in ("skills", "sandboxes"):
         (resolved / directory).mkdir(parents=True, exist_ok=True)
