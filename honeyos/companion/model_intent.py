@@ -41,6 +41,22 @@ _FRIENDLY_TARGETS = {
     "deepseek": "deepseek",
 }
 
+_MODEL_ID_PREFIXES = (
+    "gpt-",
+    "o1",
+    "o3",
+    "o4",
+    "claude-",
+    "gemini-",
+    "deepseek-",
+    "qwen",
+    "mistral-",
+    "llama-",
+    "kimi-",
+    "doubao-",
+    "grok-",
+)
+
 
 def _clean_target(raw: str) -> str:
     target = raw.strip(" \t，,。.!！?？")
@@ -52,6 +68,25 @@ def _clean_target(raw: str) -> str:
         flags=re.IGNORECASE,
     ).strip(" \t，,。.!！?？")
     return _FRIENDLY_TARGETS.get(target.casefold(), target)
+
+
+def _looks_like_model_target(raw: str, *, explicit_model_word: bool) -> bool:
+    """Keep bare “use X” commands narrow enough to avoid tool-name capture."""
+
+    target = _clean_target(raw)
+    folded = target.casefold()
+    if not target:
+        return False
+    if explicit_model_word:
+        return True
+    if folded in _FRIENDLY_TARGETS or folded in _FRIENDLY_TARGETS.values():
+        return True
+    if any(char.isspace() for char in target):
+        return False
+    if "/" in target:
+        provider, _, model = target.partition("/")
+        return bool(provider and model)
+    return folded.startswith(_MODEL_ID_PREFIXES)
 
 
 def natural_model_command(text: str) -> Optional[str]:
@@ -89,13 +124,20 @@ def natural_model_command(text: str) -> Optional[str]:
 
     value = re.sub(r"^(?:请|麻烦|帮我|给我)(?:把)?", "", value).strip()
     patterns = (
-        r"^(?:把)?(?:模型)?(?:切换|切|换|更换|改)(?:模型)?(?:到|成|为|用)?\s*(.+)$",
-        r"^(?:默认)?(?:都)?(?:改用|使用|用)\s*(.+)$",
+        (
+            r"^(?:把)?(?:模型)?(?:切换|切|换|更换|改)(?:模型)?(?:到|成|为|用)?\s*(.+)$",
+            False,
+        ),
+        (r"^(?:默认)?(?:都)?(?:改用|使用|用)\s*(.+)$", True),
     )
     target = ""
-    for pattern in patterns:
+    for pattern, require_model_like in patterns:
         match = re.match(pattern, value, flags=re.IGNORECASE)
         if match:
+            if require_model_like and not _looks_like_model_target(
+                match.group(1), explicit_model_word="模型" in value
+            ):
+                continue
             target = _clean_target(match.group(1))
             break
     if not target or target in {"模型", "一个模型"}:

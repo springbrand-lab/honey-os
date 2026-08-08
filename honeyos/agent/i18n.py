@@ -87,6 +87,20 @@ _LANGUAGE_ALIASES: dict[str, str] = {
 _catalog_cache: dict[str, dict[str, str]] = {}
 _catalog_lock = threading.Lock()
 
+# Standalone HoneyOS packages may intentionally omit the legacy full locale
+# bundle. Keep high-impact control-path failures human-readable even then.
+_BUILTIN_FALLBACKS: dict[str, dict[str, str]] = {
+    "en": {
+        "gateway.model.error_prefix": "Model switch failed: {error}",
+    },
+    "zh": {
+        "gateway.model.error_prefix": "模型切换失败：{error}",
+    },
+    "zh-hant": {
+        "gateway.model.error_prefix": "模型切換失敗：{error}",
+    },
+}
+
 
 def _locales_dir() -> Path:
     """Return the directory containing locale YAML files.
@@ -254,6 +268,11 @@ def t(key: str, lang: str | None = None, **format_kwargs: Any) -> str:
     if value is None and target != DEFAULT_LANGUAGE:
         # Fall through to English rather than showing a key path to the user.
         value = _load_catalog(DEFAULT_LANGUAGE).get(key)
+
+    if value is None:
+        value = (_BUILTIN_FALLBACKS.get(target) or {}).get(key)
+    if value is None:
+        value = (_BUILTIN_FALLBACKS.get(DEFAULT_LANGUAGE) or {}).get(key)
 
     if value is None:
         # Last-ditch: return the key itself.  A broken catalog should not

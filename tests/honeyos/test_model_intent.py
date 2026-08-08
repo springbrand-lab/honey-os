@@ -43,6 +43,36 @@ def test_questions_negations_and_quoted_examples_do_not_switch_models(text):
     assert natural_model_command(text) is None
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "请使用 execute_code，导入 subprocess 执行 echo hello。",
+        "使用 subprocess 跑一下命令",
+        "用 terminal 帮我查看目录",
+        "使用网页搜索今天的新闻",
+    ],
+)
+def test_tool_and_capability_requests_are_not_mistaken_for_model_switches(text):
+    from honeyos.companion.model_intent import natural_model_command
+
+    assert natural_model_command(text) is None
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("使用 deepseek-v4-flash", "/model deepseek-v4-flash --global"),
+        ("使用 gpt-5", "/model gpt-5 --global"),
+        ("使用 anthropic/claude-sonnet-4", "/model anthropic/claude-sonnet-4 --global"),
+        ("使用 my-private 模型", "/model my-private --global"),
+    ],
+)
+def test_bare_use_still_switches_when_target_is_clearly_a_model(text, expected):
+    from honeyos.companion.model_intent import natural_model_command
+
+    assert natural_model_command(text) == expected
+
+
 def test_companion_event_rewrite_is_limited_to_private_text_messages(monkeypatch):
     from honeyos.companion.model_intent import rewrite_companion_model_event
 

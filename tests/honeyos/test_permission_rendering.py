@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 from honeyos.companion.permission_ui import build_permission_presentation
 from honeyos.gateway.relay.adapter import RelayAdapter
@@ -102,3 +103,36 @@ def test_plain_text_fallback_is_relationship_native_and_keeps_details_secondary(
     assert "运行本机上的构建脚本" in text
     assert "如果愿意" in text
     assert "Command Approval Required" not in text
+
+
+def test_feishu_dm_owner_can_click_permission_card_in_pairing_mode():
+    adapter = object.__new__(FeishuAdapter)
+    adapter._approval_state = {
+        7: {"session_key": "owner-session", "chat_id": "owner-chat"}
+    }
+    adapter._admins = set()
+    adapter._allowed_group_users = set()
+    adapter._get_cached_sender_name = lambda _open_id: "小酒"
+    adapter._allow_group_message = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        AssertionError("a private approval must not use the group policy gate")
+    )
+    submitted = []
+
+    def submit(_loop, coro):
+        submitted.append(coro)
+        coro.close()
+        return True
+
+    adapter._submit_on_loop = submit
+    event = SimpleNamespace(
+        operator=SimpleNamespace(open_id="owner-open-id", user_id=""),
+        context=SimpleNamespace(open_chat_id="owner-chat"),
+    )
+
+    adapter._handle_approval_card_action(
+        event=event,
+        action_value={"approval_id": 7, "honeyos_action": "approve_once"},
+        loop=object(),
+    )
+
+    assert len(submitted) == 1
