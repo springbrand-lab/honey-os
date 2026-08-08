@@ -1202,7 +1202,13 @@ def _security_headers_for_path(path: str) -> Dict[str, str]:
     """Return strict API headers or the bundled UI's same-origin CSP."""
 
     headers = dict(_SECURITY_HEADERS)
-    if path in {"/", "/file-open.js"} or path.startswith("/honeyos/"):
+    if path in {
+        "/",
+        "/file-open.js",
+        "/run-state.js",
+        "/app.js",
+        "/styles.css",
+    } or path.startswith("/honeyos/"):
         headers["Content-Security-Policy"] = (
             "default-src 'self'; "
             "script-src 'self'; style-src 'self'; connect-src 'self'; "
@@ -2044,6 +2050,9 @@ class APIServerAdapter(BasePlatformAdapter):
         routes: List[tuple] = [
             ("GET", "/", self._handle_companion_index),
             ("GET", "/file-open.js", self._handle_companion_file_guard),
+            ("GET", "/run-state.js", self._handle_companion_run_state),
+            ("GET", "/app.js", self._handle_companion_script),
+            ("GET", "/styles.css", self._handle_companion_styles),
             ("GET", "/honeyos/run-state.js", self._handle_companion_run_state),
             ("GET", "/honeyos/app.js", self._handle_companion_script),
             ("GET", "/honeyos/styles.css", self._handle_companion_styles),

@@ -93,3 +93,35 @@ def test_lifecycle_addresses_only_exact_honeyos_service(monkeypatch, tmp_path: P
         ("launchctl", "kickstart", f"gui/{service.os.getuid()}/{identity.macos_label}"),
         ("launchctl", "bootout", f"gui/{service.os.getuid()}/{identity.macos_label}"),
     ]
+
+
+def test_macos_restart_reinstalls_service_after_bootout(
+    monkeypatch, tmp_path: Path
+) -> None:
+    service = _service_module()
+    identity = service.ServiceIdentity.default(home=tmp_path / ".honeyos")
+    plist_path = tmp_path / "ai.honeyos.gateway.plist"
+    calls: list[tuple[str, ...]] = []
+
+    def record(argv, **_kwargs):
+        calls.append(tuple(argv))
+        return 0
+
+    monkeypatch.setattr(service.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(service, "launchd_plist_path", lambda _identity: plist_path)
+
+    assert service.restart_service(identity, runner=record) == 0
+    assert plist_path.is_file()
+    assert calls == [
+        (
+            "launchctl",
+            "bootout",
+            f"gui/{service.os.getuid()}/{identity.macos_label}",
+        ),
+        (
+            "launchctl",
+            "bootstrap",
+            f"gui/{service.os.getuid()}",
+            str(plist_path),
+        ),
+    ]

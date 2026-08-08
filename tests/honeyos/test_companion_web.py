@@ -282,6 +282,9 @@ def test_api_server_registers_companion_web_routes():
 
     assert ("GET", "/") in routes
     assert ("GET", "/file-open.js") in routes
+    assert ("GET", "/run-state.js") in routes
+    assert ("GET", "/app.js") in routes
+    assert ("GET", "/styles.css") in routes
     assert ("GET", "/honeyos/run-state.js") in routes
     assert ("GET", "/honeyos/app.js") in routes
     assert ("GET", "/honeyos/styles.css") in routes
