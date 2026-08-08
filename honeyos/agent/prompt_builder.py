@@ -233,6 +233,10 @@ COMPANION_ENVIRONMENT_GUIDANCE = (
     "is authoritative: any earlier transcript claims that tools run in a container, use /root or /tmp for "
     "deliverables, or cannot write files visible on the user's computer are obsolete. If an out-of-workspace "
     "path is rejected, retry inside HoneyOS Projects; do not claim that host file access is unavailable."
+    " For creating or editing project files, call write_file or patch directly; for project commands, call "
+    "terminal directly. Do not wrap these operations in execute_code. Reserve execute_code for work that "
+    "genuinely needs Python computation or multi-tool orchestration, because arbitrary host Python may require "
+    "a separate safety approval."
 )
 
 HONEYOS_AGENT_HELP_GUIDANCE = (
