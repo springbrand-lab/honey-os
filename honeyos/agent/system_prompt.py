@@ -35,6 +35,7 @@ from honeyos.agent.prompt_builder import (
     COMPANION_ENVIRONMENT_GUIDANCE,
     COMPANION_EXTENSION_GUIDANCE,
     COMPANION_MEMORY_GUIDANCE,
+    COMPANION_SKILL_GUIDANCE,
     COMPANION_STRUCTURED_MEMORY_GUIDANCE,
     COMPANION_SESSION_SEARCH_GUIDANCE,
     DEFAULT_AGENT_IDENTITY,
@@ -217,6 +218,7 @@ def _build_companion_system_prompt_parts(
         stable_parts.append(COMPANION_SESSION_SEARCH_GUIDANCE)
 
     if any(name in valid_tools for name in {"skills_list", "skill_view", "skill_manage"}):
+        stable_parts.append(COMPANION_SKILL_GUIDANCE)
         available_toolsets = {
             toolset
             for toolset in (

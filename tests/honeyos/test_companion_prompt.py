@@ -93,6 +93,15 @@ def test_companion_prompt_uses_confirmation_only_memory_guidance():
     assert "身份、感情、关系" in prompt
 
 
+def test_companion_prompt_treats_bundled_skills_as_installed_and_implicit():
+    prompt = _prompt("companion")
+
+    assert "内置 Skill 已经安装并可用" in prompt
+    assert "自然语言需求自动匹配" in prompt
+    assert "不要询问是否安装已经内置的 Skill" in prompt
+    assert "明确询问 Skill 管理" in prompt
+
+
 def test_companion_fallback_identity_never_names_hermes():
     prompt = _prompt("companion", soul="")
 
@@ -140,6 +149,8 @@ def test_companion_soul_defines_intimate_identity_and_controlled_growth(tmp_path
     assert "系统软件" in soul and "明确确认" in soul
     assert "不得修改 HoneyOS 核心" in soul
     assert "不要声称已经搜索、读取、安装或执行" in soul
+    assert "内置 Skill 已经安装并可用" in soul
+    assert "自然语言需求自动匹配" in soul
 
 
 def test_companion_home_creates_relationship_context_files(tmp_path):

@@ -212,6 +212,7 @@ def test_web_assets_are_packaged():
 
     assert (assets / "index.html").is_file()
     assert (assets / "app.js").is_file()
+    assert (assets / "message-format.js").is_file()
     assert (assets / "run-state.js").is_file()
     assert (assets / "styles.css").is_file()
     file_guard = assets / "file-open.js"
@@ -225,6 +226,7 @@ def test_companion_assets_define_relationship_native_run_ui():
     app = (assets / "app.js").read_text(encoding="utf-8")
 
     assert 'src="./run-state.js"' in index
+    assert 'src="./message-format.js"' in index
     assert 'id="presence-line"' in index
     assert 'id="action-trail"' in index
     assert 'id="scroll-to-latest"' in index
@@ -390,10 +392,12 @@ def test_api_server_registers_companion_web_routes():
 
     assert ("GET", "/") in routes
     assert ("GET", "/file-open.js") in routes
+    assert ("GET", "/message-format.js") in routes
     assert ("GET", "/run-state.js") in routes
     assert ("GET", "/app.js") in routes
     assert ("GET", "/styles.css") in routes
     assert ("GET", "/honeyos/run-state.js") in routes
+    assert ("GET", "/honeyos/message-format.js") in routes
     assert ("GET", "/honeyos/app.js") in routes
     assert ("GET", "/honeyos/styles.css") in routes
     assert ("GET", "/api/companion/bootstrap") in routes

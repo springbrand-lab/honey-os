@@ -261,13 +261,13 @@ button {
 }
 
 .bubble {
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-size: 16px;
-  line-height: 1.72;
+  line-height: 1.64;
 }
 
 .user .bubble {
+  white-space: pre-wrap;
   max-width: calc(76% - 46px);
   padding: 11px 16px;
   border-radius: 17px 17px 5px 17px;
@@ -280,6 +280,84 @@ button {
   max-width: min(calc(88% - 46px), 614px);
   padding: 2px 2px 2px 0;
   color: var(--text);
+}
+
+.rich-text > :first-child {
+  margin-top: 0;
+}
+
+.rich-text > :last-child {
+  margin-bottom: 0;
+}
+
+.rich-text p {
+  margin: 0.68em 0 0;
+}
+
+.rich-text strong {
+  font-weight: 680;
+}
+
+.rich-text hr {
+  width: 30px;
+  margin: 15px 0;
+  border: 0;
+  border-top: 1px solid var(--line-strong);
+}
+
+.rich-text ul,
+.rich-text ol {
+  margin: 0.72em 0;
+  padding-left: 1.35em;
+}
+
+.rich-text li + li {
+  margin-top: 0.3em;
+}
+
+.rich-text h1,
+.rich-text h2,
+.rich-text h3 {
+  margin: 0.8em 0 0.25em;
+  font-size: 1.02em;
+  font-weight: 680;
+  line-height: 1.45;
+}
+
+.rich-text blockquote {
+  margin: 0.75em 0;
+  padding-left: 12px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 34%, transparent);
+  color: var(--text-soft);
+}
+
+.rich-text code {
+  padding: 0.08em 0.3em;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.88em;
+}
+
+.rich-text pre {
+  max-width: 100%;
+  margin: 0.75em 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-solid);
+}
+
+.rich-text pre code {
+  padding: 0;
+  background: transparent;
+  white-space: pre;
+}
+
+.rich-text a {
+  color: var(--accent-strong);
+  text-underline-offset: 0.16em;
 }
 
 .turn-status {

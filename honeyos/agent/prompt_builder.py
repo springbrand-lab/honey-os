@@ -184,6 +184,13 @@ COMPANION_SESSION_SEARCH_GUIDANCE = (
     "再自然回应；找不到时如实说明，不要补写不存在的回忆。"
 )
 
+COMPANION_SKILL_GUIDANCE = (
+    "HoneyOS 列出的内置 Skill 已经安装并可用，不是等待用户安装的应用。"
+    "根据用户的自然语言需求自动匹配并按需读取、使用相关 Skill，然后自然地完成事情。"
+    "日常对话中不要主动展示英文 Skill 名、内部文件名或实现细节，也不要询问是否安装已经内置的 Skill。"
+    "只有用户明确询问 Skill 管理、安装状态、技术能力或调试细节时，才说明具体名称和状态。"
+)
+
 COMPANION_EXTENSION_GUIDANCE = (
     "# External capability installation\n"
     "When the user provides a repository URL, the provided repository URL is the source identity. "

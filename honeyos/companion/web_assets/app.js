@@ -72,12 +72,20 @@ function createMessage(role) {
   return bubble;
 }
 
+function renderMessage(bubble, role, content) {
+  if (role === "assistant") {
+    HoneyOSMessageFormat.render(bubble, content);
+    return;
+  }
+  bubble.textContent = content;
+}
+
 function addMessage(role, content, options = {}) {
   if (!content) return null;
   const forceScroll = Boolean(options.forceScroll);
   const shouldFollow = forceScroll || isNearLatest();
   const bubble = createMessage(role);
-  bubble.textContent = content;
+  renderMessage(bubble, role, content);
   keepAtLatest = shouldFollow;
   scrollToLatest(forceScroll);
   return bubble;
@@ -240,12 +248,12 @@ function handleStreamEvent(name, payload) {
 
   if (name === "assistant.delta" && payload.delta) {
     if (!activeAssistantBubble) activeAssistantBubble = createMessage("assistant");
-    activeAssistantBubble.textContent = turnState.content;
+    renderMessage(activeAssistantBubble, "assistant", turnState.content);
   }
 
   if (name === "assistant.completed" && payload.content) {
     if (!activeAssistantBubble) activeAssistantBubble = createMessage("assistant");
-    activeAssistantBubble.textContent = turnState.content;
+    renderMessage(activeAssistantBubble, "assistant", turnState.content);
   }
 
   if (name === "error") showError(payload.message);

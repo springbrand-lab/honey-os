@@ -1266,6 +1266,7 @@ def _security_headers_for_path(path: str) -> Dict[str, str]:
     if path in {
         "/",
         "/file-open.js",
+        "/message-format.js",
         "/run-state.js",
         "/app.js",
         "/styles.css",
@@ -2111,9 +2112,11 @@ class APIServerAdapter(BasePlatformAdapter):
         routes: List[tuple] = [
             ("GET", "/", self._handle_companion_index),
             ("GET", "/file-open.js", self._handle_companion_file_guard),
+            ("GET", "/message-format.js", self._handle_companion_message_format),
             ("GET", "/run-state.js", self._handle_companion_run_state),
             ("GET", "/app.js", self._handle_companion_script),
             ("GET", "/styles.css", self._handle_companion_styles),
+            ("GET", "/honeyos/message-format.js", self._handle_companion_message_format),
             ("GET", "/honeyos/run-state.js", self._handle_companion_run_state),
             ("GET", "/honeyos/app.js", self._handle_companion_script),
             ("GET", "/honeyos/styles.css", self._handle_companion_styles),
@@ -2226,6 +2229,13 @@ class APIServerAdapter(BasePlatformAdapter):
     async def _handle_companion_script(self, request: "web.Request") -> "web.Response":
         return await self._handle_companion_asset(
             request, "app.js", "application/javascript"
+        )
+
+    async def _handle_companion_message_format(
+        self, request: "web.Request"
+    ) -> "web.Response":
+        return await self._handle_companion_asset(
+            request, "message-format.js", "application/javascript"
         )
 
     async def _handle_companion_run_state(
