@@ -83,9 +83,9 @@ _SEND_RE = re.compile(
     re.IGNORECASE,
 )
 _MUTATION_RE = re.compile(
-    r"(?:把|将)\s*(?P<object>[^，。,.]{1,80}?)\s*"
+    r"(?:把|将)\s*(?P<object>[^，。,]{1,80}?)\s*"
     r"(?P<verb>上传|发布|删掉|删除)(?:到|至)?\s*"
-    r"(?P<target>[^，。,.]{0,80})",
+    r"(?P<target>[^，。,]{0,80})",
     re.IGNORECASE,
 )
 _SCHEDULE_RE = re.compile(

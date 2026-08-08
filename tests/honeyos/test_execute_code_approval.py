@@ -53,3 +53,24 @@ def test_dunder_object_escape_still_requires_approval():
 
     assert result["approved"] is False
     assert result["approval_pending"] is True
+
+
+def test_direct_host_python_never_offers_session_or_permanent_scope():
+    result = _gateway_guard("import os\nprint(os.getcwd())")
+
+    assert result["approved"] is False
+    assert result["allow_session"] is False
+    assert result["allow_permanent"] is False
+
+
+def test_legacy_broad_execute_code_grant_does_not_bypass_one_shot_consent():
+    with (
+        patch("honeyos.tools.approval._is_gateway_approval_context", return_value=True),
+        patch("honeyos.tools.approval._get_approval_mode", return_value="manual"),
+        patch("honeyos.tools.approval.get_current_session_key", return_value="proxy-test"),
+        patch("honeyos.tools.approval.is_approved", return_value=True),
+    ):
+        result = check_execute_code_guard("import os\nprint(os.getcwd())", "local")
+
+    assert result["approved"] is False
+    assert result["approval_pending"] is True

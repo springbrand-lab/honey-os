@@ -325,7 +325,10 @@ _USER_SENSITIVE_WRITE_TARGET = (
     rf'{_SHELL_RC_FILES}|'
     rf'{_CREDENTIAL_FILES})'
 )
-_PROJECT_SENSITIVE_WRITE_TARGET = rf'(?:{_PROJECT_ENV_PATH}|{_PROJECT_CONFIG_PATH})'
+# Project-local config.yaml is ordinary application configuration. Only
+# environment files are secret-bearing by default; HoneyOS's own security
+# config remains covered separately by _HONEYOS_CONFIG_PATH.
+_PROJECT_SENSITIVE_WRITE_TARGET = _PROJECT_ENV_PATH
 # Anchor for the cp/mv/install rule, where the sensitive path is only a write
 # target when it is the LAST argument (the destination). Requiring end-of-line
 # (or a command separator) keeps `cp config.yaml backup.yaml` — config.yaml as
@@ -498,6 +501,14 @@ _SUDO_STDIN_RE = re.compile(
     r'(?:^|[;&|`\n]|&&|\|\||\$\()\s*sudo\s+-S\b',
     re.IGNORECASE)
 
+_HONEYOS_INTERNAL_SECRET_RE = re.compile(
+    r"(?:~|\$home|\$\{home\})/\.honeyos/(?:"
+    r"\.env|auth\.json|auth\.lock|\.anthropic_oauth\.json|"
+    r"webhook_subscriptions\.json|auth/google_oauth\.json|"
+    r"cache/bws_cache\.json|mcp-tokens(?:/[^\s;&|]+)?)\b",
+    re.IGNORECASE,
+)
+
 
 def _check_sudo_stdin_guard(command: str) -> tuple:
     """Detect ``sudo -S`` (stdin password) without configured SUDO_PASSWORD.
@@ -529,6 +540,8 @@ def detect_hardline_command(command: str) -> tuple:
     if _command_parser_limit_exceeded(command):
         return (True, _PARSER_LIMIT_DESCRIPTION)
     normalized = _normalize_command_for_detection(command)
+    if _HONEYOS_INTERNAL_SECRET_RE.search(normalized):
+        return (True, "access HoneyOS internal credential")
     _, malformed_grep = _grep_safe_detection_variant(normalized)
     if malformed_grep:
         return (True, _MALFORMED_EXEC_DESCRIPTION)
@@ -752,6 +765,14 @@ DANGEROUS_PATTERNS = [
     # Shell -c is parsed structurally by _execution_flag_findings(). A regex
     # that merely searched a dash-token for "c" also matched --norc,
     # --rcfile, and --restricted.
+    (
+        r'\bcurl\b[^;\n]*(?:'
+        r'(?:-F|--form)\s+["\']?[^;\n]*?=@|'
+        r'(?:-T|--upload-file)\s+\S+|'
+        r'(?:--data|--data-binary)\s+["\']?@)'
+        r'[^;\n]*https?://',
+        "upload local file to external service",
+    ),
     (r'\b(curl|wget)\b.*\|\s*(?:[/\w]*/)?(?:ba)?sh(?:\s|$|-c)', "pipe remote content to shell"),
     (r'\b(bash|sh|zsh|ksh)\s+<\s*<?\s*\(\s*(curl|wget)\b', "execute remote script via process substitution"),
     # Remote content executed via command substitution: eval/source/. $(curl ...)
@@ -1677,6 +1698,85 @@ def _execution_flag_findings(command: str):
                     yield (f"arbitrary program execution via {tool} {option}", payload)
 
 
+_SAFE_INLINE_PYTHON_CALLS = frozenset({
+    "abs", "all", "any", "bool", "dict", "enumerate", "float", "int",
+    "len", "list", "max", "min", "print", "range", "repr", "reversed",
+    "round", "set", "sorted", "str", "sum", "tuple", "zip",
+})
+_SAFE_INLINE_PYTHON_NODES = (
+    ast.Module,
+    ast.Expr,
+    ast.Call,
+    ast.Name,
+    ast.Load,
+    ast.Constant,
+    ast.List,
+    ast.Tuple,
+    ast.Set,
+    ast.Dict,
+    ast.keyword,
+    ast.BinOp,
+    ast.UnaryOp,
+    ast.BoolOp,
+    ast.Compare,
+    ast.Add,
+    ast.Sub,
+    ast.Mult,
+    ast.Div,
+    ast.FloorDiv,
+    ast.Mod,
+    ast.Pow,
+    ast.UAdd,
+    ast.USub,
+    ast.Not,
+    ast.And,
+    ast.Or,
+    ast.Eq,
+    ast.NotEq,
+    ast.Lt,
+    ast.LtE,
+    ast.Gt,
+    ast.GtE,
+)
+
+
+def _is_safe_inline_python_command(command: str) -> bool:
+    """Allow pure calculations instead of gating Python merely for ``-c``.
+
+    This is intentionally much smaller than Python: imports, attributes,
+    subscripts, assignments, comprehensions, file access, dynamic execution,
+    and user-defined callables remain on the consent path.
+    """
+
+    try:
+        tokens = shlex.split(command, posix=True)
+    except ValueError:
+        return False
+    if len(tokens) < 3 or _interpreter_family(tokens[0]) != "python":
+        return False
+    try:
+        flag_index = tokens.index("-c")
+    except ValueError:
+        return False
+    if flag_index + 2 != len(tokens):
+        return False
+    try:
+        tree = ast.parse(tokens[flag_index + 1], mode="exec")
+    except (SyntaxError, TypeError, ValueError):
+        return False
+    for node in ast.walk(tree):
+        if not isinstance(node, _SAFE_INLINE_PYTHON_NODES):
+            return False
+        if isinstance(node, ast.Call):
+            if not isinstance(node.func, ast.Name):
+                return False
+            if node.func.id not in _SAFE_INLINE_PYTHON_CALLS:
+                return False
+        if isinstance(node, ast.Name) and node.id.startswith("__"):
+            return False
+    return True
+
+
 def _skip_shell_whitespace(command: str, pos: int) -> int:
     while pos < len(command) and command[pos].isspace():
         pos += 1
@@ -2177,6 +2277,30 @@ def _is_verification_artifact_cleanup(command: str) -> bool:
     return re.fullmatch(r"honeyos-(?:verify|ad-hoc)-[A-Za-z0-9_.-]+", basename) is not None
 
 
+def _external_command_target(command: str) -> str:
+    match = re.search(r"https?://(?P<host>[^/\s'\"]+)", command, re.IGNORECASE)
+    return match.group("host").lower() if match else "external service"
+
+
+def _explicit_effect_grant_matches_command(description: str, command: str) -> bool:
+    if description != "upload local file to external service":
+        return False
+    try:
+        from honeyos.tools.permission_policy import Effect, RiskTier, decide_effect
+
+        decision = decide_effect(
+            Effect(
+                "upload",
+                target=_external_command_target(command),
+                external_commit=True,
+                technical_detail=command,
+            )
+        )
+        return decision.tier is RiskTier.DIRECT and decision.matched_grant is not None
+    except Exception:
+        return False
+
+
 def detect_dangerous_command(command: str) -> tuple:
     """Check if a command matches any dangerous patterns.
 
@@ -2196,6 +2320,11 @@ def detect_dangerous_command(command: str) -> tuple:
                 return (True, pattern_key, description)
     normalized = _normalize_command_for_detection(command)
     for description, _ in _execution_flag_findings(normalized):
+        if (
+            description == "script execution via -e/-c flag"
+            and _is_safe_inline_python_command(normalized)
+        ):
+            continue
         return (True, description, description)
     return (False, None, None)
 
@@ -3931,7 +4060,9 @@ def check_all_command_guards(command: str, env_type: str,
         if not is_approved(session_key, tirith_key):
             warnings.append((tirith_key, tirith_desc, True))
 
-    if is_dangerous:
+    if is_dangerous and not _explicit_effect_grant_matches_command(
+        description, command
+    ):
         if not is_approved(session_key, pattern_key):
             warnings.append((pattern_key, description, False))
 
@@ -4401,11 +4532,9 @@ def check_execute_code_guard(code: str, env_type: str,
     # paths don't pay to copy a potentially-large script into this string.
     command = f"execute_code <<'PY'\n{code}\nPY"
 
-    # Check session/permanent approval — same gate as check_all_command_guards.
-    # Without this, "Approve session" / "Always" choices are stored but never
-    # consulted, so every execute_code call re-prompts the user (#39275).
-    if is_approved(session_key, pattern_key):
-        return {"approved": True, "message": None}
+    # A legacy grant under the coarse ``execute_code`` key must not authorize
+    # unrelated future host scripts. Direct host Python is always one-shot;
+    # proxy-only scripts already returned through the audited path above.
 
     # Smart mode: ask the aux LLM about the whole script. An APPROVE here only
     # suppresses the redundant whole-script prompt; the per-call terminal()
@@ -4482,6 +4611,8 @@ def check_execute_code_guard(code: str, env_type: str,
             "pattern_key": pattern_key,
             "status": "pending_approval",
             "approval_pending": True,
+            "allow_permanent": False,
+            "allow_session": False,
             "command": display_command,
             "description": display_description,
             "message": (
@@ -4498,8 +4629,8 @@ def check_execute_code_guard(code: str, env_type: str,
         "pattern_key": pattern_key,
         "pattern_keys": [pattern_key],
         "description": display_description,
-        "allow_permanent": not smart_denied_for_owner,
-        "allow_session": not smart_denied_for_owner,
+        "allow_permanent": False,
+        "allow_session": False,
     }
     if smart_denied_for_owner:
         approval_data["smart_denied"] = True
@@ -4543,17 +4674,8 @@ def check_execute_code_guard(code: str, env_type: str,
             "deny_reason": deny_reason,
         }
 
-    # Never persist a smart-DENY override under the coarse execute_code key;
-    # doing so would approve unrelated future scripts. Manual and ESCALATE
-    # decisions preserve their existing session/permanent behavior.
-    if not smart_denied_for_owner:
-        if choice == "session":
-            approve_session(session_key, pattern_key)
-        elif choice == "always":
-            approve_session(session_key, pattern_key)
-            approve_permanent(pattern_key)
-            save_permanent_allowlist(_permanent_approved)
-    # choice == "once": no persistence — approval lasts this single call only.
+    # Adapter compatibility may still return session/always from an older
+    # card. Treat both as one-shot for the coarse execute_code key.
 
     # A human approval resets the consecutive-denial tally.
     _reset_denials(session_key)
