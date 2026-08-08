@@ -216,6 +216,22 @@ def test_web_assets_are_packaged():
     assert "window.location.replace" in file_guard.read_text(encoding="utf-8")
 
 
+def test_companion_assets_define_relationship_native_run_ui():
+    assets = Path(__file__).parents[2] / "honeyos" / "companion" / "web_assets"
+    index = (assets / "index.html").read_text(encoding="utf-8")
+    app = (assets / "app.js").read_text(encoding="utf-8")
+
+    assert 'src="./run-state.js"' in index
+    assert 'id="presence-line"' in index
+    assert 'id="action-trail"' in index
+    assert 'id="scroll-to-latest"' in index
+    assert "activityTimer" not in app
+    assert "ACTIVITY_DELAY_MS" not in app
+    assert "payload.preview" not in app
+    assert "payload.args" not in app
+    assert "payload.tool_name" not in app
+
+
 def _api_adapter() -> APIServerAdapter:
     return APIServerAdapter(
         PlatformConfig(

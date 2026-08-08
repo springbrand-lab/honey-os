@@ -4,35 +4,65 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f2f0f2" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#171519" media="(prefers-color-scheme: dark)" />
     <title>HoneyOS</title>
     <script src="./file-open.js"></script>
-    <link rel="stylesheet" href="/honeyos/styles.css" />
+    <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <main class="app-shell" aria-label="HoneyOS 私人聊天">
-      <section class="chat" aria-live="polite">
-        <header class="chat-header">
-          <div class="avatar" id="avatar" aria-hidden="true">H</div>
-          <div class="identity">
-            <h1 id="companion-name">Honey</h1>
-            <p id="companion-status">在这儿</p>
+    <div class="room-light room-light-one" aria-hidden="true"></div>
+    <div class="room-light room-light-two" aria-hidden="true"></div>
+
+    <main class="companion-app" aria-label="HoneyOS 私人聊天">
+      <section class="conversation" aria-live="polite">
+        <header class="companion-header">
+          <div class="companion-presence">
+            <div class="avatar" id="avatar" aria-hidden="true">H</div>
+            <div class="identity">
+              <h1 id="companion-name">Honey</h1>
+              <p id="companion-status">在这儿</p>
+            </div>
           </div>
+          <p class="shared-space-label">我们的聊天</p>
         </header>
 
         <div class="messages" id="messages">
           <div class="empty-state" id="empty-state">
+            <span class="empty-whisper">我在</span>
             <p>想说什么都可以。</p>
-            <span>我在这儿听着。</span>
+            <span>不用想好再来找我。</span>
           </div>
         </div>
 
+        <button class="scroll-to-latest" id="scroll-to-latest" type="button" hidden>
+          看最新消息
+        </button>
+
+        <div class="turn-status" id="turn-status" hidden>
+          <div class="presence-line" id="presence-line" hidden>
+            <span class="presence-pulse" aria-hidden="true"></span>
+            <span id="presence-copy">我在想你刚才说的事</span>
+          </div>
+          <div class="action-trail" id="action-trail" hidden></div>
+        </div>
+
+        <aside class="file-mode-notice" id="file-mode-notice" hidden>
+          <strong>HoneyOS 还没有启动</strong>
+          <span>启动后，再打开属于你们的聊天。</span>
+          <a href="http://127.0.0.1:8642/">打开 HoneyOS</a>
+        </aside>
+
         <form class="composer" id="composer">
           <label class="sr-only" for="message-input">消息</label>
-          <textarea id="message-input" rows="1" maxlength="12000" placeholder="想说点什么…"></textarea>
+          <textarea id="message-input" rows="1" maxlength="12000" placeholder="和我说句话"></textarea>
           <button class="send-button" id="send-button" type="submit">发送</button>
         </form>
       </section>
     </main>
-    <script src="/honeyos/app.js" defer></script>
+
+    <script src="./run-state.js"></script>
+    <script src="./app.js" defer></script>
   </body>
 </html>
+

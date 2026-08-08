@@ -7,20 +7,43 @@ const elements = {
   name: document.querySelector("#companion-name"),
   status: document.querySelector("#companion-status"),
   avatar: document.querySelector("#avatar"),
+  turnStatus: document.querySelector("#turn-status"),
+  presence: document.querySelector("#presence-line"),
+  presenceCopy: document.querySelector("#presence-copy"),
+  actionTrail: document.querySelector("#action-trail"),
+  scrollLatest: document.querySelector("#scroll-to-latest"),
 };
 
 let sessionId = "";
 let sessionKey = "";
-let activeActivity = null;
 let activeAssistantBubble = null;
 let sending = false;
-let activityTimer = null;
-let pendingActivity = null;
-let turnStartedAt = 0;
-const ACTIVITY_DELAY_MS = 1200;
+let turnState = HoneyOSRunState.create(Date.now());
+let keepAtLatest = true;
 
-function scrollToLatest() {
+function isNearLatest() {
+  const remaining =
+    elements.messages.scrollHeight -
+    elements.messages.scrollTop -
+    elements.messages.clientHeight;
+  return remaining < 80;
+}
+
+function updateScrollButton() {
+  const shouldShow =
+    !isNearLatest() &&
+    elements.messages.scrollHeight > elements.messages.clientHeight;
+  elements.scrollLatest.hidden = !shouldShow;
+}
+
+function scrollToLatest(force = false) {
+  if (!force && !keepAtLatest) {
+    updateScrollButton();
+    return;
+  }
   elements.messages.scrollTop = elements.messages.scrollHeight;
+  keepAtLatest = true;
+  updateScrollButton();
 }
 
 function removeEmptyState() {
@@ -30,72 +53,119 @@ function removeEmptyState() {
   }
 }
 
-function addMessage(role, content) {
-  if (!content) return null;
+function createMessage(role) {
   removeEmptyState();
   const row = document.createElement("div");
-  row.className = `message-row ${role === "user" ? "user" : "assistant"}`;
+  row.className = "message-row " + (role === "user" ? "user" : "assistant");
   const bubble = document.createElement("div");
   bubble.className = "bubble";
-  bubble.textContent = content;
   row.append(bubble);
   elements.messages.append(row);
-  scrollToLatest();
   return bubble;
 }
 
-function showError(message) {
-  const note = document.createElement("p");
+function addMessage(role, content, options = {}) {
+  if (!content) return null;
+  const forceScroll = Boolean(options.forceScroll);
+  const shouldFollow = forceScroll || isNearLatest();
+  const bubble = createMessage(role);
+  bubble.textContent = content;
+  keepAtLatest = shouldFollow;
+  scrollToLatest(forceScroll);
+  return bubble;
+}
+
+function hideTurnStatus() {
+  elements.turnStatus.hidden = true;
+  elements.presence.hidden = true;
+  elements.actionTrail.hidden = true;
+}
+
+function renderPresence(state) {
+  const activity = state.presence || { title: "我在想你刚才说的事" };
+  elements.presenceCopy.textContent =
+    activity.title || "我在想你刚才说的事";
+  elements.turnStatus.hidden = false;
+  elements.presence.hidden = false;
+  elements.actionTrail.hidden = true;
+}
+
+function activityStatusLabel(activity) {
+  if (activity.state === "completed") return "好了";
+  if (activity.state === "failed") return "换个办法";
+  return "正在做";
+}
+
+function renderActionTrail(state) {
+  const activities = state.activities || [];
+  const current =
+    [...activities].reverse().find((activity) => activity.state === "active") ||
+    activities[activities.length - 1];
+  if (!current) {
+    renderPresence(state);
+    return;
+  }
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "action-current";
+  wrapper.dataset.state = current.state || "active";
+
+  const mark = document.createElement("span");
+  mark.className = "action-mark";
+  mark.setAttribute("aria-hidden", "true");
+
+  const copy = document.createElement("div");
+  copy.className = "action-copy";
+  const title = document.createElement("p");
+  title.textContent = current.title;
+  copy.append(title);
+  if (current.detail) {
+    const detail = document.createElement("span");
+    detail.textContent = current.detail;
+    copy.append(detail);
+  }
+
+  const meta = document.createElement("span");
+  meta.className = "action-meta";
+  meta.textContent =
+    activities.length > 1
+      ? activityStatusLabel(current) + "，共 " + activities.length + " 件"
+      : activityStatusLabel(current);
+
+  wrapper.append(mark, copy, meta);
+  elements.actionTrail.replaceChildren(wrapper);
+  elements.turnStatus.hidden = false;
+  elements.presence.hidden = true;
+  elements.actionTrail.hidden = false;
+}
+
+function renderTurnState(state) {
+  if (state.phase === "present") renderPresence(state);
+  else if (state.phase === "acting") renderActionTrail(state);
+  else hideTurnStatus();
+  scrollToLatest();
+}
+
+function safeErrorMessage() {
+  return "刚才没有连上。你可以再发一次，我也会在这里。";
+}
+
+function showError() {
+  const note = document.createElement("div");
   note.className = "error-note";
-  note.textContent = message || "刚才没有连上，再试一次吧。";
+  const message = document.createElement("span");
+  message.textContent = safeErrorMessage();
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.textContent = "再试一次";
+  retry.addEventListener("click", () => {
+    note.remove();
+    elements.input.focus();
+  });
+  note.append(message, retry);
   elements.messages.append(note);
-  scrollToLatest();
-}
-
-function renderActivity(activity) {
-  removeEmptyState();
-  if (!activeActivity) {
-    activeActivity = document.createElement("div");
-    activeActivity.className = "activity-card";
-    activeActivity.innerHTML = `
-      <div class="activity-mark" aria-hidden="true"></div>
-      <div>
-        <p class="activity-title"></p>
-        <p class="activity-detail"></p>
-      </div>`;
-    elements.messages.append(activeActivity);
-  }
-  activeActivity.dataset.state = activity.state || "active";
-  activeActivity.querySelector(".activity-title").textContent = activity.title;
-  const detail = activeActivity.querySelector(".activity-detail");
-  detail.textContent = activity.detail || "";
-  detail.hidden = !activity.detail;
-  scrollToLatest();
-}
-
-function updateActivity(activity) {
-  if (!activity || !activity.title) return;
-  if (activity.state === "active" && !activeActivity) {
-    pendingActivity = activity;
-    if (!activityTimer) {
-      const elapsed = Math.max(0, Date.now() - turnStartedAt);
-      activityTimer = window.setTimeout(() => {
-        activityTimer = null;
-        if (pendingActivity) renderActivity(pendingActivity);
-      }, Math.max(0, ACTIVITY_DELAY_MS - elapsed));
-    }
-    return;
-  }
-  if (activity.state === "completed" && !activeActivity) {
-    pendingActivity = null;
-    if (activityTimer) window.clearTimeout(activityTimer);
-    activityTimer = null;
-    return;
-  }
-  pendingActivity = null;
-  if (activityTimer) window.clearTimeout(activityTimer);
-  activityTimer = null;
-  renderActivity(activity);
+  keepAtLatest = true;
+  scrollToLatest(true);
 }
 
 function parseEventBlock(block) {
@@ -114,35 +184,36 @@ function parseEventBlock(block) {
 }
 
 function handleStreamEvent(name, payload) {
-  if (payload.activity) updateActivity(payload.activity);
+  turnState = HoneyOSRunState.reduce(
+    turnState,
+    { name, payload },
+    Date.now(),
+  );
+
   if (name === "assistant.delta" && payload.delta) {
-    if (!activeAssistantBubble) activeAssistantBubble = addMessage("assistant", "");
-    if (!activeAssistantBubble) {
-      removeEmptyState();
-      const row = document.createElement("div");
-      row.className = "message-row assistant";
-      activeAssistantBubble = document.createElement("div");
-      activeAssistantBubble.className = "bubble";
-      row.append(activeAssistantBubble);
-      elements.messages.append(row);
-    }
-    activeAssistantBubble.textContent += payload.delta;
-    scrollToLatest();
+    if (!activeAssistantBubble) activeAssistantBubble = createMessage("assistant");
+    activeAssistantBubble.textContent = turnState.content;
   }
+
   if (name === "assistant.completed" && payload.content) {
-    if (!activeAssistantBubble) activeAssistantBubble = addMessage("assistant", payload.content);
-    else activeAssistantBubble.textContent = payload.content;
+    if (!activeAssistantBubble) activeAssistantBubble = createMessage("assistant");
+    activeAssistantBubble.textContent = turnState.content;
   }
-  if (name === "error") showError(payload.message);
+
+  if (name === "error") showError();
+  renderTurnState(turnState);
 }
 
 async function consumeSse(response) {
-  if (!response.ok || !response.body) throw new Error("聊天服务暂时没有回应");
+  if (!response.ok || !response.body) throw new Error("chat_unavailable");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+
   while (true) {
-    const { value, done } = await reader.read();
+    const result = await reader.read();
+    const value = result.value;
+    const done = result.done;
     buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
     const blocks = buffer.split("\n\n");
     buffer = blocks.pop() || "";
@@ -155,48 +226,56 @@ async function consumeSse(response) {
 }
 
 async function bootstrap() {
-  const response = await fetch("/api/companion/bootstrap", { credentials: "same-origin" });
-  if (!response.ok) throw new Error("本地伴侣还没有准备好");
+  const response = await fetch("/api/companion/bootstrap", {
+    credentials: "same-origin",
+  });
+  if (!response.ok) throw new Error("bootstrap_unavailable");
   const data = await response.json();
   sessionId = data.session_id;
   sessionKey = data.session_key;
   elements.name.textContent = data.profile.name;
   elements.status.textContent = data.profile.status;
   elements.avatar.textContent = Array.from(data.profile.name || "H")[0];
-  for (const message of data.messages || []) addMessage(message.role, message.content);
+  for (const message of data.messages || []) {
+    addMessage(message.role, message.content);
+  }
+  scrollToLatest(true);
 }
 
 async function sendMessage(text) {
   sending = true;
   elements.send.disabled = true;
-  activeActivity = null;
   activeAssistantBubble = null;
-  pendingActivity = null;
-  turnStartedAt = Date.now();
-  if (activityTimer) window.clearTimeout(activityTimer);
-  activityTimer = null;
-  addMessage("user", text);
+  turnState = HoneyOSRunState.create(Date.now());
+  addMessage("user", text, { forceScroll: true });
+
   try {
-    const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/chat/stream`, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: {
-        "Content-Type": "application/json",
-        "X-HoneyOS-Session-Key": sessionKey,
-        "X-HoneyOS-Companion-View": "1",
+    const response = await fetch(
+      "/api/sessions/" + encodeURIComponent(sessionId) + "/chat/stream",
+      {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "X-HoneyOS-Session-Key": sessionKey,
+          "X-HoneyOS-Companion-View": "1",
+        },
+        body: JSON.stringify({ message: text }),
       },
-      body: JSON.stringify({ message: text }),
-    });
+    );
     await consumeSse(response);
-  } catch (error) {
-    showError(error instanceof Error ? error.message : "刚才没有连上，再试一次吧。");
+  } catch {
+    turnState = HoneyOSRunState.reduce(
+      turnState,
+      { name: "error", payload: { message: "chat_unavailable" } },
+      Date.now(),
+    );
+    showError();
+    renderTurnState(turnState);
   } finally {
     sending = false;
     elements.send.disabled = false;
     activeAssistantBubble = null;
-    pendingActivity = null;
-    if (activityTimer) window.clearTimeout(activityTimer);
-    activityTimer = null;
     elements.input.focus();
   }
 }
@@ -212,7 +291,8 @@ elements.form.addEventListener("submit", (event) => {
 
 elements.input.addEventListener("input", () => {
   elements.input.style.height = "auto";
-  elements.input.style.height = `${Math.min(elements.input.scrollHeight, 132)}px`;
+  elements.input.style.height =
+    Math.min(elements.input.scrollHeight, 132) + "px";
 });
 
 elements.input.addEventListener("keydown", (event) => {
@@ -222,4 +302,14 @@ elements.input.addEventListener("keydown", (event) => {
   }
 });
 
-bootstrap().catch((error) => showError(error.message));
+elements.messages.addEventListener("scroll", () => {
+  keepAtLatest = isNearLatest();
+  updateScrollButton();
+});
+
+elements.scrollLatest.addEventListener("click", () => scrollToLatest(true));
+
+if (window.location.protocol !== "file:") {
+  bootstrap().catch(() => showError());
+}
+
