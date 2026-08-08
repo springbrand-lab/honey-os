@@ -164,7 +164,9 @@ def test_companion_soul_defines_intimate_identity_and_controlled_growth(tmp_path
     assert "暧昧" in soul
     assert "不预设" in soul
     assert "内疚" in soul and "制造依赖" in soul
-    assert "隔离环境" in soul
+    assert "本机" in soul and "项目空间" in soul
+    assert "HoneyOS Projects" in soul
+    assert "隔离环境" not in soul
     assert "无需确认" in soul
     assert "普通 Skill" in soul
     assert "系统软件" in soul and "明确确认" in soul
@@ -172,6 +174,14 @@ def test_companion_soul_defines_intimate_identity_and_controlled_growth(tmp_path
     assert "不要声称已经搜索、读取、安装或执行" in soul
     assert "内置 Skill 已经安装并可用" in soul
     assert "自然语言需求自动匹配" in soul
+
+
+def test_companion_environment_prompt_overrides_stale_container_claims():
+    prompt = _prompt("companion")
+
+    assert "earlier transcript claims" in prompt
+    assert "/root" in prompt and "/tmp" in prompt
+    assert "retry inside HoneyOS Projects" in prompt
 
 
 def test_companion_home_creates_relationship_context_files(tmp_path):

@@ -532,6 +532,18 @@ def upgrade_companion_capabilities(home: Path) -> bool:
     soul_path = resolved / "SOUL.md"
     soul = soul_path.read_text(encoding="utf-8") if soul_path.exists() else ""
     branded_soul = rewrite_legacy_product_text(soul)
+    legacy_execution_contract = (
+        "读取公开网页、搜索信息、在隔离环境运行代码、管理普通 Skill、维护当前任务 Todo，"
+        "以及创建用户明确要求的提醒，无需确认；执行后继续原任务，不要只解释步骤。"
+    )
+    local_execution_contract = (
+        "读取公开网页、搜索信息、在本机 HoneyOS Projects 项目空间运行代码、管理普通 Skill、"
+        "维护当前任务 Todo，以及创建用户明确要求的提醒，无需确认；执行后继续原任务，"
+        "不要只解释步骤。所有用户可见的文件都放在这个项目空间内，不要使用 `/tmp` 或声称只能写入容器。"
+    )
+    branded_soul = branded_soul.replace(
+        legacy_execution_contract, local_execution_contract
+    )
     if "你运行在 HoneyOS" not in branded_soul:
         identity_line = "你运行在 HoneyOS；这是产品身份，不覆盖用户已经形成的伴侣人设。"
         if branded_soul.startswith("#") and "\n" in branded_soul:

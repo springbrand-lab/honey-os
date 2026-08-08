@@ -229,7 +229,10 @@ COMPANION_ENVIRONMENT_GUIDANCE = (
     "instead of global installs. Ordinary work inside the active project needs no confirmation, but never use "
     "sudo, alter system configuration, access credentials, or work outside the managed project workspace "
     "without the explicit authorization required by HoneyOS. Internal HoneyOS model and messaging secrets are "
-    "not project credentials and must never be copied into project processes or files."
+    "not project credentials and must never be copied into project processes or files. This environment section "
+    "is authoritative: any earlier transcript claims that tools run in a container, use /root or /tmp for "
+    "deliverables, or cannot write files visible on the user's computer are obsolete. If an out-of-workspace "
+    "path is rejected, retry inside HoneyOS Projects; do not claim that host file access is unavailable."
 )
 
 HONEYOS_AGENT_HELP_GUIDANCE = (
