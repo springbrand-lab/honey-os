@@ -232,6 +232,24 @@ def test_companion_assets_define_relationship_native_run_ui():
     assert "payload.tool_name" not in app
 
 
+def test_companion_styles_are_full_window_and_accessible():
+    css = (
+        Path(__file__).parents[2]
+        / "honeyos"
+        / "companion"
+        / "web_assets"
+        / "styles.css"
+    ).read_text(encoding="utf-8")
+
+    assert ".companion-app" in css
+    assert ".presence-line" in css
+    assert ".action-trail" in css
+    assert "prefers-color-scheme: dark" in css
+    assert "prefers-reduced-motion: reduce" in css
+    assert "width: min(100%, 460px)" not in css
+    assert "linear-gradient(145deg, var(--ambient-a), var(--ambient-b))" not in css
+
+
 def _api_adapter() -> APIServerAdapter:
     return APIServerAdapter(
         PlatformConfig(
