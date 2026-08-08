@@ -23,6 +23,9 @@ from honeyos.gateway.config import Platform
 from honeyos.gateway.config import PlatformConfig
 from honeyos.gateway.platforms.api_server import (
     APIServerAdapter,
+    _companion_tool_event_payload,
+    _run_completed_event_payload,
+    _runtime_provider_identity,
     _security_headers_for_path,
 )
 from honeyos.gateway.session import SessionSource, build_session_key
@@ -261,6 +264,106 @@ def test_file_mode_and_provider_recovery_have_human_copy():
     assert "honeyos setup" in app
     assert "No LLM provider configured" not in index
     assert "file-mode-notice" in file_guard
+
+
+def test_session_model_refresh_keeps_named_custom_provider_identity():
+    runtime = {
+        "provider": "custom",
+        "requested_provider": "honeyos-model",
+        "base_url": "https://example.invalid/v1",
+        "api_key": "configured",
+    }
+
+    assert _runtime_provider_identity(runtime) == "honeyos-model"
+    assert _runtime_provider_identity({"provider": "openrouter"}) == "openrouter"
+
+
+def test_session_model_agent_refresh_does_not_replace_named_provider_credentials(
+    monkeypatch,
+):
+    import honeyos.gateway.platforms.api_server as api_server
+    import honeyos.gateway.run as gateway_run
+    import honeyos.run_agent as run_agent
+
+    captured = {}
+    refreshed = []
+
+    class FakeAgent:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            self.provider = kwargs.get("provider")
+            self.model = kwargs.get("model")
+
+    def resolve_provider(provider, target_model=None):
+        refreshed.append((provider, target_model))
+        assert provider == "honeyos-model"
+        return {
+            "provider": "custom",
+            "requested_provider": "honeyos-model",
+            "base_url": "https://configured.example/v1",
+            "api_key": "configured-key",
+            "api_mode": "chat_completions",
+        }
+
+    monkeypatch.setattr(run_agent, "AIAgent", FakeAgent)
+    monkeypatch.setattr(
+        gateway_run,
+        "_resolve_runtime_agent_kwargs",
+        lambda: {
+            "provider": "custom",
+            "requested_provider": "honeyos-model",
+            "base_url": "https://configured.example/v1",
+            "api_key": "configured-key",
+            "api_mode": "chat_completions",
+        },
+    )
+    monkeypatch.setattr(gateway_run, "_resolve_gateway_model", lambda: "default-model")
+    monkeypatch.setattr(gateway_run, "_load_gateway_config", lambda: {})
+    monkeypatch.setattr(
+        api_server, "_resolve_request_runtime_agent_kwargs", resolve_provider
+    )
+
+    adapter = _api_adapter()
+    monkeypatch.setattr(adapter, "_ensure_session_db", lambda: None)
+    adapter._create_agent(
+        session_id="session-1",
+        gateway_session_key="owner",
+        session_model="deepseek-v4-flash",
+    )
+
+    assert refreshed == [("honeyos-model", "deepseek-v4-flash")]
+    assert captured["api_key"] == "configured-key"
+    assert captured["base_url"] == "https://configured.example/v1"
+    assert captured["requested_provider"] == "honeyos-model"
+
+
+def test_companion_stream_payloads_never_include_raw_tool_or_reasoning_data():
+    tool_payload = _companion_tool_event_payload(
+        event_type="tool.started",
+        message_id="message-1",
+        tool_name="terminal",
+        activity_id="activity-1",
+        preview="curl https://private.example",
+        args={"api_key": "secret"},
+    )
+    completed_payload = _run_completed_event_payload(
+        companion_view=True,
+        session_id="session-1",
+        message_id="message-1",
+        turn_messages=[{"role": "assistant", "reasoning": "private"}],
+        usage={"input_tokens": 99},
+        runtime={"provider": "custom", "model": "test"},
+    )
+
+    assert set(tool_payload) == {"message_id", "activity"}
+    assert "terminal" not in str(tool_payload)
+    assert "private" not in str(tool_payload)
+    assert completed_payload == {
+        "session_id": "session-1",
+        "message_id": "message-1",
+        "completed": True,
+        "runtime": {"provider": "custom", "model": "test"},
+    }
 
 
 def _api_adapter() -> APIServerAdapter:

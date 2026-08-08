@@ -252,6 +252,7 @@ _RUNTIME_AGENT_OVERRIDE_KEYS = (
     "api_key",
     "base_url",
     "provider",
+    "requested_provider",
     "api_mode",
     "command",
     "args",
@@ -328,6 +329,65 @@ def _apply_runtime_agent_overrides(
     return runtime_kwargs
 
 
+def _runtime_provider_identity(runtime_kwargs: Dict[str, Any]) -> Optional[str]:
+    """Return the configured provider identity before runtime normalization.
+
+    Named OpenAI-compatible providers resolve to the transport provider
+    ``custom``.  ``requested_provider`` retains the configured entry name and
+    must be used when a persisted session model refreshes credentials;
+    resolving bare ``custom`` can otherwise discard the entry's key and URL.
+    """
+    return _clean_request_string(runtime_kwargs.get("requested_provider")) or _clean_request_string(
+        runtime_kwargs.get("provider")
+    )
+
+
+def _companion_tool_event_payload(
+    *,
+    event_type: str,
+    message_id: str,
+    tool_name: Optional[str],
+    activity_id: str,
+    preview: Optional[str] = None,
+    args: Any = None,
+) -> Dict[str, Any]:
+    """Project a tool event into the companion browser's safe vocabulary."""
+    from honeyos.companion.activity import project_activity
+
+    return {
+        "message_id": message_id,
+        "activity": project_activity(
+            event_type,
+            tool_name,
+            activity_id=activity_id,
+            preview=preview,
+            args=args,
+        ),
+    }
+
+
+def _run_completed_event_payload(
+    *,
+    companion_view: bool,
+    session_id: str,
+    message_id: str,
+    turn_messages: List[Dict[str, Any]],
+    usage: Dict[str, Any],
+    runtime: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Build a completion event without exposing transcripts to companion UI."""
+    payload: Dict[str, Any] = {
+        "session_id": session_id,
+        "message_id": message_id,
+        "completed": True,
+        "runtime": runtime,
+    }
+    if not companion_view:
+        payload["messages"] = turn_messages
+        payload["usage"] = usage
+    return payload
+
+
 def _resolve_request_runtime_agent_kwargs(provider: str, target_model: Optional[str] = None) -> Dict[str, Any]:
     """Resolve runtime kwargs for a one-request provider override.
 
@@ -363,6 +423,7 @@ def _resolve_request_runtime_agent_kwargs(provider: str, target_model: Optional[
         "api_key": runtime.get("api_key"),
         "base_url": runtime.get("base_url"),
         "provider": runtime.get("provider"),
+        "requested_provider": runtime.get("requested_provider"),
         "api_mode": runtime.get("api_mode"),
         "command": runtime.get("command"),
         "args": list(runtime.get("args") or []),
@@ -2902,7 +2963,7 @@ class APIServerAdapter(BasePlatformAdapter):
         if session_override:
             override_model = resolve_effective_model(session_override, None, model)
             session_provider = _clean_request_string(session_override.get("provider"))
-            current_provider = _clean_request_string(runtime_kwargs.get("provider"))
+            current_provider = _runtime_provider_identity(runtime_kwargs)
             provider_runtime = _resolve_provider_runtime(
                 session_provider or current_provider,
                 target_model=override_model,
@@ -2922,7 +2983,7 @@ class APIServerAdapter(BasePlatformAdapter):
             # alias).  Pins this session's turns ahead of per-request body
             # values — a session's chosen model is a standing selection,
             # matching the native gateway's session-model semantics.
-            current_provider = _clean_request_string(runtime_kwargs.get("provider"))
+            current_provider = _runtime_provider_identity(runtime_kwargs)
             provider_runtime = _resolve_provider_runtime(
                 current_provider,
                 target_model=session_row_model,
@@ -2945,7 +3006,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 effective_model = route_model or model
             else:
                 effective_model = request_model or model
-            current_provider = _clean_request_string(runtime_kwargs.get("provider"))
+            current_provider = _runtime_provider_identity(runtime_kwargs)
             effective_provider = request_provider or route_provider or current_provider
             provider_runtime = None
             if effective_provider and (
@@ -3929,6 +3990,7 @@ class APIServerAdapter(BasePlatformAdapter):
         seq = 0
         activity_seq = 0
         active_activity_ids: Dict[str, List[str]] = {}
+        companion_view = request.headers.get("X-HoneyOS-Companion-View") == "1"
 
         def _event_payload(name: str, payload: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
             nonlocal seq
@@ -3975,9 +4037,6 @@ class APIServerAdapter(BasePlatformAdapter):
             return f"activity_{activity_seq}"
 
         def _tool_progress(event_type: str, tool_name: str = None, preview: str = None, args=None, **kwargs) -> None:
-            companion_view = (
-                request.headers.get("X-HoneyOS-Companion-View") == "1"
-            )
             if event_type == "reasoning.available":
                 # Reasoning content is never projected into the companion UI.
                 if companion_view:
@@ -3990,30 +4049,29 @@ class APIServerAdapter(BasePlatformAdapter):
                 else:
                     _enqueue("tool.progress", {"message_id": message_id, "tool_name": tool_name or "_thinking", "delta": preview or ""})
             elif event_type in {"tool.started", "tool.completed", "tool.failed"}:
-                payload = {
-                    "message_id": message_id,
-                    "tool_name": tool_name,
-                    "preview": preview,
-                    "args": args,
-                }
                 if companion_view:
-                    from honeyos.companion.activity import project_activity
-
                     activity_id = (
                         _started_activity_id(tool_name)
                         if event_type == "tool.started"
                         else _finished_activity_id(tool_name)
                     )
-                    # The browser reads only this safe projection. Keep the
-                    # legacy raw fields for authenticated API clients that
-                    # already depend on the session-stream contract.
-                    payload["activity"] = project_activity(
-                        event_type,
-                        tool_name,
+                    payload = _companion_tool_event_payload(
+                        event_type=event_type,
+                        message_id=message_id,
+                        tool_name=tool_name,
                         activity_id=activity_id,
                         preview=preview,
                         args=args,
                     )
+                else:
+                    # Keep the legacy raw fields for authenticated API clients
+                    # that already depend on the session-stream contract.
+                    payload = {
+                        "message_id": message_id,
+                        "tool_name": tool_name,
+                        "preview": preview,
+                        "args": args,
+                    }
                 _enqueue(event_type, payload)
 
         async def _run_and_signal() -> None:
@@ -4068,14 +4126,17 @@ class APIServerAdapter(BasePlatformAdapter):
                     "interrupted": False,
                     "runtime": effective_runtime,
                 }))
-                await queue.put(_event_payload("run.completed", {
-                    "session_id": effective_session_id,
-                    "message_id": message_id,
-                    "completed": True,
-                    "messages": turn_messages,
-                    "usage": usage,
-                    "runtime": effective_runtime,
-                }))
+                await queue.put(_event_payload(
+                    "run.completed",
+                    _run_completed_event_payload(
+                        companion_view=companion_view,
+                        session_id=effective_session_id,
+                        message_id=message_id,
+                        turn_messages=turn_messages,
+                        usage=usage,
+                        runtime=effective_runtime,
+                    ),
+                ))
             except Exception as exc:
                 logger.exception("[api_server] session chat stream failed")
                 await queue.put(_event_payload("error", {"message": _redact_api_error_text(exc)}))
