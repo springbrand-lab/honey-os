@@ -44,6 +44,56 @@ def ensure_project_root(data_home: Path | None = None) -> Path:
     return root
 
 
+def active_managed_project_root() -> Path | None:
+    """Return the configured companion workspace, or ``None`` outside it."""
+
+    try:
+        from honeyos.runtime.config import load_config_readonly
+
+        config = load_config_readonly()
+    except Exception:
+        return None
+    agent = config.get("agent") if isinstance(config.get("agent"), dict) else {}
+    terminal = (
+        config.get("terminal") if isinstance(config.get("terminal"), dict) else {}
+    )
+    if str(agent.get("mode", "")).strip().lower() != "companion":
+        return None
+    if str(terminal.get("backend", "")).strip().lower() != "local":
+        return None
+    raw_root = str(terminal.get("cwd", "")).strip()
+    if not raw_root:
+        return None
+    root = Path(raw_root).expanduser()
+    return root.resolve() if root.is_absolute() else None
+
+
+def path_is_in_managed_projects(path: Path, root: Path | None = None) -> bool:
+    """Return whether a host path resolves within the active project root."""
+
+    managed_root = (root or active_managed_project_root())
+    if managed_root is None:
+        return True
+    try:
+        path.expanduser().resolve().relative_to(managed_root.resolve())
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return True
+
+
+def managed_project_boundary_error(path: Path) -> str | None:
+    """Describe an out-of-workspace companion path without granting access."""
+
+    root = active_managed_project_root()
+    if root is None or path_is_in_managed_projects(path, root):
+        return None
+    return (
+        f"Blocked: {path} is outside the managed HoneyOS Projects workspace "
+        f"({root}). Put the project there; access to another user directory "
+        "requires an explicit directory-authorization feature."
+    )
+
+
 def _load_completed_tasks(marker: Path) -> set[str]:
     try:
         payload = json.loads(marker.read_text(encoding="utf-8"))
