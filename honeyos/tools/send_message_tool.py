@@ -251,6 +251,17 @@ def send_message_tool(args, **kw):
     if action == "unreact":
         return _handle_react(args, remove=True)
 
+    target = str(args.get("target") or "").strip()
+    if target:
+        from honeyos.tools.permission_policy import Effect, gate_effect_or_error
+
+        blocked = gate_effect_or_error(
+            Effect("send", target=target, external_commit=True),
+            tool_name="send_message",
+        )
+        if blocked is not None:
+            return blocked
+
     return _handle_send(args)
 
 

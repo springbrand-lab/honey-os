@@ -8,6 +8,7 @@ tool output, browsed pages, and installed Skills cannot create one.
 from __future__ import annotations
 
 import contextvars
+import json
 import re
 from dataclasses import dataclass
 from enum import Enum
@@ -162,7 +163,11 @@ def grant_matches(grant: IntentGrant, effect: Effect) -> bool:
     if grant.scope == "subtree":
         return effect_target == grant_target or effect_target.startswith(grant_target + "/")
     if grant.scope == "task":
-        return grant_target in effect_target or effect_target in grant_target
+        # Task-scoped grants are already bounded by the current tool-dispatch
+        # ContextVar and action class. Schedules often normalize from natural
+        # language ("每天九点") to cron syntax, so target string equality is
+        # neither stable nor useful here.
+        return True
     return grant_target == effect_target
 
 
@@ -202,3 +207,63 @@ def decide_effect(effect: Effect) -> PolicyDecision:
         )
 
     return PolicyDecision(RiskTier.DIRECT, "ordinary reversible action")
+
+
+def _effect_summary(effect: Effect) -> str:
+    labels = {
+        "send": "向其他会话发送消息",
+        "upload": "把本地内容上传到外部服务",
+        "publish": "向外发布内容",
+        "schedule": "创建未来会自动执行的任务",
+        "desktop": "在电脑界面完成一次对外操作",
+        "directory": "访问 HoneyOS Projects 以外的目录",
+    }
+    label = labels.get(effect.action_class, "执行一项会越过当前边界的操作")
+    return f"{label}：{effect.target}" if effect.target else label
+
+
+def gate_effect_or_error(effect: Effect, *, tool_name: str) -> str | None:
+    """Return a JSON tool error when an effect cannot proceed, else ``None``."""
+
+    decision = decide_effect(effect)
+    if decision.tier is RiskTier.DIRECT:
+        return None
+    summary = _effect_summary(effect)
+    if decision.tier is RiskTier.HARD_BLOCK:
+        return json.dumps(
+            {
+                "success": False,
+                "status": "hard_blocked",
+                "error": summary,
+                "action_class": effect.action_class,
+                "target": effect.target,
+            },
+            ensure_ascii=False,
+        )
+
+    from honeyos.tools.approval import request_tool_approval
+
+    target_hash = __import__("hashlib").sha256(
+        effect.target.encode("utf-8", errors="replace")
+    ).hexdigest()[:12]
+    result = request_tool_approval(
+        tool_name,
+        summary,
+        rule_key=f"effect:{effect.action_class}:{target_hash}",
+    )
+    if result.get("approved"):
+        return None
+    return json.dumps(
+        {
+            "success": False,
+            "status": result.get("status", "blocked"),
+            "error": result.get("message") or summary,
+            "approval_pending": bool(
+                result.get("approval_pending")
+                or result.get("status") in {"approval_required", "pending_approval"}
+            ),
+            "action_class": effect.action_class,
+            "target": effect.target,
+        },
+        ensure_ascii=False,
+    )

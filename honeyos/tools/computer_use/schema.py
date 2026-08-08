@@ -64,6 +64,19 @@ COMPUTER_USE_SCHEMA: Dict[str, Any] = {
                     "without opening the native menu (no focus steal)."
                 ),
             },
+            "effect": {
+                "type": "string",
+                "enum": [
+                    "none", "send", "submit", "publish", "purchase",
+                    "delete", "credential", "permission",
+                ],
+                "description": (
+                    "Declare the user-visible commit effect of this exact action. "
+                    "Use none or omit for reversible navigation. Use send, submit, "
+                    "publish, purchase, delete, credential, or permission immediately "
+                    "before the corresponding external commit boundary."
+                ),
+            },
             # ── capture ────────────────────────────────────────────
             "mode": {
                 "type": "string",

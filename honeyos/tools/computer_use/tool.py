@@ -82,14 +82,21 @@ _SAFE_ACTIONS = frozenset({
     "capture", "wait", "list_apps", "list_windows", "cua_browser_state",
 })
 
-# Actions that mutate user-visible state. Go through approval.
+# Legacy per-action approval remains only for file transfer and native dialog
+# actions. Reversible navigation is direct; consequential commit effects use
+# the shared effect gate below.
 _DESTRUCTIVE_ACTIONS = frozenset({
-    "click", "double_click", "right_click", "middle_click",
-    "drag", "scroll", "type", "key", "set_value", "focus_app",
-    "cua_browser_prepare", "cua_browser_navigate", "cua_browser_click",
-    "cua_browser_type", "cua_browser_pointer", "cua_browser_dialog",
+    "cua_browser_dialog",
     "cua_browser_set_input_files", "cua_browser_download",
 })
+
+_COMMIT_EFFECTS = frozenset({
+    "send", "submit", "publish", "purchase", "delete", "credential", "permission",
+})
+
+
+def _computer_effect_requires_consent(args: Dict[str, Any]) -> bool:
+    return str(args.get("effect") or "").strip().lower() in _COMMIT_EFFECTS
 
 # Hard-blocked key combinations. Mirrored from #4562 — these are destructive
 # regardless of approval level (e.g. logout kills the session HoneyOS runs in).
@@ -476,21 +483,27 @@ def handle_computer_use(args: Dict[str, Any], **kwargs) -> Any:
             "code": "bring_to_front_requires_foreground",
         })
 
+    if _computer_effect_requires_consent(args):
+        from honeyos.tools.permission_policy import Effect, gate_effect_or_error
+
+        effect_name = str(args.get("effect") or "").strip().lower()
+        target = str(args.get("app") or args.get("window_id") or action)
+        blocked = gate_effect_or_error(
+            Effect(
+                "desktop",
+                target=f"{effect_name}:{target}",
+                external_commit=True,
+            ),
+            tool_name="computer_use",
+        )
+        if blocked is not None:
+            return blocked
+
     # Approval gate (destructive actions only).
     if action in _DESTRUCTIVE_ACTIONS:
         err = _request_approval(action, args, session_id)
         if err is not None:
             return err
-    # Persistent focus is a separate, visible side effect from the input
-    # itself. Keep its approval scope distinct even when the input rung has
-    # already been approved for this session.
-    if args.get("bring_to_front") or (
-        action == "focus_app" and args.get("raise_window")
-    ):
-        err = _request_approval("bring_to_front", args, session_id)
-        if err is not None:
-            return err
-
     # Dispatch to backend.
     try:
         backend = _get_backend(session_id=session_id)

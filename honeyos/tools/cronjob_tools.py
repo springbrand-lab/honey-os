@@ -707,6 +707,39 @@ def _execute_job_now(job: Dict[str, Any]) -> Dict[str, Any]:
         return {"claimed": True, "success": False, "error": str(e)}
 
 
+_CRON_EXTERNAL_EFFECT_RE = re.compile(
+    r"(?:send_message|发送|发给|发布|上传|purchase|购买|删除外部)",
+    re.IGNORECASE,
+)
+
+
+def _cron_effect_for_create(
+    *,
+    prompt: str | None,
+    schedule: str | None,
+    deliver: str | None,
+    script: str | None,
+    no_agent: bool,
+):
+    """Describe only cron jobs that create unattended external effects."""
+
+    normalized_deliver = str(deliver or "origin").strip().lower()
+    has_external_delivery = normalized_deliver not in {"", "origin", "local"}
+    has_external_prompt = bool(_CRON_EXTERNAL_EFFECT_RE.search(str(prompt or "")))
+    if not (script or no_agent or has_external_delivery or has_external_prompt):
+        return None
+    from honeyos.tools.permission_policy import Effect
+
+    target = f"{schedule or 'unspecified'}:{normalized_deliver or 'origin'}"
+    return Effect(
+        "schedule",
+        target=target,
+        unattended=True,
+        external_commit=has_external_delivery or has_external_prompt,
+        technical_detail=str(prompt or script or "scheduled task"),
+    )
+
+
 def cronjob(
     action: str,
     job_id: Optional[str] = None,
@@ -771,6 +804,20 @@ def cronjob(
             base_url_error = _validate_cron_base_url(provider, base_url)
             if base_url_error:
                 return tool_error(base_url_error, success=False)
+
+            cron_effect = _cron_effect_for_create(
+                prompt=prompt,
+                schedule=schedule,
+                deliver=deliver,
+                script=script,
+                no_agent=_no_agent,
+            )
+            if cron_effect is not None:
+                from honeyos.tools.permission_policy import gate_effect_or_error
+
+                blocked = gate_effect_or_error(cron_effect, tool_name="cronjob")
+                if blocked is not None:
+                    return blocked
 
             # Validate context_from references existing jobs
             if context_from:
