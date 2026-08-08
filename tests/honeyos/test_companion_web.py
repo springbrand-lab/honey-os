@@ -228,6 +228,9 @@ def test_companion_assets_define_relationship_native_run_ui():
     assert 'id="presence-line"' in index
     assert 'id="action-trail"' in index
     assert 'id="scroll-to-latest"' in index
+    assert 'class="message-avatar status-avatar"' in index
+    assert 'message-avatar' in app
+    assert 'state.activities.length' in app
     assert "activityTimer" not in app
     assert "ACTIVITY_DELAY_MS" not in app
     assert "payload.preview" not in app
@@ -247,6 +250,8 @@ def test_companion_styles_are_full_window_and_accessible():
     assert ".companion-app" in css
     assert ".presence-line" in css
     assert ".action-trail" in css
+    assert ".message-avatar" in css
+    assert ".turn-status-row" in css
     assert "prefers-color-scheme: dark" in css
     assert "prefers-reduced-motion: reduce" in css
     assert "width: min(100%, 460px)" not in css

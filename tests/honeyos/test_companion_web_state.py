@@ -42,12 +42,13 @@ state = HoneyOSRunState.reduce(state, {name:'run.started', payload:{}}, 1000);
 state = HoneyOSRunState.reduce(state, {name:'tool.started', payload:{activity:{activity_id:'a1',kind:'checking',state:'active',title:'我去替你认真看看',detail:''}}}, 1100);
 state = HoneyOSRunState.reduce(state, {name:'tool.completed', payload:{activity:{activity_id:'a1',kind:'checking',state:'completed',title:'找到了，我整理一下',detail:''}}}, 1400);
 state = HoneyOSRunState.reduce(state, {name:'assistant.delta', payload:{delta:'找'}}, 1600);
+state = HoneyOSRunState.reduce(state, {name:'assistant.completed', payload:{content:'找到了'}}, 1700);
 process.stdout.write(JSON.stringify(state));
 """
     )
 
-    assert state["phase"] == "responding"
-    assert state["content"] == "找"
+    assert state["phase"] == "completed"
+    assert state["content"] == "找到了"
     assert state["activities"] == [
         {
             "activity_id": "a1",
@@ -77,4 +78,3 @@ process.stdout.write(JSON.stringify(state));
     assert [item["activity_id"] for item in state["activities"]] == ["a1", "a2"]
     assert state["activities"][1]["state"] == "failed"
     assert state["presence"]["title"] == "我在想你刚才说的事"
-

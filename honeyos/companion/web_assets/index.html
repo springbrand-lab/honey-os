@@ -33,19 +33,21 @@
             <p>想说什么都可以。</p>
             <span>不用想好再来找我。</span>
           </div>
+          <div class="turn-status turn-status-row" id="turn-status" hidden>
+            <div class="message-avatar status-avatar" id="status-avatar" aria-hidden="true">H</div>
+            <div class="turn-status-body">
+              <div class="presence-line" id="presence-line" hidden>
+                <span class="presence-pulse" aria-hidden="true"></span>
+                <span id="presence-copy">我在想你刚才说的事</span>
+              </div>
+              <div class="action-trail" id="action-trail" hidden></div>
+            </div>
+          </div>
         </div>
 
         <button class="scroll-to-latest" id="scroll-to-latest" type="button" hidden>
           看最新消息
         </button>
-
-        <div class="turn-status" id="turn-status" hidden>
-          <div class="presence-line" id="presence-line" hidden>
-            <span class="presence-pulse" aria-hidden="true"></span>
-            <span id="presence-copy">我在想你刚才说的事</span>
-          </div>
-          <div class="action-trail" id="action-trail" hidden></div>
-        </div>
 
         <aside class="file-mode-notice" id="file-mode-notice" hidden>
           <strong>HoneyOS 还没有启动</strong>
@@ -65,4 +67,3 @@
     <script src="./app.js" defer></script>
   </body>
 </html>
-

@@ -7,6 +7,7 @@ const elements = {
   name: document.querySelector("#companion-name"),
   status: document.querySelector("#companion-status"),
   avatar: document.querySelector("#avatar"),
+  statusAvatar: document.querySelector("#status-avatar"),
   turnStatus: document.querySelector("#turn-status"),
   presence: document.querySelector("#presence-line"),
   presenceCopy: document.querySelector("#presence-copy"),
@@ -20,6 +21,7 @@ let activeAssistantBubble = null;
 let sending = false;
 let turnState = HoneyOSRunState.create(Date.now());
 let keepAtLatest = true;
+let companionAvatarLabel = "H";
 
 function isNearLatest() {
   const remaining =
@@ -57,9 +59,15 @@ function createMessage(role) {
   removeEmptyState();
   const row = document.createElement("div");
   row.className = "message-row " + (role === "user" ? "user" : "assistant");
+  const avatar = document.createElement("div");
+  avatar.className =
+    "message-avatar " + (role === "user" ? "user-avatar" : "assistant-avatar");
+  avatar.setAttribute("aria-hidden", "true");
+  avatar.textContent = role === "user" ? "你" : companionAvatarLabel;
   const bubble = document.createElement("div");
   bubble.className = "bubble";
-  row.append(bubble);
+  if (role === "user") row.append(bubble, avatar);
+  else row.append(avatar, bubble);
   elements.messages.append(row);
   return bubble;
 }
@@ -81,11 +89,19 @@ function hideTurnStatus() {
   elements.actionTrail.hidden = true;
 }
 
+function showTurnStatus() {
+  const shouldMoveToLatest =
+    elements.turnStatus.hidden ||
+    elements.turnStatus.parentElement !== elements.messages;
+  if (shouldMoveToLatest) elements.messages.append(elements.turnStatus);
+  elements.turnStatus.hidden = false;
+}
+
 function renderPresence(state) {
   const activity = state.presence || { title: "我在想你刚才说的事" };
   elements.presenceCopy.textContent =
     activity.title || "我在想你刚才说的事";
-  elements.turnStatus.hidden = false;
+  showTurnStatus();
   elements.presence.hidden = false;
   elements.actionTrail.hidden = true;
 }
@@ -134,14 +150,14 @@ function renderActionTrail(state) {
 
   wrapper.append(mark, copy, meta);
   elements.actionTrail.replaceChildren(wrapper);
-  elements.turnStatus.hidden = false;
+  showTurnStatus();
   elements.presence.hidden = true;
   elements.actionTrail.hidden = false;
 }
 
 function renderTurnState(state) {
-  if (state.phase === "present") renderPresence(state);
-  else if (state.phase === "acting") renderActionTrail(state);
+  if (state.activities.length) renderActionTrail(state);
+  else if (state.phase === "present") renderPresence(state);
   else hideTurnStatus();
   scrollToLatest();
 }
@@ -276,7 +292,9 @@ async function bootstrap() {
   sessionKey = data.session_key;
   elements.name.textContent = data.profile.name;
   elements.status.textContent = data.profile.status;
-  elements.avatar.textContent = Array.from(data.profile.name || "H")[0];
+  companionAvatarLabel = Array.from(data.profile.name || "H")[0];
+  elements.avatar.textContent = companionAvatarLabel;
+  elements.statusAvatar.textContent = companionAvatarLabel;
   for (const message of data.messages || []) {
     addMessage(message.role, message.content);
   }
@@ -288,6 +306,7 @@ async function sendMessage(text) {
   elements.send.disabled = true;
   activeAssistantBubble = null;
   turnState = HoneyOSRunState.create(Date.now());
+  hideTurnStatus();
   addMessage("user", text, { forceScroll: true });
 
   try {
