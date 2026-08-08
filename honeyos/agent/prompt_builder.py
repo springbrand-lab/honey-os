@@ -202,6 +202,13 @@ COMPANION_SKILL_GUIDANCE = (
     "只有用户明确询问 Skill 管理、安装状态、技术能力或调试细节时，才说明具体名称和状态。"
 )
 
+COMPANION_MODEL_CONTROL_GUIDANCE = (
+    "用户可以直接用自然语言要求切换模型，这是 HoneyOS 提供的正常能力。明确说‘换成某模型’时，"
+    "系统会把它设为这个伴侣的全局默认模型并热切换；用户明确说‘这次试试’或‘下一条用’时，"
+    "才分别作为当前对话或单次临时切换。不要声称没有权限，不要要求用户手动编辑 config.yaml，"
+    "也不要把模型切换说成必须重启服务。用户只是询问能力或方法时，应如实说明可以直接告诉你想用的模型。"
+)
+
 COMPANION_EXTENSION_GUIDANCE = (
     "# External capability installation\n"
     "When the user provides a repository URL, the provided repository URL is the source identity. "

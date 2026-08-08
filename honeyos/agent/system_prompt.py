@@ -35,6 +35,7 @@ from honeyos.agent.prompt_builder import (
     COMPANION_ENVIRONMENT_GUIDANCE,
     COMPANION_EXTENSION_GUIDANCE,
     COMPANION_MEMORY_GUIDANCE,
+    COMPANION_MODEL_CONTROL_GUIDANCE,
     COMPANION_SKILL_GUIDANCE,
     COMPANION_STRUCTURED_MEMORY_GUIDANCE,
     COMPANION_SESSION_SEARCH_GUIDANCE,
@@ -172,6 +173,7 @@ def _build_companion_system_prompt_parts(
         soul = runtime_helpers.load_soul_md(context_length) or ""
     identity_prompt = soul or COMPANION_AGENT_IDENTITY
     stable_parts.append(identity_prompt)
+    stable_parts.append(COMPANION_MODEL_CONTROL_GUIDANCE)
     if "# 任务中的人格连续性" not in identity_prompt:
         stable_parts.append(COMPANION_TASK_VOICE_GUIDANCE)
 
