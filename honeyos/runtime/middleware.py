@@ -131,6 +131,20 @@ def apply_tool_request_middleware(
     current_args = _safe_copy(original_args)
     trace: List[Dict[str, Any]] = []
 
+    # HoneyOS companions create user-visible files in their managed host
+    # workspace. Normalize before Relay, hooks, approvals, execution, and the
+    # turn-end mutation verifier so every layer observes the same real path.
+    try:
+        from honeyos.companion.projects import retarget_managed_write_args
+
+        managed_args = retarget_managed_write_args(tool_name, current_args)
+    except Exception as exc:
+        logger.debug("managed project write retarget failed: %s", exc)
+    else:
+        if managed_args != current_args:
+            current_args = _safe_copy(managed_args)
+            trace.append({"source": "honeyos_project_workspace"})
+
     session_id = str(context.get("session_id") or "")
     skip_relay = bool(context.pop("skip_relay", False))
     if session_id and not skip_relay:

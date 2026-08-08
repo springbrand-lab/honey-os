@@ -111,6 +111,33 @@ def managed_project_boundary_error(path: Path) -> str | None:
     )
 
 
+def retarget_managed_write_args(tool_name: str, args: dict) -> dict:
+    """Place new companion files inside the visible managed workspace.
+
+    Models sometimes infer Desktop when a user says "save it on my computer".
+    HoneyOS intentionally does not grant Desktop access, but a rejected first
+    attempt needlessly consumes another model round and leaks an internal
+    verifier warning.  Retarget only ``write_file`` creations; reads and
+    patches still require an already-authorized path.
+    """
+
+    root = active_managed_project_root()
+    if tool_name != "write_file" or root is None or not isinstance(args, dict):
+        return args
+    raw_path = args.get("path")
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        return args
+    requested = Path(raw_path).expanduser()
+    if not requested.is_absolute() or path_is_in_managed_projects(requested, root):
+        return args
+    filename = requested.name
+    if not filename:
+        return args
+    rewritten = dict(args)
+    rewritten["path"] = str(root / filename)
+    return rewritten
+
+
 def _expand_shell_home_path(raw_path: str) -> Path:
     """Resolve the small set of explicit home forms accepted by the scanner."""
 
@@ -145,6 +172,8 @@ def managed_command_write_boundary_error(command: str) -> str | None:
                 )
                 if value is not None
             )
+            if raw_path == "/dev/null":
+                continue
             boundary_error = managed_project_boundary_error(
                 _expand_shell_home_path(raw_path)
             )

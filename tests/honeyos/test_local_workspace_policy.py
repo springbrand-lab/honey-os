@@ -157,3 +157,84 @@ print(terminal_tool("mkdir -p game && printf safe > game/index.html", task_id='r
 
     assert payload["exit_code"] == 0
     assert (projects / "game" / "index.html").read_text(encoding="utf-8") == "safe"
+
+
+def test_companion_terminal_allows_stderr_to_dev_null(tmp_path):
+    projects = tmp_path / "HoneyOS Projects"
+    payload = _run_case(
+        tmp_path,
+        """
+import json
+from pathlib import Path
+from honeyos.companion.config import initialize_home
+from honeyos.tools.terminal_tool import terminal_tool
+home = Path(__import__('os').environ['HONEYOS_HOME'])
+initialize_home(home)
+print(terminal_tool(
+    "mkdir -p game && printf safe > game/index.html 2>/dev/null",
+    task_id='dev-null-test',
+))
+""",
+    )
+
+    assert payload["exit_code"] == 0
+    assert (projects / "game" / "index.html").read_text(encoding="utf-8") == "safe"
+
+
+def test_companion_write_request_is_retargeted_before_execution_and_verification(
+    tmp_path,
+):
+    projects = tmp_path / "HoneyOS Projects"
+    desktop_target = tmp_path / "Desktop" / "打地鼠.html"
+    payload = _run_case(
+        tmp_path,
+        f"""
+import json
+from pathlib import Path
+from honeyos.companion.config import initialize_home
+from honeyos.runtime.middleware import apply_tool_request_middleware
+home = Path({str(tmp_path / '.honeyos')!r})
+initialize_home(home)
+result = apply_tool_request_middleware(
+    'write_file',
+    {{'path': {str(desktop_target)!r}, 'content': '<h1>game</h1>'}},
+    task_id='retarget-test',
+)
+print(json.dumps({{
+    'payload': result.payload,
+    'changed': result.changed,
+    'trace': result.trace,
+}}, ensure_ascii=False))
+""",
+    )
+
+    assert payload["changed"] is True
+    assert payload["payload"]["path"] == str(projects / "打地鼠.html")
+    assert payload["payload"]["content"] == "<h1>game</h1>"
+    assert payload["trace"] == [{"source": "honeyos_project_workspace"}]
+
+
+def test_agent_dispatch_retargets_desktop_write_in_one_call(tmp_path):
+    projects = tmp_path / "HoneyOS Projects"
+    desktop_target = tmp_path / "Desktop" / "打地鼠.html"
+    payload = _run_case(
+        tmp_path,
+        f"""
+import json
+from pathlib import Path
+from honeyos.companion.config import initialize_home
+from honeyos.model_tools import handle_function_call
+home = Path({str(tmp_path / '.honeyos')!r})
+initialize_home(home)
+print(handle_function_call(
+    'write_file',
+    {{'path': {str(desktop_target)!r}, 'content': '<h1>game</h1>'}},
+    task_id='retarget-dispatch-test',
+))
+""",
+    )
+
+    assert "error" not in payload
+    assert payload["resolved_path"] == str(projects / "打地鼠.html")
+    assert not desktop_target.exists()
+    assert (projects / "打地鼠.html").read_text(encoding="utf-8") == "<h1>game</h1>"
