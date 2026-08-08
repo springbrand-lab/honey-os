@@ -8,6 +8,7 @@ This module is the single source of truth for the dangerous command system:
 - Permanent allowlist persistence (config.yaml)
 """
 
+import ast
 import contextlib
 import contextvars
 import fnmatch
@@ -4226,6 +4227,97 @@ def check_all_command_guards(command: str, env_type: str,
             "user_approved": True, "description": combined_desc}
 
 
+_PROXY_SCRIPT_SAFE_CALLS = frozenset({
+    "bool",
+    "dict",
+    "enumerate",
+    "float",
+    "int",
+    "isinstance",
+    "len",
+    "list",
+    "max",
+    "min",
+    "print",
+    "range",
+    "set",
+    "sorted",
+    "str",
+    "sum",
+    "tuple",
+    "zip",
+})
+_PROXY_SCRIPT_FORBIDDEN_NAMES = frozenset({
+    "__builtins__",
+    "breakpoint",
+    "compile",
+    "eval",
+    "exec",
+    "globals",
+    "help",
+    "input",
+    "locals",
+    "memoryview",
+    "open",
+    "vars",
+})
+_PROXY_SCRIPT_FORBIDDEN_NODES = (
+    ast.AsyncFunctionDef,
+    ast.Attribute,
+    ast.Await,
+    ast.ClassDef,
+    ast.FunctionDef,
+    ast.Global,
+    ast.Import,
+    ast.Lambda,
+    ast.Nonlocal,
+    ast.Yield,
+    ast.YieldFrom,
+)
+
+
+def _is_honeyos_proxy_only_script(code: str) -> bool:
+    """Return whether Python can act only through audited HoneyOS proxies.
+
+    ``execute_code`` normally needs whole-script approval because Python can
+    access host files, processes, and sockets without passing through tool
+    guardrails.  A deliberately small subset that imports callables only from
+    ``honeyos_tools`` has no direct host capability: every side effect crosses
+    the RPC tool dispatcher and receives the normal per-tool policy checks.
+    """
+
+    try:
+        tree = ast.parse(code, mode="exec")
+    except (SyntaxError, ValueError, TypeError):
+        return False
+
+    proxy_names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if node.level != 0 or node.module != "honeyos_tools":
+                return False
+            for alias in node.names:
+                if alias.name == "*":
+                    return False
+                proxy_names.add(alias.asname or alias.name)
+        elif isinstance(node, _PROXY_SCRIPT_FORBIDDEN_NODES):
+            return False
+
+    if not proxy_names:
+        return False
+    callable_names = proxy_names | set(_PROXY_SCRIPT_SAFE_CALLS)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            if node.id.startswith("__") or node.id in _PROXY_SCRIPT_FORBIDDEN_NAMES:
+                return False
+            if isinstance(node.ctx, ast.Store) and node.id in callable_names:
+                return False
+        elif isinstance(node, ast.Call):
+            if not isinstance(node.func, ast.Name) or node.func.id not in callable_names:
+                return False
+    return True
+
+
 def check_execute_code_guard(code: str, env_type: str,
                              has_host_access: bool = False) -> dict:
     """Approve an execute_code script before its child process is spawned.
@@ -4260,6 +4352,13 @@ def check_execute_code_guard(code: str, env_type: str,
         return {"approved": True, "message": None}
     if _should_skip_container_guards(env_type, has_host_access=has_host_access):
         return {"approved": True, "message": None}
+
+    # Proxy-only scripts cannot touch the host except through honeyos_tools.
+    # Those RPC calls retain their own terminal/file/network guardrails, so a
+    # second blanket approval around the Python wrapper adds friction without
+    # adding a security boundary.
+    if env_type == "local" and _is_honeyos_proxy_only_script(code):
+        return {"approved": True, "message": None, "proxy_only": True}
 
     # --yolo or approvals.mode=off: bypass (session- or process-scoped).
     approval_mode = _get_approval_mode()
