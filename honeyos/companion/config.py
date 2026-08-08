@@ -264,7 +264,10 @@ def companion_config(platform: str | None = None) -> dict:
         "display": {
             "memory_notifications": "off",
             "platforms": {
-                name: {"tool_progress": "off"}
+                name: {
+                    "tool_progress": "off",
+                    "interim_assistant_messages": "off",
+                }
                 for name in platforms
             },
         },
@@ -423,6 +426,9 @@ def upgrade_companion_capabilities(home: Path) -> bool:
         current_progress = platform_display.get("tool_progress")
         if current_progress in {None, "new"}:
             platform_display["tool_progress"] = "off"
+        current_interim = platform_display.get("interim_assistant_messages")
+        if current_interim in {None, "new"}:
+            platform_display["interim_assistant_messages"] = "off"
 
     memory = config.setdefault("memory", {})
     if not isinstance(memory, dict):

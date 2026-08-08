@@ -81,6 +81,8 @@ def test_initialize_home_creates_companion_contract(tmp_path):
     assert config["platforms"]["feishu"]["extra"]["group_policy"] == "disabled"
     assert config["display"]["platforms"]["feishu"]["tool_progress"] == "off"
     assert config["display"]["platforms"]["weixin"]["tool_progress"] == "off"
+    assert config["display"]["platforms"]["feishu"]["interim_assistant_messages"] == "off"
+    assert config["display"]["platforms"]["weixin"]["interim_assistant_messages"] == "off"
     assert (tmp_path / ".no-bundled-skills").exists()
     assert "亲密关系伴侣" in (tmp_path / "SOUL.md").read_text(encoding="utf-8")
     assert (tmp_path / "memories" / "USER.md").exists()
@@ -139,6 +141,8 @@ def test_upgrade_quiets_managed_companion_progress_but_preserves_user_verbose_ch
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     config["display"]["platforms"]["feishu"]["tool_progress"] = "new"
     config["display"]["platforms"]["weixin"] = {"tool_progress": "verbose"}
+    config["display"]["platforms"]["feishu"]["interim_assistant_messages"] = "new"
+    config["display"]["platforms"]["weixin"]["interim_assistant_messages"] = "on"
     config_path.write_text(
         yaml.safe_dump(config, allow_unicode=True, sort_keys=False),
         encoding="utf-8",
@@ -149,6 +153,8 @@ def test_upgrade_quiets_managed_companion_progress_but_preserves_user_verbose_ch
     upgraded = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert upgraded["display"]["platforms"]["feishu"]["tool_progress"] == "off"
     assert upgraded["display"]["platforms"]["weixin"]["tool_progress"] == "verbose"
+    assert upgraded["display"]["platforms"]["feishu"]["interim_assistant_messages"] == "off"
+    assert upgraded["display"]["platforms"]["weixin"]["interim_assistant_messages"] == "on"
 
 
 def test_initialize_home_rejects_unsupported_platform(tmp_path):

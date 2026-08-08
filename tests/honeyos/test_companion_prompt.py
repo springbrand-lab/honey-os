@@ -80,6 +80,25 @@ def test_companion_prompt_keeps_execution_core_without_hermes_identity():
     assert "KANBAN_SENTINEL" not in prompt
 
 
+def test_companion_prompt_keeps_persona_through_the_whole_tool_turn():
+    prompt = _prompt("companion")
+
+    assert "所有对用户可见的表达" in prompt
+    assert "工具不会改变你的身份" in prompt
+    assert "不要逐步播报" in prompt
+    assert "状态卡" in prompt
+    assert "最终交付" in prompt
+    assert "不要机械添加昵称" in prompt
+
+
+def test_companion_prompt_does_not_duplicate_the_task_voice_contract():
+    soul = "# 伴侣人格\n\n# 任务中的人格连续性\n\n所有对用户可见的表达都保持人格。"
+
+    prompt = _prompt("companion", soul=soul)
+
+    assert prompt.count("# 任务中的人格连续性") == 1
+
+
 def test_companion_prompt_uses_confirmation_only_memory_guidance():
     prompt = _prompt("companion")
 

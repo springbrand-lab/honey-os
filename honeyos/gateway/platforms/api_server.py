@@ -2310,6 +2310,10 @@ class APIServerAdapter(BasePlatformAdapter):
             content = item.get("content") if isinstance(item, dict) else None
             if role not in {"user", "assistant"} or not isinstance(content, str):
                 continue
+            if role == "assistant" and item.get("tool_calls"):
+                # Tool-call narration belongs to the activity card, not the
+                # companion's durable chat history.
+                continue
             text = content.strip()
             if text:
                 messages.append({"role": role, "content": text})

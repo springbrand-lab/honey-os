@@ -482,7 +482,13 @@ async def test_companion_bootstrap_returns_only_safe_shared_chat_messages(
     db.get_messages.return_value = [
         {"role": "user", "content": "你好"},
         {"role": "assistant", "content": "在呢。"},
+        {
+            "role": "assistant",
+            "content": "找到几个，我再看看。",
+            "tool_calls": [{"id": "call-1", "function": {"name": "web_search"}}],
+        },
         {"role": "tool", "content": "raw command output"},
+        {"role": "assistant", "content": "查好了，给你看。", "tool_calls": None},
         {"role": "assistant", "content": None, "reasoning": "hidden"},
     ]
     adapter._ensure_session_db_async = AsyncMock(return_value=db)
@@ -502,6 +508,8 @@ async def test_companion_bootstrap_returns_only_safe_shared_chat_messages(
     assert payload["messages"] == [
         {"role": "user", "content": "你好"},
         {"role": "assistant", "content": "在呢。"},
+        {"role": "assistant", "content": "查好了，给你看。"},
     ]
+    assert "找到几个，我再看看。" not in response.text
     assert "reasoning" not in response.text
     assert "raw command output" not in response.text
