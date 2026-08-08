@@ -32,7 +32,8 @@ def test_first_start_report_checks_required_state_and_keeps_optional_tools_optio
     assert "模型与 API Key" in rendered
     assert "微信已绑定" in rendered
     assert "至少一个 IM 已连接" in rendered
-    assert "Docker 未安装" in rendered
+    assert "本机项目空间可用" in rendered
+    assert "Docker 未安装" not in rendered
     assert "Computer Use 未安装" in rendered
 
 

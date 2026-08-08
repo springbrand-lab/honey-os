@@ -2663,6 +2663,26 @@ def terminal_tool(
                     "status": "blocked"
                 }, ensure_ascii=False)
 
+        if env_type == "local":
+            from honeyos.companion.projects import managed_project_boundary_error
+
+            requested_cwd = _resolve_command_cwd(
+                workdir=workdir,
+                default_cwd=cwd,
+                session_key=session_key,
+            )
+            candidate_cwd = Path(requested_cwd).expanduser()
+            if not candidate_cwd.is_absolute():
+                candidate_cwd = Path(cwd) / candidate_cwd
+            boundary_error = managed_project_boundary_error(candidate_cwd)
+            if boundary_error:
+                return json.dumps({
+                    "output": "",
+                    "exit_code": -1,
+                    "error": boundary_error,
+                    "status": "blocked",
+                }, ensure_ascii=False)
+
         # Prepare command for execution
         pty_disabled_reason = None
         effective_pty = pty

@@ -202,6 +202,13 @@ COMPANION_SKILL_GUIDANCE = (
     "只有用户明确询问 Skill 管理、安装状态、技术能力或调试细节时，才说明具体名称和状态。"
 )
 
+COMPANION_MODEL_CONTROL_GUIDANCE = (
+    "用户可以直接用自然语言要求切换模型，这是 HoneyOS 提供的正常能力。明确说‘换成某模型’时，"
+    "系统会把它设为这个伴侣的全局默认模型并热切换；用户明确说‘这次试试’或‘下一条用’时，"
+    "才分别作为当前对话或单次临时切换。不要声称没有权限，不要要求用户手动编辑 config.yaml，"
+    "也不要把模型切换说成必须重启服务。用户只是询问能力或方法时，应如实说明可以直接告诉你想用的模型。"
+)
+
 COMPANION_EXTENSION_GUIDANCE = (
     "# External capability installation\n"
     "When the user provides a repository URL, the provided repository URL is the source identity. "
@@ -216,11 +223,13 @@ COMPANION_EXTENSION_GUIDANCE = (
 
 COMPANION_ENVIRONMENT_GUIDANCE = (
     "# HoneyOS execution environment\n"
-    "Your terminal and code tools run in a persistent isolated container, not the user's host computer. "
-    "The container has network access but no host workspace mounts, forwarded secrets, or host environment "
-    "variables. Probe the real container before choosing commands or package managers. Install ordinary "
-    "user-scoped CLIs under /root/.local (with executables in /root/.local/bin) so they survive container "
-    "recreation; never claim that a container install changed the user's host computer."
+    "Your terminal and code tools run on the user's host computer inside the managed HoneyOS Projects "
+    "workspace. Store every user-visible deliverable in a clearly named project directory there so the user "
+    "can open it with Finder, an editor, or a browser. Use project-local dependencies and virtual environments "
+    "instead of global installs. Ordinary work inside the active project needs no confirmation, but never use "
+    "sudo, alter system configuration, access credentials, or work outside the managed project workspace "
+    "without the explicit authorization required by HoneyOS. Internal HoneyOS model and messaging secrets are "
+    "not project credentials and must never be copied into project processes or files."
 )
 
 HONEYOS_AGENT_HELP_GUIDANCE = (

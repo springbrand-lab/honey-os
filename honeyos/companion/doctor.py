@@ -11,6 +11,7 @@ import yaml
 
 from honeyos.companion import PRODUCT_NAME
 from honeyos.companion.config import COMPANION_TOOLSETS, DEFAULT_IM_PLATFORMS
+from honeyos.companion.projects import project_root
 from honeyos.companion.runtime import gateway_argv
 
 
@@ -87,13 +88,19 @@ def run_doctor(home: Path) -> DoctorReport:
         for platform in DEFAULT_IM_PLATFORMS
     )
     terminal = config.get("terminal", {}) if isinstance(config.get("terminal"), dict) else {}
-    sandbox_ok = (
-        terminal.get("backend") == "docker"
-        and terminal.get("docker_mount_cwd_to_workspace") is False
-        and terminal.get("docker_volumes") == []
-        and terminal.get("docker_forward_env") == []
+    expected_projects = project_root(resolved).resolve()
+    configured_cwd = Path(str(terminal.get("cwd", ""))).expanduser()
+    project_workspace_ok = (
+        terminal.get("backend") == "local"
+        and configured_cwd.is_absolute()
+        and configured_cwd.resolve() == expected_projects
+        and expected_projects.is_dir()
+        and os.access(expected_projects, os.W_OK)
         and terminal.get("env_passthrough") == []
     )
+    approvals = config.get("approvals", {}) if isinstance(config.get("approvals"), dict) else {}
+    approval_mode = str(approvals.get("mode", "")).strip().lower()
+    execution_approval_ok = approval_mode in {"manual", "smart"}
 
     runtime_ok = bool(runtime) and (
         runtime.get("data_directory") == str(resolved)
@@ -130,11 +137,16 @@ def run_doctor(home: Path) -> DoctorReport:
             repr(configured_tools),
         ),
         DoctorCheck(
-            "sandbox-backend",
-            sandbox_ok,
-            "docker (no host mounts or forwarded environment)"
-            if sandbox_ok
+            "project-workspace",
+            project_workspace_ok,
+            f"local writable workspace at {expected_projects}"
+            if project_workspace_ok
             else repr(terminal),
+        ),
+        DoctorCheck(
+            "execution-approval",
+            execution_approval_ok,
+            approval_mode or "missing",
         ),
         DoctorCheck(
             "storage-writable",

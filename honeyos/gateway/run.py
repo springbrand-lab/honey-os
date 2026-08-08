@@ -14593,6 +14593,22 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     pairing_store._record_rate_limit(platform_name, source.user_id)
             return None
 
+        # HoneyOS presents one private companion across web and IM surfaces.
+        # Route explicit natural-language model changes through the mature
+        # /model control path before busy-session and prompt interception so
+        # switching is atomic, durable, and uses the existing credential and
+        # provider validation instead of asking the agent to edit config.yaml.
+        if not is_internal:
+            try:
+                from honeyos.companion.model_intent import (
+                    rewrite_companion_model_event,
+                )
+
+                event = rewrite_companion_model_event(event)
+                source = event.source
+            except Exception:
+                logger.debug("HoneyOS natural model routing failed", exc_info=True)
+
         # Intercept messages that are responses to a pending /update prompt.
         # The update process (detached) wrote .update_prompt.json; the watcher
         # forwarded it to the user; now the user's reply goes back via

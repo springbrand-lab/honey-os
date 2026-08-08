@@ -20,15 +20,16 @@ from honeyos.migration.legacy import (
 )
 
 from honeyos.companion import PRODUCT_NAME
+from honeyos.companion.projects import (
+    ensure_project_root,
+    project_root,
+    recover_legacy_projects,
+)
 
 
 DEFAULT_IM_PLATFORMS = ("weixin", "feishu")
 COMPANION_WEB_PLATFORM = "api_server"
 _SUPPORTED_PLATFORMS = frozenset(DEFAULT_IM_PLATFORMS)
-COMPANION_SANDBOX_PATH = (
-    "/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-)
-
 COMPANION_TOOLSETS = (
     "companion_memory",
     "memory",
@@ -167,7 +168,9 @@ def _atomic_replace(path: Path, content: str, *, mode: int) -> None:
             pass
 
 
-def companion_config(platform: str | None = None) -> dict:
+def companion_config(
+    platform: str | None = None, *, projects_root: Path | None = None
+) -> dict:
     """Return the deterministic companion configuration for the default IMs.
 
     Passing a platform remains useful for focused tests and custom installers;
@@ -183,6 +186,8 @@ def companion_config(platform: str | None = None) -> dict:
                 f"{PRODUCT_NAME} v0.2 supports the weixin and feishu platforms"
             )
         platforms = (normalized,)
+
+    managed_projects = (projects_root or project_root()).expanduser().resolve()
 
     return {
         "agent": {
@@ -227,20 +232,11 @@ def companion_config(platform: str | None = None) -> dict:
             "backend": "ddgs",
         },
         "terminal": {
-            "backend": "docker",
-            "cwd": ".",
-            "docker_mount_cwd_to_workspace": False,
-            "docker_volumes": [],
-            "docker_forward_env": [],
-            "docker_env": {"PATH": COMPANION_SANDBOX_PATH},
+            "backend": "local",
+            "cwd": str(managed_projects),
             "env_passthrough": [],
-            "docker_network": True,
-            "container_cpu": 1,
-            "container_memory": 2048,
-            "container_disk": 10240,
-            "container_persistent": True,
         },
-        "approvals": {"mode": "off"},
+        "approvals": {"mode": "manual"},
         "security": {"allow_proxy_fake_ips": True},
         "platforms": {
             **{
@@ -309,6 +305,8 @@ def initialize_home(home: Path, *, platform: str | None = None) -> InitResult:
 
     resolved = home.expanduser().resolve()
     resolved.mkdir(parents=True, exist_ok=True)
+    projects = ensure_project_root(resolved)
+    recover_legacy_projects(resolved, projects)
     for directory in ("memories", "sessions", "logs", "skills", "sandboxes"):
         (resolved / directory).mkdir(parents=True, exist_ok=True)
 
@@ -316,7 +314,7 @@ def initialize_home(home: Path, *, platform: str | None = None) -> InitResult:
         Path(__file__).parent / "templates" / "companion_soul.md"
     ).read_text(encoding="utf-8")
     generated_config = yaml.safe_dump(
-        companion_config(platform),
+        companion_config(platform, projects_root=projects),
         allow_unicode=True,
         sort_keys=False,
     )
@@ -475,27 +473,32 @@ def upgrade_companion_capabilities(home: Path) -> bool:
     if not isinstance(terminal, dict):
         terminal = {}
         config["terminal"] = terminal
+    projects = ensure_project_root(resolved)
+    recovery = recover_legacy_projects(resolved, projects)
     terminal.update(
         {
-            "backend": "docker",
-            "cwd": ".",
-            "docker_mount_cwd_to_workspace": False,
-            "docker_volumes": [],
-            "docker_forward_env": [],
-            "docker_env": {"PATH": COMPANION_SANDBOX_PATH},
+            "backend": "local",
+            "cwd": str(projects),
             "env_passthrough": [],
-            "docker_network": True,
-            "container_cpu": 1,
-            "container_memory": 2048,
-            "container_disk": 10240,
-            "container_persistent": True,
         }
     )
+    for docker_key in (
+        "docker_mount_cwd_to_workspace",
+        "docker_volumes",
+        "docker_forward_env",
+        "docker_env",
+        "docker_network",
+        "container_cpu",
+        "container_memory",
+        "container_disk",
+        "container_persistent",
+    ):
+        terminal.pop(docker_key, None)
     approvals = config.setdefault("approvals", {})
     if not isinstance(approvals, dict):
         approvals = {}
         config["approvals"] = approvals
-    approvals["mode"] = "off"
+    approvals["mode"] = "manual"
 
     security = config.setdefault("security", {})
     if not isinstance(security, dict):
@@ -504,7 +507,7 @@ def upgrade_companion_capabilities(home: Path) -> bool:
     security["allow_proxy_fake_ips"] = True
 
     rendered_config = yaml.safe_dump(config, allow_unicode=True, sort_keys=False)
-    changed = credential_migrated or rendered_config != original_config
+    changed = credential_migrated or bool(recovery.copied) or rendered_config != original_config
     if changed:
         _atomic_replace(config_path, rendered_config, mode=0o600)
 

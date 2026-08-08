@@ -300,7 +300,32 @@ def _authoritative_workspace_root(task_id: str = "default") -> str | None:
     registered = _registered_task_cwd_override(task_id)
     if registered:
         return registered
-    return _configured_terminal_cwd()
+    configured = _configured_terminal_cwd()
+    if configured:
+        return configured
+    try:
+        from honeyos.companion.projects import active_managed_project_root
+
+        managed = active_managed_project_root()
+    except Exception:
+        managed = None
+    return str(managed) if managed is not None else None
+
+
+def _check_managed_project_write_path(
+    filepath: str, task_id: str = "default"
+) -> str | None:
+    """Block companion file writes that escape its visible project root."""
+
+    if _uses_container_paths(task_id):
+        return None
+    try:
+        resolved = Path(_resolve_path_for_task(filepath, task_id))
+        from honeyos.companion.projects import managed_project_boundary_error
+
+        return managed_project_boundary_error(resolved)
+    except Exception:
+        return None
 
 
 def _resolve_base_dir(
@@ -1765,6 +1790,9 @@ def write_file_tool(path: str, content: str, task_id: str = "default",
     Pass ``True`` after explicit user direction — same shape as ``force``
     on the terminal tool.
     """
+    workspace_err = _check_managed_project_write_path(path, task_id)
+    if workspace_err:
+        return tool_error(workspace_err)
     sensitive_err = _check_sensitive_path(path, task_id)
     if sensitive_err:
         return tool_error(sensitive_err)
@@ -1893,6 +1921,9 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
                     return _err
                 _paths_to_check.append(v4a_path)
     for _p in _paths_to_check:
+        workspace_err = _check_managed_project_write_path(_p, task_id)
+        if workspace_err:
+            return tool_error(workspace_err)
         sensitive_err = _check_sensitive_path(_p, task_id)
         if sensitive_err:
             return tool_error(sensitive_err)
