@@ -8,7 +8,9 @@ import honeyos.companion.config as config_module
 from honeyos.companion.config import initialize_home, upgrade_companion_capabilities
 
 
-def test_initialize_home_creates_companion_contract(tmp_path):
+def test_initialize_home_creates_companion_contract(tmp_path, monkeypatch):
+    projects = tmp_path / "HoneyOS Projects"
+    monkeypatch.setenv("HONEYOS_PROJECTS_HOME", str(projects))
     result = initialize_home(tmp_path)
     config = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
 
@@ -44,15 +46,10 @@ def test_initialize_home_creates_companion_contract(tmp_path):
         "image_gen",
     ]
     assert config["web"]["backend"] == "ddgs"
-    assert config["terminal"]["backend"] == "docker"
-    assert config["terminal"]["docker_mount_cwd_to_workspace"] is False
-    assert config["terminal"]["docker_volumes"] == []
-    assert config["terminal"]["docker_forward_env"] == []
+    assert config["terminal"]["backend"] == "local"
+    assert config["terminal"]["cwd"] == str(projects.resolve())
     assert config["terminal"]["env_passthrough"] == []
-    assert config["terminal"]["docker_env"]["PATH"].startswith(
-        "/root/.local/bin:"
-    )
-    assert config["approvals"]["mode"] == "off"
+    assert config["approvals"]["mode"] == "manual"
     assert config["security"]["allow_proxy_fake_ips"] is True
     assert config["memory"]["memory_enabled"] is True
     assert config["memory"]["user_profile_enabled"] is True
@@ -167,7 +164,11 @@ def test_initialize_home_rejects_unsupported_platform(tmp_path):
         raise AssertionError("unsupported platform was accepted")
 
 
-def test_upgrade_companion_capabilities_is_idempotent_and_preserves_user_state(tmp_path):
+def test_upgrade_companion_capabilities_is_idempotent_and_preserves_user_state(
+    tmp_path, monkeypatch
+):
+    projects = tmp_path / "HoneyOS Projects"
+    monkeypatch.setenv("HONEYOS_PROJECTS_HOME", str(projects))
     initialize_home(tmp_path)
     config_path = tmp_path / "config.yaml"
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
@@ -217,10 +218,9 @@ def test_upgrade_companion_capabilities_is_idempotent_and_preserves_user_state(t
     assert migrated["agent"]["environment_probe"] is True
     assert migrated["platforms"]["feishu"]["extra"]["dm_policy"] == "pairing"
     assert migrated["platforms"]["feishu"]["extra"]["group_policy"] == "disabled"
-    assert migrated["terminal"]["backend"] == "docker"
-    assert migrated["terminal"]["docker_env"]["PATH"].startswith(
-        "/root/.local/bin:"
-    )
+    assert migrated["terminal"]["backend"] == "local"
+    assert migrated["terminal"]["cwd"] == str(projects.resolve())
+    assert migrated["approvals"]["mode"] == "manual"
     assert migrated["security"]["allow_proxy_fake_ips"] is True
     assert migrated["memory"]["distillation"]["trigger_messages"] == 20
     assert migrated["memory"]["distillation"]["max_daily_runs"] == 12
