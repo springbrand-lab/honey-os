@@ -24,6 +24,47 @@ def test_permission_presentation_separates_relationship_copy_from_trusted_facts(
     assert "curl" in presentation.technical_detail
 
 
+def test_permission_narration_uses_confirmed_user_nickname(tmp_path):
+    from honeyos.companion.config import initialize_home
+    from honeyos.companion.profile import update_companion_profile
+
+    initialize_home(tmp_path)
+    update_companion_profile(
+        tmp_path,
+        companion_name="小意",
+        personality="嘴硬心软，有主见",
+        user_nickname="小酒",
+        source="user_explicit",
+    )
+
+    presentation = build_permission_presentation(
+        command="python3 build.py",
+        description="execute a local build script",
+        allow_session=True,
+        allow_permanent=False,
+        home=tmp_path,
+    )
+
+    assert presentation.narration.startswith("小酒")
+    assert "下面" in presentation.narration
+    assert presentation.summary == "运行本机上的构建脚本"
+
+
+def test_permission_narration_does_not_invent_a_nickname(tmp_path):
+    from honeyos.companion.config import initialize_home
+
+    initialize_home(tmp_path)
+    presentation = build_permission_presentation(
+        command="python3 build.py",
+        description="execute a local build script",
+        allow_session=True,
+        allow_permanent=False,
+        home=tmp_path,
+    )
+
+    assert "小酒" not in presentation.narration
+
+
 def test_curl_fail_on_http_error_flag_is_not_mislabeled_as_an_upload():
     presentation = build_permission_presentation(
         command="curl -f https://example.com/status",
@@ -80,7 +121,7 @@ def test_relay_permission_prompt_uses_same_companion_copy():
         smart_denied=False,
     )
 
-    assert payload["text"].startswith("我得借一下你电脑的能力")
+    assert "电脑" in payload["text"] and "下面" in payload["text"]
     assert payload["summary"] == "运行本机上的构建脚本"
     assert [item["label"] for item in payload["options"]] == [
         "好，你继续",
@@ -99,7 +140,7 @@ def test_plain_text_fallback_is_relationship_native_and_keeps_details_secondary(
         allow_permanent=False,
     )
 
-    assert text.startswith("我得借一下你电脑的能力")
+    assert "电脑" in text and "下面" in text
     assert "运行本机上的构建脚本" in text
     assert "如果愿意" in text
     assert "Command Approval Required" not in text

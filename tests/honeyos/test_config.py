@@ -29,6 +29,7 @@ def test_initialize_home_creates_companion_contract(tmp_path, monkeypatch):
         config_module.COMPANION_TOOLSETS
     )
     assert config["platform_toolsets"]["weixin"] == [
+        "companion_profile",
         "companion_memory",
         "memory",
         "session_search",

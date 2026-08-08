@@ -31,6 +31,7 @@ DEFAULT_IM_PLATFORMS = ("weixin", "feishu")
 COMPANION_WEB_PLATFORM = "api_server"
 _SUPPORTED_PLATFORMS = frozenset(DEFAULT_IM_PLATFORMS)
 COMPANION_TOOLSETS = (
+    "companion_profile",
     "companion_memory",
     "memory",
     "session_search",
@@ -520,6 +521,21 @@ def upgrade_companion_capabilities(home: Path) -> bool:
     for filename in ("IDENTITY.md", "RELATIONSHIP.md"):
         if _create_file(resolved / "memories" / filename, "", mode=0o600):
             changed = True
+
+    from honeyos.companion.profile import migrate_confirmed_profile_from_memory
+
+    if migrate_confirmed_profile_from_memory(resolved) is not None:
+        changed = True
+
+    from honeyos.companion.memory_policy import scrub_sensitive_companion_state
+
+    if scrub_sensitive_companion_state(resolved):
+        changed = True
+
+    from honeyos.companion.distillation import repair_legacy_distillation_failures
+
+    if repair_legacy_distillation_failures(resolved):
+        changed = True
 
     if migrate_legacy_skill_directory(resolved):
         changed = True

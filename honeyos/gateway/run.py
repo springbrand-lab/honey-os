@@ -16408,6 +16408,23 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
         session_entry = await self.async_session_store.get_or_create_session(source)
         session_key = session_entry.session_key
+        if (
+            _is_honeyos_runtime()
+            and str(getattr(source, "chat_type", "") or "").lower() == "dm"
+        ):
+            try:
+                from honeyos.companion.profile import capture_explicit_profile_assignment
+                from honeyos.core.constants import get_honeyos_home
+
+                captured_profile = capture_explicit_profile_assignment(
+                    get_honeyos_home(), event.text or ""
+                )
+                if captured_profile is not None:
+                    self._evict_cached_agent(session_key)
+            except ValueError:
+                logger.warning("Rejected unsafe explicit companion profile assignment")
+            except Exception:
+                logger.debug("Companion profile capture failed", exc_info=True)
         pinned_session_id = str(
             (getattr(event, "metadata", None) or {}).get("gateway_session_id") or ""
         ).strip()
@@ -16548,6 +16565,21 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # ride the current user message via the api_content sidecar instead
         # (staged below, consumed in run_sync → build_turn_context).
         turn_sidecar_notes: List[str] = []
+
+        # Identity and relationship files may change during a live cached
+        # session. Inject their current confirmed fields every turn so a name
+        # or nickname update takes effect immediately across Web/Feishu/Weixin
+        # without rebuilding the entire agent prompt.
+        try:
+            from honeyos.companion.profile import companion_profile_note
+            from honeyos.core.constants import get_honeyos_home
+
+            _honeyos_profile_note = companion_profile_note(get_honeyos_home())
+        except Exception:
+            logger.debug("HoneyOS companion profile load failed", exc_info=True)
+            _honeyos_profile_note = None
+        if _honeyos_profile_note:
+            turn_sidecar_notes.append(_honeyos_profile_note)
 
         # HoneyOS working memory is lane-scoped and read from the local
         # continuity database on every turn.  It rides the user-message

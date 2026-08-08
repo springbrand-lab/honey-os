@@ -15,7 +15,7 @@ import os
 import sqlite3
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Iterable, Mapping
 
@@ -163,7 +163,7 @@ async def extract_with_auxiliary_model(
         if not provider or not model:
             raise RuntimeError("main model runtime is unavailable for memory distillation")
         call_overrides.update(provider=provider, model=model)
-        for key in ("base_url", "api_mode"):
+        for key in ("base_url",):
             value = runtime.get(key)
             if isinstance(value, str) and value.strip():
                 call_overrides[key] = value.strip()
@@ -362,7 +362,18 @@ class MemoryDistiller:
                 if existing["status"] in {"completed", "pending", "running"}:
                     return None
                 if int(existing["attempts"]) >= self.settings.max_attempts:
-                    return None
+                    try:
+                        last_attempt = _as_utc(
+                            datetime.fromisoformat(str(existing["created_at"]))
+                        )
+                    except (TypeError, ValueError):
+                        return None
+                    if now - last_attempt < timedelta(minutes=15):
+                        return None
+                    connection.execute(
+                        "UPDATE distillation_runs SET attempts = 0, error = '' WHERE id = ?",
+                        (existing["id"],),
+                    )
                 run_id = existing["id"]
             else:
                 run_id = uuid.uuid4().hex
@@ -507,10 +518,10 @@ class MemoryDistiller:
             connection.execute(
                 """
                 UPDATE distillation_runs
-                SET status = 'running', attempts = attempts + 1, error = ''
+                SET status = 'running', attempts = attempts + 1, error = '', created_at = ?
                 WHERE id = ?
                 """,
-                (job.run_id,),
+                (timestamp.isoformat(), job.run_id),
             )
         try:
             active_items = self.memories.list_active(lane_key=lane_key, now=timestamp)
@@ -566,6 +577,27 @@ class MemoryDistiller:
             except sqlite3.Error:
                 pass
             return DistillationResult(run_id=job.run_id, status="failed", error=error)
+
+
+def repair_legacy_distillation_failures(home: Path) -> int:
+    """Reopen runs exhausted solely by the fixed ``api_mode`` call bug."""
+
+    db_path = Path(home).expanduser().resolve() / "continuity.db"
+    if not db_path.exists():
+        return 0
+    try:
+        with sqlite3.connect(db_path, timeout=1.0) as connection:
+            cursor = connection.execute(
+                """
+                UPDATE distillation_runs
+                SET attempts = 0, error = ''
+                WHERE status = 'failed'
+                  AND error LIKE '%unexpected keyword argument%api_mode%'
+                """
+            )
+            return max(0, int(cursor.rowcount or 0))
+    except sqlite3.Error:
+        return 0
 
 
 def active_honeyos_distiller() -> MemoryDistiller | None:

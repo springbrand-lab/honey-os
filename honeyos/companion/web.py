@@ -62,6 +62,11 @@ def wait_for_companion_web(
 def companion_profile(home: Path) -> dict[str, str]:
     """Return the tiny public profile needed by the chat header."""
 
+    from honeyos.companion.profile import load_companion_profile
+
+    managed = load_companion_profile(home)
+    if managed.companion_name:
+        return {"name": managed.companion_name[:40], "status": "在这儿"}
     identity_path = Path(home).expanduser().resolve() / "memories" / "IDENTITY.md"
     name = ""
     try:

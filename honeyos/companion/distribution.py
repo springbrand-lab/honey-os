@@ -13,6 +13,7 @@ from honeyos.companion.doctor import DoctorCheck, run_doctor
 
 
 _REQUIRED_COMPANION_TOOL_NAMES = {
+    "companion_profile",
     "companion_memory",
     "memory",
     "session_search",

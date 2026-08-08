@@ -36,6 +36,7 @@ from honeyos.agent.prompt_builder import (
     COMPANION_EXTENSION_GUIDANCE,
     COMPANION_MEMORY_GUIDANCE,
     COMPANION_MODEL_CONTROL_GUIDANCE,
+    COMPANION_PROFILE_GUIDANCE,
     COMPANION_SKILL_GUIDANCE,
     COMPANION_STRUCTURED_MEMORY_GUIDANCE,
     COMPANION_SESSION_SEARCH_GUIDANCE,
@@ -178,6 +179,8 @@ def _build_companion_system_prompt_parts(
         stable_parts.append(COMPANION_TASK_VOICE_GUIDANCE)
 
     valid_tools = set(agent.valid_tool_names or set())
+    if "companion_profile" in valid_tools:
+        stable_parts.append(COMPANION_PROFILE_GUIDANCE)
     if getattr(agent, "_task_completion_guidance", True) and valid_tools:
         stable_parts.append(TASK_COMPLETION_GUIDANCE)
     if getattr(agent, "_parallel_tool_call_guidance", True) and valid_tools:

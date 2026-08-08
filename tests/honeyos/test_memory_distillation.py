@@ -9,6 +9,7 @@ from honeyos.companion.distillation import (
     DistillationSettings,
     MemoryDistiller,
     extract_with_auxiliary_model,
+    repair_legacy_distillation_failures,
 )
 from honeyos.companion.continuity import StructuredMemoryStore
 
@@ -62,6 +63,77 @@ async def test_periodic_distillation_waits_for_twenty_new_messages(tmp_path):
     assert result is not None
     assert result.status == "completed"
     assert calls == [True]
+
+
+@pytest.mark.asyncio
+async def test_auxiliary_distillation_accepts_main_runtime_api_mode(monkeypatch, tmp_path):
+    captured = {}
+
+    class _Message:
+        content = '{"operations":[]}'
+
+    class _Choice:
+        message = _Message()
+
+    class _Response:
+        choices = [_Choice()]
+
+    async def fake_call_llm(**kwargs):
+        captured.update(kwargs)
+        return _Response()
+
+    monkeypatch.setattr(
+        "honeyos.agent.auxiliary_client.async_call_llm", fake_call_llm
+    )
+    distiller = MemoryDistiller(tmp_path)
+    job = distiller._prepare(
+        lane_key=LANE,
+        session_id="session-api-mode",
+        messages=_messages(20),
+        reason="periodic",
+        now=NOW,
+    )
+    assert job is not None
+
+    raw = await extract_with_auxiliary_model(
+        job,
+        (),
+        {
+            "provider": "custom",
+            "model": "deepseek-v4-flash",
+            "base_url": "https://example.invalid/v1",
+            "api_mode": "chat_completions",
+        },
+        task_config={"provider": "auto", "model": "auto"},
+    )
+
+    assert raw == '{"operations":[]}'
+    assert captured["main_runtime"]["api_mode"] == "chat_completions"
+    assert "api_mode" not in {
+        key for key in captured if key != "main_runtime"
+    }
+
+
+def test_upgrade_reopens_runs_exhausted_by_legacy_api_mode_bug(tmp_path):
+    distiller = MemoryDistiller(tmp_path)
+    with distiller._connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO distillation_runs (
+                id, lane_key, session_id, reason, source_start_id,
+                source_end_id, source_hash, status, attempts, error, created_at
+            ) VALUES ('legacy', ?, 's', 'periodic', 1, 20, 'hash',
+                      'failed', 3, ?, ?)
+            """,
+            (LANE, "TypeError: async_call_llm() got an unexpected keyword argument 'api_mode'", NOW.isoformat()),
+        )
+
+    assert repair_legacy_distillation_failures(tmp_path) == 1
+    with distiller._connect() as connection:
+        row = connection.execute(
+            "SELECT status, attempts, error FROM distillation_runs WHERE id='legacy'"
+        ).fetchone()
+        assert tuple(row) == ("failed", 0, "")
 
 
 @pytest.mark.asyncio
@@ -132,6 +204,43 @@ async def test_distillation_is_idempotent_for_the_same_message_range(tmp_path):
 
     assert first is not None
     assert second is None
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_exhausted_failed_run_recovers_after_cooldown(tmp_path):
+    calls = 0
+
+    async def extractor(_job, _active, _runtime):
+        nonlocal calls
+        calls += 1
+        return '{"operations":[]}'
+
+    distiller = MemoryDistiller(tmp_path, extractor=extractor)
+    messages = _messages(20)
+    prepared = distiller._prepare(
+        lane_key=LANE,
+        session_id="session-recover",
+        messages=messages,
+        reason="periodic",
+        now=NOW - timedelta(hours=1),
+    )
+    assert prepared is not None
+    with distiller._connect() as connection:
+        connection.execute(
+            "UPDATE distillation_runs SET status='failed', attempts=3 WHERE id=?",
+            (prepared.run_id,),
+        )
+
+    result = await distiller.distill_if_due(
+        lane_key=LANE,
+        session_id="session-recover",
+        messages=messages,
+        reason="periodic",
+        now=NOW,
+    )
+
+    assert result is not None and result.status == "completed"
     assert calls == 1
 
 

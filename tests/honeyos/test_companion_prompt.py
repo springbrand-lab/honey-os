@@ -14,6 +14,7 @@ def _agent(mode: str):
         load_soul_identity=True,
         skip_context_files=False,
         valid_tool_names={
+            "companion_profile",
             "memory",
             "companion_memory",
             "session_search",
@@ -112,6 +113,13 @@ def test_companion_prompt_uses_confirmation_only_memory_guidance():
     assert "commitment" in prompt
     assert "episode" in prompt
     assert "身份、感情、关系" in prompt
+
+
+def test_companion_prompt_requires_explicit_persona_updates_to_profile_tool():
+    prompt = _prompt("companion")
+
+    assert "companion_profile(action='update')" in prompt
+    assert "不要把这些字段塞进普通 memory" in prompt
 
 
 def test_companion_prompt_treats_bundled_skills_as_installed_and_implicit():

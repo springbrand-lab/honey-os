@@ -164,6 +164,21 @@ def test_companion_profile_uses_identity_name_and_never_returns_file_body(tmp_pa
     assert "sk-never-show" not in str(profile)
 
 
+def test_companion_web_header_reads_managed_profile_name(tmp_path):
+    from honeyos.companion.config import initialize_home
+    from honeyos.companion.profile import update_companion_profile
+
+    initialize_home(tmp_path)
+    update_companion_profile(
+        tmp_path,
+        companion_name="小意",
+        personality="嘴硬心软",
+        source="user_explicit",
+    )
+
+    assert companion_profile(tmp_path) == {"name": "小意", "status": "在这儿"}
+
+
 def test_companion_web_url_is_loopback_only():
     assert companion_web_url() == "http://127.0.0.1:8642/"
     assert companion_web_url(port=9123) == "http://127.0.0.1:9123/"
@@ -259,7 +274,7 @@ def test_companion_approval_event_contains_safe_copy_and_not_raw_description():
     )
 
     assert payload["summary"] == "把一个文件发到 example.com"
-    assert payload["narration"].startswith("我得借一下你电脑的能力")
+    assert "电脑" in payload["narration"] and "下面" in payload["narration"]
     assert payload["choices"] == ["once", "session", "deny"]
     assert "execute_code can spawn subprocesses" not in str(payload)
 

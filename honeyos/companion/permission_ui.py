@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlsplit
 
 
@@ -66,10 +67,18 @@ def build_permission_presentation(
     description: str,
     allow_session: bool,
     allow_permanent: bool,
+    home: Path | None = None,
 ) -> PermissionPresentation:
+    from honeyos.companion.profile import (
+        load_companion_profile,
+        permission_narration,
+    )
+    from honeyos.core.constants import get_honeyos_home
+
     summary, boundaries = _trusted_facts(str(command or ""), str(description or ""))
+    profile = load_companion_profile(home or get_honeyos_home())
     return PermissionPresentation(
-        narration="我得借一下你电脑的能力，才能把这件事继续做完。只会做下面这一步，让我继续吗？",
+        narration=permission_narration(profile),
         summary=summary,
         boundaries=boundaries,
         technical_detail=str(command or ""),

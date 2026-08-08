@@ -1123,6 +1123,39 @@ def memory_tool(
     if target not in {"memory", "user"}:
         return tool_error(f"Invalid target '{target}'. Use 'memory' or 'user'.", success=False)
 
+    # Durable memory is injected into future system prompts.  In companion
+    # mode, reject reusable credentials before either persistence or auditing;
+    # removal remains allowed so an existing bad entry can be cleaned up.
+    try:
+        from honeyos.companion.memory_policy import (
+            contains_sensitive_memory_content,
+            is_companion_mode,
+        )
+
+        candidate_contents = []
+        if operations:
+            candidate_contents = [
+                str(operation.get("content") or "")
+                for operation in operations
+                if isinstance(operation, dict)
+                and operation.get("action") in {"add", "replace"}
+            ]
+        elif action in {"add", "replace"}:
+            candidate_contents = [str(content or "")]
+        if is_companion_mode() and any(
+            contains_sensitive_memory_content(value) for value in candidate_contents
+        ):
+            return tool_error(
+                "Sensitive credentials cannot be saved to companion memory.",
+                success=False,
+            )
+    except Exception:
+        logger.exception("Companion memory credential policy failed closed")
+        return tool_error(
+            "Could not safely validate this companion memory write.",
+            success=False,
+        )
+
     # --- Batch path -------------------------------------------------------
     if operations:
         if not isinstance(operations, list):
@@ -1304,6 +1337,5 @@ registry.register(
     check_fn=check_memory_requirements,
     emoji="🧠",
 )
-
 
 

@@ -178,6 +178,15 @@ COMPANION_MEMORY_GUIDANCE = (
     "不要保存未确认的人格标签、短暂情绪、一次性闲聊细节，也不要虚构过去。"
 )
 
+COMPANION_PROFILE_GUIDANCE = (
+    "用户明确给出或修改你的名字、人格、说话方式、对用户的称呼、关系称呼或长期边界时，"
+    "必须在当前轮调用 companion_profile(action='update') 保存，并把用户原话中的一小段逐字放入"
+    " evidence_quote，再自然继续对话；用户的明确设置"
+    "本身就是授权，不要再次确认。只是玩笑、试探、模型推测或短暂情绪时不要保存，也不要把这些"
+    "字段塞进普通 memory。每轮都以 companion_profile、IDENTITY.md 和 RELATIONSHIP.md 中已确认的"
+    "最新内容为准。"
+)
+
 COMPANION_STRUCTURED_MEMORY_GUIDANCE = (
     "你还有 companion_memory 工具，用于维持关系对话的近期连续性。对明确未聊完的话题使用 "
     "open_loop；对用户明确说出的短期状态使用 temporary_state；对你明确答应的事情使用 "
