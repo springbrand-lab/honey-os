@@ -3910,6 +3910,8 @@ class APIServerAdapter(BasePlatformAdapter):
         message_id = f"msg_{uuid.uuid4().hex}"
         run_id = f"run_{uuid.uuid4().hex}"
         seq = 0
+        activity_seq = 0
+        active_activity_ids: Dict[str, List[str]] = {}
 
         def _event_payload(name: str, payload: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
             nonlocal seq
@@ -3938,35 +3940,64 @@ class APIServerAdapter(BasePlatformAdapter):
             if delta:
                 _enqueue("assistant.delta", {"message_id": message_id, "delta": delta})
 
-        def _tool_progress(event_type: str, tool_name: str = None, preview: str = None, args=None, **kwargs) -> None:
-            activity = None
-            if request.headers.get("X-HoneyOS-Companion-View") == "1":
-                from honeyos.companion.activity import project_activity
+        def _started_activity_id(tool_name: str | None) -> str:
+            nonlocal activity_seq
+            activity_seq += 1
+            activity_id = f"activity_{activity_seq}"
+            key = str(tool_name or "_unknown")
+            active_activity_ids.setdefault(key, []).append(activity_id)
+            return activity_id
 
-                activity = project_activity(
-                    event_type,
-                    tool_name,
-                    preview=preview,
-                    args=args,
-                )
+        def _finished_activity_id(tool_name: str | None) -> str:
+            nonlocal activity_seq
+            key = str(tool_name or "_unknown")
+            pending = active_activity_ids.get(key, [])
+            if pending:
+                return pending.pop(0)
+            activity_seq += 1
+            return f"activity_{activity_seq}"
+
+        def _tool_progress(event_type: str, tool_name: str = None, preview: str = None, args=None, **kwargs) -> None:
+            companion_view = (
+                request.headers.get("X-HoneyOS-Companion-View") == "1"
+            )
             if event_type == "reasoning.available":
                 # Reasoning content is never projected into the companion UI.
-                if activity is None:
+                if companion_view:
+                    from honeyos.companion.activity import project_presence
+
+                    _enqueue("presence.updated", {
+                        "message_id": message_id,
+                        "activity": project_presence(preview=preview),
+                    })
+                else:
                     _enqueue("tool.progress", {"message_id": message_id, "tool_name": tool_name or "_thinking", "delta": preview or ""})
             elif event_type in {"tool.started", "tool.completed", "tool.failed"}:
-                event_name = event_type.replace("tool.", "tool.")
                 payload = {
                     "message_id": message_id,
                     "tool_name": tool_name,
                     "preview": preview,
                     "args": args,
                 }
-                if activity is not None:
+                if companion_view:
+                    from honeyos.companion.activity import project_activity
+
+                    activity_id = (
+                        _started_activity_id(tool_name)
+                        if event_type == "tool.started"
+                        else _finished_activity_id(tool_name)
+                    )
                     # The browser reads only this safe projection. Keep the
                     # legacy raw fields for authenticated API clients that
                     # already depend on the session-stream contract.
-                    payload["activity"] = activity
-                _enqueue(event_name, payload)
+                    payload["activity"] = project_activity(
+                        event_type,
+                        tool_name,
+                        activity_id=activity_id,
+                        preview=preview,
+                        args=args,
+                    )
+                _enqueue(event_type, payload)
 
         async def _run_and_signal() -> None:
             try:

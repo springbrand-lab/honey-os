@@ -87,6 +87,7 @@ def project_activity(
     event_type: str,
     tool_name: str | None,
     *,
+    activity_id: str | None = None,
     preview: str | None = None,
     args: Any = None,
 ) -> dict[str, str]:
@@ -103,6 +104,7 @@ def project_activity(
     normalized_event = str(event_type or "").strip().lower()
     if normalized_event in {"tool.completed", "completed", "done"}:
         return {
+            "activity_id": str(activity_id or "activity"),
             "kind": kind,
             "state": "completed",
             "title": _COMPLETED_COPY[kind],
@@ -110,6 +112,7 @@ def project_activity(
         }
     if normalized_event in {"tool.failed", "failed", "error"}:
         return {
+            "activity_id": str(activity_id or "activity"),
             "kind": kind,
             "state": "failed",
             "title": "刚才没走通，我换个办法",
@@ -117,6 +120,7 @@ def project_activity(
         }
     title, detail = _ACTIVE_COPY[kind]
     return {
+        "activity_id": str(activity_id or "activity"),
         "kind": kind,
         "state": "active",
         "title": title,
@@ -124,4 +128,17 @@ def project_activity(
     }
 
 
-__all__ = ["activity_kind", "project_activity"]
+def project_presence(*, preview: str | None = None) -> dict[str, str]:
+    """Return a safe presence cue without exposing model reasoning."""
+
+    del preview
+    return {
+        "activity_id": "presence",
+        "kind": "presence",
+        "state": "active",
+        "title": "我在想你刚才说的事",
+        "detail": "",
+    }
+
+
+__all__ = ["activity_kind", "project_activity", "project_presence"]

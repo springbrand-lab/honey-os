@@ -9,7 +9,7 @@ import json
 import pytest
 import yaml
 
-from honeyos.companion.activity import project_activity
+from honeyos.companion.activity import project_activity, project_presence
 from honeyos.cli.main import _parser
 from honeyos.companion.config import initialize_home
 from honeyos.companion.setup import _choose_im_platforms
@@ -66,10 +66,45 @@ def test_activity_projection_hides_raw_tool_details():
     )
 
     assert activity == {
+        "activity_id": "activity",
         "kind": "checking",
         "state": "active",
         "title": "正在认真核对",
         "detail": "我在看几处相关内容",
+    }
+    assert "web_search" not in str(activity)
+    assert "secret" not in str(activity)
+
+
+def test_presence_projection_never_contains_reasoning():
+    presence = project_presence(preview="private chain of thought")
+
+    assert presence == {
+        "activity_id": "presence",
+        "kind": "presence",
+        "state": "active",
+        "title": "我在想你刚才说的事",
+        "detail": "",
+    }
+    assert "private" not in str(presence)
+
+
+def test_activity_projection_keeps_only_opaque_identifier():
+    activity = project_activity(
+        "tool.started",
+        "web_search",
+        activity_id="activity_3",
+        preview="curl https://secret.example",
+        args={"api_key": "sk-secret"},
+    )
+
+    assert activity["activity_id"] == "activity_3"
+    assert set(activity) == {
+        "activity_id",
+        "kind",
+        "state",
+        "title",
+        "detail",
     }
     assert "web_search" not in str(activity)
     assert "secret" not in str(activity)
@@ -80,12 +115,14 @@ def test_activity_projection_collapses_success_and_softens_failure():
     failed = project_activity("tool.failed", "terminal")
 
     assert completed == {
+        "activity_id": "activity",
         "kind": "checking",
         "state": "completed",
         "title": "已经替你核对过了",
         "detail": "",
     }
     assert failed == {
+        "activity_id": "activity",
         "kind": "handling",
         "state": "failed",
         "title": "刚才没走通，我换个办法",
