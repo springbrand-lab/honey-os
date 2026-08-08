@@ -209,6 +209,7 @@ def test_web_assets_are_packaged():
 
     assert (assets / "index.html").is_file()
     assert (assets / "app.js").is_file()
+    assert (assets / "run-state.js").is_file()
     assert (assets / "styles.css").is_file()
     file_guard = assets / "file-open.js"
     assert file_guard.is_file()
@@ -234,6 +235,7 @@ def test_api_server_registers_companion_web_routes():
 
     assert ("GET", "/") in routes
     assert ("GET", "/file-open.js") in routes
+    assert ("GET", "/honeyos/run-state.js") in routes
     assert ("GET", "/honeyos/app.js") in routes
     assert ("GET", "/honeyos/styles.css") in routes
     assert ("GET", "/api/companion/bootstrap") in routes

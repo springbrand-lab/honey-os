@@ -2044,6 +2044,7 @@ class APIServerAdapter(BasePlatformAdapter):
         routes: List[tuple] = [
             ("GET", "/", self._handle_companion_index),
             ("GET", "/file-open.js", self._handle_companion_file_guard),
+            ("GET", "/honeyos/run-state.js", self._handle_companion_run_state),
             ("GET", "/honeyos/app.js", self._handle_companion_script),
             ("GET", "/honeyos/styles.css", self._handle_companion_styles),
             ("GET", "/api/companion/bootstrap", self._handle_companion_bootstrap),
@@ -2132,7 +2133,7 @@ class APIServerAdapter(BasePlatformAdapter):
             return web.Response(status=404)
         response = web.Response(body=body, content_type=content_type)
         response.headers["Cache-Control"] = (
-            "no-store" if establish_session else "public, max-age=3600"
+            "no-store" if establish_session else "no-cache"
         )
         if establish_session:
             response.set_cookie(
@@ -2155,6 +2156,13 @@ class APIServerAdapter(BasePlatformAdapter):
     async def _handle_companion_script(self, request: "web.Request") -> "web.Response":
         return await self._handle_companion_asset(
             request, "app.js", "application/javascript"
+        )
+
+    async def _handle_companion_run_state(
+        self, request: "web.Request"
+    ) -> "web.Response":
+        return await self._handle_companion_asset(
+            request, "run-state.js", "application/javascript"
         )
 
     async def _handle_companion_file_guard(
