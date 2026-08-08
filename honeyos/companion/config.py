@@ -20,7 +20,11 @@ from honeyos.migration.legacy import (
 )
 
 from honeyos.companion import PRODUCT_NAME
-from honeyos.companion.projects import ensure_project_root, project_root
+from honeyos.companion.projects import (
+    ensure_project_root,
+    project_root,
+    recover_legacy_projects,
+)
 
 
 DEFAULT_IM_PLATFORMS = ("weixin", "feishu")
@@ -302,6 +306,7 @@ def initialize_home(home: Path, *, platform: str | None = None) -> InitResult:
     resolved = home.expanduser().resolve()
     resolved.mkdir(parents=True, exist_ok=True)
     projects = ensure_project_root(resolved)
+    recover_legacy_projects(resolved, projects)
     for directory in ("memories", "sessions", "logs", "skills", "sandboxes"):
         (resolved / directory).mkdir(parents=True, exist_ok=True)
 
@@ -469,6 +474,7 @@ def upgrade_companion_capabilities(home: Path) -> bool:
         terminal = {}
         config["terminal"] = terminal
     projects = ensure_project_root(resolved)
+    recovery = recover_legacy_projects(resolved, projects)
     terminal.update(
         {
             "backend": "local",
@@ -501,7 +507,7 @@ def upgrade_companion_capabilities(home: Path) -> bool:
     security["allow_proxy_fake_ips"] = True
 
     rendered_config = yaml.safe_dump(config, allow_unicode=True, sort_keys=False)
-    changed = credential_migrated or rendered_config != original_config
+    changed = credential_migrated or bool(recovery.copied) or rendered_config != original_config
     if changed:
         _atomic_replace(config_path, rendered_config, mode=0o600)
 

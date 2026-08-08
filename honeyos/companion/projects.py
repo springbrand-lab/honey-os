@@ -3,11 +3,24 @@
 from __future__ import annotations
 
 import os
+import json
+import shutil
+import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 
 PROJECTS_ENV = "HONEYOS_PROJECTS_HOME"
 DEFAULT_PROJECTS_DIR = "HoneyOS Projects"
+RECOVERY_DIR = "从旧版本恢复"
+RECOVERY_MARKER = ".local-project-recovery-v1.json"
+
+
+@dataclass(frozen=True)
+class RecoveryResult:
+    copied: tuple[str, ...] = ()
+    skipped: tuple[str, ...] = ()
+    errors: tuple[str, ...] = ()
 
 
 def project_root(data_home: Path | None = None) -> Path:
@@ -29,3 +42,109 @@ def ensure_project_root(data_home: Path | None = None) -> Path:
     root = project_root(data_home)
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+
+def _load_completed_tasks(marker: Path) -> set[str]:
+    try:
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return set()
+    tasks = payload.get("completed_tasks", []) if isinstance(payload, dict) else []
+    return {str(task) for task in tasks if str(task).strip()}
+
+
+def _write_completed_tasks(marker: Path, tasks: set[str]) -> None:
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{marker.name}.", dir=marker.parent
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(
+                {"completed_tasks": sorted(tasks)},
+                handle,
+                ensure_ascii=False,
+                indent=2,
+            )
+            handle.write("\n")
+        os.replace(temporary_name, marker)
+    finally:
+        try:
+            os.unlink(temporary_name)
+        except FileNotFoundError:
+            pass
+
+
+def _copy_entry(source: Path, destination: Path) -> None:
+    if source.is_symlink():
+        raise OSError("symbolic links are not recovered automatically")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if source.is_dir():
+        shutil.copytree(source, destination, symlinks=True)
+    else:
+        shutil.copy2(source, destination, follow_symlinks=False)
+
+
+def recover_legacy_projects(
+    data_home: Path, destination: Path | None = None
+) -> RecoveryResult:
+    """Copy legacy container projects into the visible host workspace once.
+
+    The old sandbox tree is never renamed or removed. Companion memory is not
+    below the scanned ``sandboxes/docker`` root and is therefore never read.
+    """
+
+    resolved_home = data_home.expanduser().resolve()
+    legacy_root = resolved_home / "sandboxes" / "docker"
+    if not legacy_root.is_dir():
+        return RecoveryResult()
+
+    root = (destination or ensure_project_root(resolved_home)).expanduser().resolve()
+    marker = resolved_home / RECOVERY_MARKER
+    completed = _load_completed_tasks(marker)
+    copied: list[str] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+
+    try:
+        task_directories = sorted(path for path in legacy_root.iterdir() if path.is_dir())
+    except OSError as exc:
+        return RecoveryResult(errors=(f"{legacy_root}: {exc}",))
+
+    for task_directory in task_directories:
+        task_name = task_directory.name
+        if task_name in completed:
+            continue
+        task_errors = 0
+        for source_group, include_hidden in (("workspace", True), ("home", False)):
+            source_root = task_directory / source_group
+            if not source_root.is_dir():
+                continue
+            try:
+                entries = sorted(source_root.iterdir())
+            except OSError as exc:
+                errors.append(f"{source_root}: {exc}")
+                task_errors += 1
+                continue
+            for source in entries:
+                if not include_hidden and source.name.startswith("."):
+                    continue
+                target = root / RECOVERY_DIR / task_name / source_group / source.name
+                if target.exists() or target.is_symlink():
+                    skipped.append(str(target))
+                    continue
+                try:
+                    _copy_entry(source, target)
+                except OSError as exc:
+                    errors.append(f"{source}: {exc}")
+                    task_errors += 1
+                else:
+                    copied.append(str(target))
+        if task_errors == 0:
+            completed.add(task_name)
+            try:
+                _write_completed_tasks(marker, completed)
+            except OSError as exc:
+                errors.append(f"{marker}: {exc}")
+
+    return RecoveryResult(tuple(copied), tuple(skipped), tuple(errors))
