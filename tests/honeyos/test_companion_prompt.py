@@ -184,6 +184,14 @@ def test_companion_environment_prompt_overrides_stale_container_claims():
     assert "retry inside HoneyOS Projects" in prompt
 
 
+def test_companion_uses_direct_project_tools_instead_of_code_wrapper():
+    prompt = _prompt("companion")
+
+    assert "call write_file or patch directly" in prompt
+    assert "call terminal directly" in prompt
+    assert "do not wrap these operations in execute_code" in prompt.lower()
+
+
 def test_companion_home_creates_relationship_context_files(tmp_path):
     initialize_home(tmp_path)
 
