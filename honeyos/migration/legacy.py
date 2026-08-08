@@ -162,7 +162,12 @@ def migrate_legacy_home(
     backup: Path | None = None
     try:
         _reject_symlinks(legacy)
-        shutil.copytree(legacy, staging, symlinks=False)
+        shutil.copytree(
+            legacy,
+            staging,
+            symlinks=False,
+            ignore=shutil.ignore_patterns("*.pid", "*.lock", "*.sock"),
+        )
         _rewrite_legacy_paths(staging, legacy, destination)
         _validate_migrated_home(legacy, staging)
 

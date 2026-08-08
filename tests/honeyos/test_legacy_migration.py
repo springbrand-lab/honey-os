@@ -93,3 +93,18 @@ def test_rewrites_only_runtime_paths_and_removes_stale_runtime_identity(
     assert str(old) not in (new / "config.yaml").read_text(encoding="utf-8")
     assert str(new) in (new / "config.yaml").read_text(encoding="utf-8")
     assert not (new / "runtime.json").exists()
+
+
+def test_migration_ignores_volatile_process_and_lock_files(tmp_path: Path) -> None:
+    migration = _migration_module()
+    old = tmp_path / ".h2os"
+    new = tmp_path / ".honeyos"
+    old.mkdir()
+    (old / "config.yaml").write_text("agent:\n  mode: companion\n", encoding="utf-8")
+    (old / "gateway.pid").write_text("123", encoding="utf-8")
+    (old / "gateway.lock").write_text("", encoding="utf-8")
+
+    migration.migrate_legacy_home(new, old)
+
+    assert not (new / "gateway.pid").exists()
+    assert not (new / "gateway.lock").exists()

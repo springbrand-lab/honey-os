@@ -18,12 +18,12 @@ from honeyos.migration.legacy import (
 def _is_incomplete_home(home: Path) -> bool:
     """Recognize a shell created before legacy companion data was migrated."""
 
+    memories = home / "memories"
+    has_memory_files = memories.is_dir() and any(
+        path.is_file() for path in memories.iterdir()
+    )
     return home.is_dir() and not any(
-        (
-            (home / "config.yaml").is_file(),
-            (home / ".env").is_file(),
-            (home / "memories").is_dir(),
-        )
+        ((home / "config.yaml").is_file(), (home / ".env").is_file(), has_memory_files)
     )
 
 

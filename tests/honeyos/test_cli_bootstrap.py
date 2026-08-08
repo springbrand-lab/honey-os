@@ -47,6 +47,8 @@ def test_bootstrap_recovers_when_an_incomplete_new_home_blocks_legacy_migration(
     incomplete = tmp_path / ".honeyos"
     incomplete.mkdir()
     (incomplete / "SOUL.md").write_text("partial install", encoding="utf-8")
+    (incomplete / "memories").mkdir()
+    (incomplete / "response_store.db").write_bytes(b"")
     stopped: list[bool] = []
 
     home = bootstrap.activate_home(
