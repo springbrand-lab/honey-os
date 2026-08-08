@@ -256,7 +256,7 @@ _LEGACY_TOOLSET_MAP = {
     "terminal_tools": ["terminal"],
     "vision_tools": ["vision_analyze"],
     "image_tools": ["image_generate"],
-    "skills_tools": ["skills_list", "skill_view", "skill_manage"],
+    "skills_tools": ["skills_list", "skill_view", "skill_manage", "skill_marketplace"],
     "browser_tools": [
         "browser_navigate", "browser_snapshot", "browser_click",
         "browser_type", "browser_scroll", "browser_back",

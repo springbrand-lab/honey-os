@@ -42,7 +42,9 @@ _TOOL_KINDS = {
         "code_execution",
         "computer_use",
         "skills",
+        "skills_list",
         "skill_manage",
+        "skill_marketplace",
         "mcp",
     }),
 }

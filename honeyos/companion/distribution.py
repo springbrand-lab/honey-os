@@ -18,6 +18,7 @@ _REQUIRED_COMPANION_TOOL_NAMES = {
     "session_search",
     "browser_navigate",
     "skills_list",
+    "skill_marketplace",
     "skill_manage",
     "todo",
     "cronjob",

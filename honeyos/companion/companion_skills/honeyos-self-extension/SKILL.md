@@ -24,15 +24,21 @@ metadata:
 
 ## Prerequisites
 
-需要 `skills_list`、`skill_view`、`skill_manage`、`terminal`、`web_search` 和 `browser_navigate` 中与任务相关的工具。
+需要 `skills_list`、`skill_view`、`skill_marketplace`、`skill_manage`、`terminal`、`web_search` 和 `browser_navigate` 中与任务相关的工具。
 
 ## How to Run
 
 1. 用 `skills_list` 和真实工具列表检查现有能力，不能凭印象回答。
-2. 优先使用已经存在的工具或 Skill。
-3. 缺少流程知识时，安装可信的普通 Skill；没有合适来源时创建最小 Skill。
+2. `skills_list` 返回的都是已经安装的 Skill，直接读取和使用，不再询问是否安装。
+3. 缺少流程知识时，用 `skill_marketplace(action="search")` 搜索未安装的 Skill，再用精确 identifier 安装；没有合适来源时创建最小 Skill。
 4. 安装后读取 Skill，继续完成原任务，不停在“安装成功”。
 5. 用实际工具结果验证能力，再向用户报告。
+
+## Installed Skills and Marketplace
+
+- `skills_list` 是当前已经安装并可直接召回的 Skill 清单。
+- 只有 `skill_marketplace` 的搜索结果才是尚未安装的候选项。
+- 安装成功后立即继续原任务，不再询问用户要不要把它接入 HoneyOS。
 
 ## Quick Reference
 
@@ -46,7 +52,7 @@ metadata:
 - 使用 `web_search` 或 `browser_navigate` 读取公开仓库和文档。
 - 用户提供的仓库 URL 是来源身份。必须检查该仓库的 README、安装文档和包元数据，不能根据项目名猜测 PyPI、npm 或其他注册表中的同名包。
 - 对 Python CLI，优先按仓库文档使用锁定版本的源码安装；需要在隔离容器中持久保留时使用用户级 `--user` 安装，让文件进入持久的用户目录，而不是临时容器系统目录。
-- 通过 `skill_manage` 管理本地 Skill，并保持说明简短、工具名真实。
+- 通过 `skill_marketplace` 搜索和安装外部 Skill；通过 `skill_manage` 创建或维护本地 Skill，并保持说明简短、工具名真实。
 - 依赖系统软件时告诉用户用途、来源和影响，等待确认。
 - 新能力只在后续会话生效时明确说明，不谎称当前会话已加载。
 - 安装完成后检查包主页或源码来源，并依次运行 `command -v`、`--help` 以及项目提供的 `doctor` 或状态命令。随后完成一个真实任务验证能力，并继续完成用户原本的任务。

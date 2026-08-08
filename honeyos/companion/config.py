@@ -100,10 +100,56 @@ def seed_companion_skills(home: Path) -> tuple[Path, ...]:
 
     if created:
         try:
-            (skills_dir / ".skills_prompt_snapshot.json").unlink()
+            (home / ".skills_prompt_snapshot.json").unlink()
         except FileNotFoundError:
             pass
     return tuple(created)
+
+
+def _skill_tree_hash(directory: Path) -> str:
+    """Return the bundled-manifest MD5 used by the embedded Skill runtime."""
+
+    digest = hashlib.md5(usedforsecurity=False)
+    for path in sorted(directory.rglob("*")):
+        if not path.is_file():
+            continue
+        digest.update(str(path.relative_to(directory)).encode("utf-8"))
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
+def record_companion_bundled_skills(home: Path) -> bool:
+    """Mark curated companion Skills as installed system bundles."""
+
+    manifest = home / "skills" / ".bundled_manifest"
+    entries: dict[str, str] = {}
+    try:
+        for line in manifest.read_text(encoding="utf-8").splitlines():
+            name, separator, value = line.partition(":")
+            if name.strip():
+                entries[name.strip()] = value.strip() if separator else ""
+    except OSError:
+        pass
+
+    for name, category, command in _COMPANION_SKILLS:
+        if command and shutil.which(command) is None:
+            continue
+        source = _companion_skill_source(name, category)
+        destination = home / "skills" / name
+        if (source / "SKILL.md").is_file() and (destination / "SKILL.md").is_file():
+            entries[name] = _skill_tree_hash(source)
+
+    rendered = "".join(
+        f"{name}:{value}\n" for name, value in sorted(entries.items())
+    )
+    try:
+        current = manifest.read_text(encoding="utf-8")
+    except OSError:
+        current = ""
+    if rendered == current:
+        return False
+    _atomic_replace(manifest, rendered, mode=0o600)
+    return True
 
 
 def _atomic_replace(path: Path, content: str, *, mode: int) -> None:
@@ -291,6 +337,8 @@ def initialize_home(home: Path, *, platform: str | None = None) -> InitResult:
     )
     _ensure_local_web_secret(resolved)
     created = created_files + seed_companion_skills(resolved)
+    if record_companion_bundled_skills(resolved):
+        created += (resolved / "skills" / ".bundled_manifest",)
     return InitResult(home=resolved, created=created)
 
 
@@ -469,6 +517,8 @@ def upgrade_companion_capabilities(home: Path) -> bool:
 
     if seed_companion_skills(resolved):
         changed = True
+    if record_companion_bundled_skills(resolved):
+        changed = True
 
     soul_path = resolved / "SOUL.md"
     soul = soul_path.read_text(encoding="utf-8") if soul_path.exists() else ""
@@ -516,27 +566,32 @@ def upgrade_companion_capabilities(home: Path) -> bool:
                 changed = True
 
     extension_skill = resolved / "skills" / "honeyos-self-extension" / "SKILL.md"
-    extension_marker = "## Source Identity and Verification"
     if extension_skill.is_file():
         extension_text = extension_skill.read_text(encoding="utf-8")
-        if extension_marker not in extension_text:
-            source_text = (
-                Path(__file__).parent
-                / "companion_skills"
-                / "honeyos-self-extension"
-                / "SKILL.md"
-            ).read_text(encoding="utf-8")
+        source_text = (
+            Path(__file__).parent
+            / "companion_skills"
+            / "honeyos-self-extension"
+            / "SKILL.md"
+        ).read_text(encoding="utf-8")
+        for extension_marker in (
+            "## Installed Skills and Marketplace",
+            "## Source Identity and Verification",
+        ):
+            if extension_marker in extension_text:
+                continue
             _prefix, separator, managed_section = source_text.partition(extension_marker)
             if separator:
-                updated_extension = (
+                extension_text = (
                     extension_text.rstrip()
                     + "\n\n"
                     + extension_marker
-                    + managed_section.rstrip()
+                    + managed_section.split("\n## ", 1)[0].rstrip()
                     + "\n"
                 )
-                _atomic_replace(extension_skill, updated_extension, mode=0o644)
                 changed = True
+        if extension_text != extension_skill.read_text(encoding="utf-8"):
+            _atomic_replace(extension_skill, extension_text, mode=0o644)
 
     marker = resolved / ".no-bundled-skills"
     if marker.is_file():

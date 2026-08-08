@@ -103,6 +103,13 @@ def test_initialize_home_creates_companion_contract(tmp_path):
         "grounded-citations",
     }.issubset(seeded_skills)
     assert "hermes-agent" not in seeded_skills
+    bundled_manifest = (tmp_path / "skills" / ".bundled_manifest").read_text(
+        encoding="utf-8"
+    )
+    assert "relationship-continuity:" in bundled_manifest
+    assert "shared-rituals:" in bundled_manifest
+    assert "honeyos-self-extension:" in bundled_manifest
+    assert all(len(line.partition(":")[2]) == 32 for line in bundled_manifest.splitlines())
     assert result.home == tmp_path.resolve()
 
 
@@ -308,3 +315,40 @@ def test_upgrade_appends_extension_safety_contract_without_losing_customization(
     assert "## Source Identity and Verification" in upgraded
     assert "用户提供的仓库 URL 是来源身份" in upgraded
     assert "User customization must survive." in upgraded
+
+
+def test_upgrade_appends_installed_vs_marketplace_contract_to_existing_skill(tmp_path):
+    initialize_home(tmp_path)
+    skill_path = tmp_path / "skills" / "honeyos-self-extension" / "SKILL.md"
+    current = skill_path.read_text(encoding="utf-8")
+    legacy = current.replace(
+        "## Installed Skills and Marketplace\n\n"
+        "- `skills_list` 是当前已经安装并可直接召回的 Skill 清单。\n"
+        "- 只有 `skill_marketplace` 的搜索结果才是尚未安装的候选项。\n"
+        "- 安装成功后立即继续原任务，不再询问用户要不要把它接入 HoneyOS。\n\n",
+        "",
+    )
+    skill_path.write_text(
+        legacy + "\nUser customization must survive.\n",
+        encoding="utf-8",
+    )
+
+    assert upgrade_companion_capabilities(tmp_path) is True
+
+    upgraded = skill_path.read_text(encoding="utf-8")
+    assert "## Installed Skills and Marketplace" in upgraded
+    assert "`skills_list` 是当前已经安装" in upgraded
+    assert "`skill_marketplace` 的搜索结果" in upgraded
+    assert "User customization must survive." in upgraded
+
+
+def test_upgrade_invalidates_real_skill_prompt_snapshot_when_seeding(tmp_path):
+    initialize_home(tmp_path)
+    shutil.rmtree(tmp_path / "skills" / "relationship-continuity")
+    snapshot = tmp_path / ".skills_prompt_snapshot.json"
+    snapshot.write_text('{"stale": true}\n', encoding="utf-8")
+
+    assert upgrade_companion_capabilities(tmp_path) is True
+
+    assert not snapshot.exists()
+    assert (tmp_path / "skills" / "relationship-continuity" / "SKILL.md").is_file()

@@ -1917,7 +1917,7 @@ def build_skills_system_prompt(
         if companion_mode:
             guidance = (
                 "## Skills\n"
-                "先快速查看下面的 Skill 名称和简介。只有在用户当前需求与某项 Skill "
+                "下面列出的 Skill 都已安装并可直接使用。先快速查看名称和简介。只有在用户当前需求与某项 Skill "
                 "相关时，才用 skill_view(name) 读取完整内容并遵循它；普通陪伴聊天不要加载 "
                 "Skill。Skill 是按需能力，不是你的人格。需要扩展能力时优先加载 "
                 "`honeyos-self-extension`，并在安装或创建后继续完成用户原本的事情。\n"
@@ -1925,7 +1925,8 @@ def build_skills_system_prompt(
         else:
             guidance = (
                 "## Skills (mandatory)\n"
-                "Before replying, scan the skills below. If a skill matches or is even partially relevant "
+                "Every skill below is already installed. Before replying, scan the skills below. "
+                "If a skill matches or is even partially relevant "
                 "to your task, you MUST load it with skill_view(name) and follow its instructions. "
                 "Err on the side of loading — it is always better to have context you don't need "
                 "than to miss critical steps, pitfalls, or established workflows. "
@@ -1948,9 +1949,9 @@ def build_skills_system_prompt(
         result = (
             guidance
             + "\n"
-            "<available_skills>\n"
+            "<installed_skills>\n"
             + "\n".join(index_lines) + "\n"
-            "</available_skills>\n"
+            "</installed_skills>\n"
             "\n"
             "Only proceed without loading a skill if genuinely none are relevant to the task."
             + hidden_note

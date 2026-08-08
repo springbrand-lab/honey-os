@@ -39,6 +39,7 @@ def test_distribution_contract_exposes_companion_action_tools_without_orchestrat
         "session_search",
         "browser_navigate",
         "skills_list",
+        "skill_marketplace",
         "skill_manage",
         "todo",
         "cronjob",

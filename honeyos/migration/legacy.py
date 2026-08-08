@@ -12,6 +12,7 @@ import subprocess
 import platform
 import os
 import uuid
+from collections.abc import MutableMapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,10 +27,30 @@ _LEGACY_MODEL_PROVIDER = "h2os-model"
 _MODEL_PROVIDER = "honeyos-model"
 _LEGACY_MODEL_KEY_ENV = "H2OS_MODEL_API_KEY"
 _MODEL_KEY_ENV = "HONEYOS_MODEL_API_KEY"
+_RUNTIME_ENVIRONMENT_KEYS = (
+    "HONEYOS_HOME",
+    "HONEYOS_RUNTIME_ID",
+    "HONEYOS_PRODUCT_NAME",
+    "H2OS_HOME",
+    "H2OS_RUNTIME_ID",
+    "H2OS_PRODUCT_NAME",
+    "HERMES_HOME",
+    "HERMES_RUNTIME_ID",
+    "HERMES_PRODUCT_NAME",
+)
 
 
 class MigrationError(RuntimeError):
     """Raised when legacy data cannot be copied and validated safely."""
+
+
+def clear_product_runtime_environment(
+    environment: MutableMapping[str, str],
+) -> None:
+    """Remove current and previous product selectors before pinning a home."""
+
+    for variable in _RUNTIME_ENVIRONMENT_KEYS:
+        environment.pop(variable, None)
 
 
 @dataclass(frozen=True)
