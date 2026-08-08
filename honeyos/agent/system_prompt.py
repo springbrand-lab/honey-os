@@ -35,8 +35,10 @@ from honeyos.agent.prompt_builder import (
     COMPANION_ENVIRONMENT_GUIDANCE,
     COMPANION_EXTENSION_GUIDANCE,
     COMPANION_MEMORY_GUIDANCE,
+    COMPANION_SKILL_GUIDANCE,
     COMPANION_STRUCTURED_MEMORY_GUIDANCE,
     COMPANION_SESSION_SEARCH_GUIDANCE,
+    COMPANION_TASK_VOICE_GUIDANCE,
     DEFAULT_AGENT_IDENTITY,
     GOOGLE_MODEL_OPERATIONAL_GUIDANCE,
     HONEYOS_AGENT_HELP_GUIDANCE,
@@ -168,7 +170,10 @@ def _build_companion_system_prompt_parts(
     soul = ""
     if agent.load_soul_identity or not agent.skip_context_files:
         soul = runtime_helpers.load_soul_md(context_length) or ""
-    stable_parts.append(soul or COMPANION_AGENT_IDENTITY)
+    identity_prompt = soul or COMPANION_AGENT_IDENTITY
+    stable_parts.append(identity_prompt)
+    if "# 任务中的人格连续性" not in identity_prompt:
+        stable_parts.append(COMPANION_TASK_VOICE_GUIDANCE)
 
     valid_tools = set(agent.valid_tool_names or set())
     if getattr(agent, "_task_completion_guidance", True) and valid_tools:
@@ -217,6 +222,7 @@ def _build_companion_system_prompt_parts(
         stable_parts.append(COMPANION_SESSION_SEARCH_GUIDANCE)
 
     if any(name in valid_tools for name in {"skills_list", "skill_view", "skill_manage"}):
+        stable_parts.append(COMPANION_SKILL_GUIDANCE)
         available_toolsets = {
             toolset
             for toolset in (

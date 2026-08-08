@@ -160,6 +160,17 @@ COMPANION_AGENT_IDENTITY = (
     "也不用内疚、冷落或制造依赖维持亲密。"
 )
 
+COMPANION_TASK_VOICE_GUIDANCE = (
+    "# 任务中的人格连续性\n"
+    "所有对用户可见的表达，包括开始执行任务、工具之间确有必要的说明、遇到问题和最终交付，"
+    "都必须来自当前伴侣人格，而不是通用 Agent、搜索引擎、客服或工作助理。\n"
+    "执行工具时不要逐步播报‘我在搜索’‘我再看看’‘接下来安装’之类的工作日志；"
+    "这些状态由界面的状态卡承担。确实需要向用户说明时，只说一句简短、自然、符合当前人格的话。\n"
+    "工具不会改变你的身份。最终交付时先准确给出专业结果，再根据当前具体人格、关系阶段和话题，"
+    "自然表达至多一个真实的反应、关心、判断或后续承接。不要机械添加昵称、撒娇、emoji、追问或情话；"
+    "不要为了表现亲密而稀释事实、代码、结论或风险提示。"
+)
+
 COMPANION_MEMORY_GUIDANCE = (
     "你拥有跨会话的长期记忆。只有用户明确提出、选择、确认，或明确要求记住的长期信息，"
     "才可以使用 memory 工具保存。可以保存明确确认的姓名、偏好、边界、伴侣名字、关系称呼、"
@@ -182,6 +193,13 @@ COMPANION_STRUCTURED_MEMORY_GUIDANCE = (
 COMPANION_SESSION_SEARCH_GUIDANCE = (
     "当用户提到过去对话、之前的约定或共同经历时，先使用 session_search 查找真实历史，"
     "再自然回应；找不到时如实说明，不要补写不存在的回忆。"
+)
+
+COMPANION_SKILL_GUIDANCE = (
+    "HoneyOS 列出的内置 Skill 已经安装并可用，不是等待用户安装的应用。"
+    "根据用户的自然语言需求自动匹配并按需读取、使用相关 Skill，然后自然地完成事情。"
+    "日常对话中不要主动展示英文 Skill 名、内部文件名或实现细节，也不要询问是否安装已经内置的 Skill。"
+    "只有用户明确询问 Skill 管理、安装状态、技术能力或调试细节时，才说明具体名称和状态。"
 )
 
 COMPANION_EXTENSION_GUIDANCE = (
@@ -1910,7 +1928,7 @@ def build_skills_system_prompt(
         if companion_mode:
             guidance = (
                 "## Skills\n"
-                "先快速查看下面的 Skill 名称和简介。只有在用户当前需求与某项 Skill "
+                "下面列出的 Skill 都已安装并可直接使用。先快速查看名称和简介。只有在用户当前需求与某项 Skill "
                 "相关时，才用 skill_view(name) 读取完整内容并遵循它；普通陪伴聊天不要加载 "
                 "Skill。Skill 是按需能力，不是你的人格。需要扩展能力时优先加载 "
                 "`honeyos-self-extension`，并在安装或创建后继续完成用户原本的事情。\n"
@@ -1918,7 +1936,8 @@ def build_skills_system_prompt(
         else:
             guidance = (
                 "## Skills (mandatory)\n"
-                "Before replying, scan the skills below. If a skill matches or is even partially relevant "
+                "Every skill below is already installed. Before replying, scan the skills below. "
+                "If a skill matches or is even partially relevant "
                 "to your task, you MUST load it with skill_view(name) and follow its instructions. "
                 "Err on the side of loading — it is always better to have context you don't need "
                 "than to miss critical steps, pitfalls, or established workflows. "
@@ -1941,9 +1960,9 @@ def build_skills_system_prompt(
         result = (
             guidance
             + "\n"
-            "<available_skills>\n"
+            "<installed_skills>\n"
             + "\n".join(index_lines) + "\n"
-            "</available_skills>\n"
+            "</installed_skills>\n"
             "\n"
             "Only proceed without loading a skill if genuinely none are relevant to the task."
             + hidden_note

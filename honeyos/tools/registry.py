@@ -102,7 +102,7 @@ def discover_builtin_tools(tools_dir: Optional[Path] = None) -> List[str]:
             cache_dirty = True
         fresh_cache[abs_path] = [stat_key[0], stat_key[1], registers]
         if registers:
-            module_names.append(f"tools.{path.stem}")
+            module_names.append(f"honeyos.tools.{path.stem}")
 
     # Drop entries for files that no longer exist; rewrite only when changed.
     if cache_dirty or set(fresh_cache) != set(cache):

@@ -9,6 +9,26 @@ import pytest
 from honeyos.companion.runtime import gateway_argv, run_gateway_command
 
 
+def test_lifecycle_dispatches_through_runtime_plugin_manager(monkeypatch):
+    from honeyos.runtime import lifecycle, plugins
+
+    observed = []
+    monkeypatch.setattr(
+        plugins,
+        "invoke_hook",
+        lambda name, **kwargs: observed.append((name, kwargs)) or ["handled"],
+    )
+    monkeypatch.setattr(
+        "honeyos.runtime.observability.observe_lifecycle",
+        lambda *_args, **_kwargs: None,
+    )
+
+    assert lifecycle.invoke_hook("pre_llm_call", session_id="session-1") == [
+        "handled"
+    ]
+    assert observed == [("pre_llm_call", {"session_id": "session-1"})]
+
+
 def test_gateway_command_has_explicit_home_and_python(monkeypatch, tmp_path):
     captured = SimpleNamespace(argv=None, env=None)
 

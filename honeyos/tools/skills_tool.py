@@ -785,7 +785,7 @@ def _sort_skills(skills: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def skills_list(category: str = None, task_id: str = None) -> str:
     """
-    List all available skills (progressive disclosure tier 1 - minimal metadata).
+    List installed skills (progressive disclosure tier 1 - minimal metadata).
 
     Returns only name + description to minimize token usage. Use skill_view() to
     load full content, tags, related files, etc.
@@ -804,6 +804,7 @@ def skills_list(category: str = None, task_id: str = None) -> str:
             return json.dumps(
                 {
                     "success": True,
+                    "catalog": "installed",
                     "skills": [],
                     "categories": [],
                     "message": f"No skills found. Skills directory created at {display_honeyos_home()}/skills/",
@@ -818,6 +819,7 @@ def skills_list(category: str = None, task_id: str = None) -> str:
             return json.dumps(
                 {
                     "success": True,
+                    "catalog": "installed",
                     "skills": [],
                     "categories": [],
                     "message": "No skills found in skills/ directory.",
@@ -832,6 +834,19 @@ def skills_list(category: str = None, task_id: str = None) -> str:
         # Sort by category then name
         all_skills = _sort_skills(all_skills)
 
+        from honeyos.tools.skill_usage import is_bundled, is_hub_installed
+
+        for skill in all_skills:
+            name = skill["name"]
+            skill["installed"] = True
+            skill["enabled"] = True
+            if is_bundled(name):
+                skill["source"] = "bundled"
+            elif is_hub_installed(name):
+                skill["source"] = "hub"
+            else:
+                skill["source"] = "local"
+
         # Extract unique categories
         categories = sorted(
             {s.get("category") for s in all_skills if s.get("category")}
@@ -840,10 +855,14 @@ def skills_list(category: str = None, task_id: str = None) -> str:
         return json.dumps(
             {
                 "success": True,
+                "catalog": "installed",
                 "skills": all_skills,
                 "categories": categories,
                 "count": len(all_skills),
-                "hint": "Use skill_view(name) to see full content, tags, and linked files",
+                "hint": (
+                    "Every listed skill is already installed. Use skill_view(name) "
+                    "to load its instructions. Search registries before installing new skills."
+                ),
             },
             ensure_ascii=False,
         )
@@ -1758,7 +1777,10 @@ if __name__ == "__main__":
 
 SKILLS_LIST_SCHEMA = {
     "name": "skills_list",
-    "description": "List available skills (name + description). Use skill_view(name) to load full content.",
+    "description": (
+        "List installed and enabled skills with provenance. Every returned item is "
+        "already installed; use skill_view(name) to load its full content."
+    ),
     "parameters": {
         "type": "object",
         "properties": {
@@ -1779,7 +1801,7 @@ SKILL_VIEW_SCHEMA = {
         "properties": {
             "name": {
                 "type": "string",
-                "description": "The skill name (use skills_list to see available skills). For plugin-provided skills, use the qualified form 'plugin:skill' (e.g. 'superpowers:writing-plans').",
+                "description": "The installed skill name (use skills_list to see installed skills). For plugin-provided skills, use the qualified form 'plugin:skill' (e.g. 'superpowers:writing-plans').",
             },
             "file_path": {
                 "type": "string",

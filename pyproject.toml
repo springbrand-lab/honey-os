@@ -361,7 +361,7 @@ include = ["honeyos", "honeyos.*"]
 
 [tool.setuptools.package-data]
 "honeyos.runtime" = ["observability/schemas/*.json"]
-"honeyos.companion" = ["templates/*.md", "companion_skills/**/*.md", "companion_skills/**/*.yaml"]
+"honeyos.companion" = ["templates/*.md", "companion_skills/**/*.md", "companion_skills/**/*.yaml", "web_assets/*"]
 # gateway/assets/ ships status_phrases.yaml and the Telegram BotFather
 # screenshot. Without this, sealed venvs (uv2nix) silently lose both —
 # status phrases fall back to the tiny hardcoded set and the Telegram

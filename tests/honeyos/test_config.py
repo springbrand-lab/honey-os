@@ -81,6 +81,8 @@ def test_initialize_home_creates_companion_contract(tmp_path):
     assert config["platforms"]["feishu"]["extra"]["group_policy"] == "disabled"
     assert config["display"]["platforms"]["feishu"]["tool_progress"] == "off"
     assert config["display"]["platforms"]["weixin"]["tool_progress"] == "off"
+    assert config["display"]["platforms"]["feishu"]["interim_assistant_messages"] == "off"
+    assert config["display"]["platforms"]["weixin"]["interim_assistant_messages"] == "off"
     assert (tmp_path / ".no-bundled-skills").exists()
     assert "亲密关系伴侣" in (tmp_path / "SOUL.md").read_text(encoding="utf-8")
     assert (tmp_path / "memories" / "USER.md").exists()
@@ -103,6 +105,13 @@ def test_initialize_home_creates_companion_contract(tmp_path):
         "grounded-citations",
     }.issubset(seeded_skills)
     assert "hermes-agent" not in seeded_skills
+    bundled_manifest = (tmp_path / "skills" / ".bundled_manifest").read_text(
+        encoding="utf-8"
+    )
+    assert "relationship-continuity:" in bundled_manifest
+    assert "shared-rituals:" in bundled_manifest
+    assert "honeyos-self-extension:" in bundled_manifest
+    assert all(len(line.partition(":")[2]) == 32 for line in bundled_manifest.splitlines())
     assert result.home == tmp_path.resolve()
 
 
@@ -132,6 +141,8 @@ def test_upgrade_quiets_managed_companion_progress_but_preserves_user_verbose_ch
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     config["display"]["platforms"]["feishu"]["tool_progress"] = "new"
     config["display"]["platforms"]["weixin"] = {"tool_progress": "verbose"}
+    config["display"]["platforms"]["feishu"]["interim_assistant_messages"] = "new"
+    config["display"]["platforms"]["weixin"]["interim_assistant_messages"] = "on"
     config_path.write_text(
         yaml.safe_dump(config, allow_unicode=True, sort_keys=False),
         encoding="utf-8",
@@ -142,6 +153,8 @@ def test_upgrade_quiets_managed_companion_progress_but_preserves_user_verbose_ch
     upgraded = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert upgraded["display"]["platforms"]["feishu"]["tool_progress"] == "off"
     assert upgraded["display"]["platforms"]["weixin"]["tool_progress"] == "verbose"
+    assert upgraded["display"]["platforms"]["feishu"]["interim_assistant_messages"] == "off"
+    assert upgraded["display"]["platforms"]["weixin"]["interim_assistant_messages"] == "on"
 
 
 def test_initialize_home_rejects_unsupported_platform(tmp_path):
@@ -254,6 +267,43 @@ def test_upgrade_migrates_legacy_product_brand_without_touching_identity(tmp_pat
     )
 
 
+def test_upgrade_migrates_legacy_model_provider_and_key_without_exposing_value(tmp_path):
+    initialize_home(tmp_path)
+    config_path = tmp_path / "config.yaml"
+    config = __import__("yaml").safe_load(config_path.read_text(encoding="utf-8"))
+    config["model"] = {
+        "default": "deepseek-v4-flash",
+        "provider": "h2os-model",
+        "base_url": "https://api.example.com/v1",
+        "api_mode": "chat_completions",
+    }
+    config["providers"] = {
+        "h2os-model": {
+            "name": "h2os-model",
+            "base_url": "https://api.example.com/v1",
+            "key_env": "H2OS_MODEL_API_KEY",
+            "default_model": "deepseek-v4-flash",
+        }
+    }
+    config_path.write_text(
+        __import__("yaml").safe_dump(config, sort_keys=False), encoding="utf-8"
+    )
+    (tmp_path / ".env").write_text(
+        "H2OS_MODEL_API_KEY=secret-value\nAPI_SERVER_KEY=local-key\n",
+        encoding="utf-8",
+    )
+
+    assert config_module.upgrade_companion_capabilities(tmp_path) is True
+
+    migrated = __import__("yaml").safe_load(config_path.read_text(encoding="utf-8"))
+    env_text = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert migrated["model"]["provider"] == "honeyos-model"
+    assert "h2os-model" not in migrated["providers"]
+    assert migrated["providers"]["honeyos-model"]["key_env"] == "HONEYOS_MODEL_API_KEY"
+    assert "HONEYOS_MODEL_API_KEY=secret-value" in env_text
+    assert "H2OS_MODEL_API_KEY=" not in env_text
+
+
 def test_upgrade_appends_extension_safety_contract_without_losing_customization(tmp_path):
     initialize_home(tmp_path)
     skill_path = tmp_path / "skills" / "honeyos-self-extension" / "SKILL.md"
@@ -271,3 +321,40 @@ def test_upgrade_appends_extension_safety_contract_without_losing_customization(
     assert "## Source Identity and Verification" in upgraded
     assert "用户提供的仓库 URL 是来源身份" in upgraded
     assert "User customization must survive." in upgraded
+
+
+def test_upgrade_appends_installed_vs_marketplace_contract_to_existing_skill(tmp_path):
+    initialize_home(tmp_path)
+    skill_path = tmp_path / "skills" / "honeyos-self-extension" / "SKILL.md"
+    current = skill_path.read_text(encoding="utf-8")
+    legacy = current.replace(
+        "## Installed Skills and Marketplace\n\n"
+        "- `skills_list` 是当前已经安装并可直接召回的 Skill 清单。\n"
+        "- 只有 `skill_marketplace` 的搜索结果才是尚未安装的候选项。\n"
+        "- 安装成功后立即继续原任务，不再询问用户要不要把它接入 HoneyOS。\n\n",
+        "",
+    )
+    skill_path.write_text(
+        legacy + "\nUser customization must survive.\n",
+        encoding="utf-8",
+    )
+
+    assert upgrade_companion_capabilities(tmp_path) is True
+
+    upgraded = skill_path.read_text(encoding="utf-8")
+    assert "## Installed Skills and Marketplace" in upgraded
+    assert "`skills_list` 是当前已经安装" in upgraded
+    assert "`skill_marketplace` 的搜索结果" in upgraded
+    assert "User customization must survive." in upgraded
+
+
+def test_upgrade_invalidates_real_skill_prompt_snapshot_when_seeding(tmp_path):
+    initialize_home(tmp_path)
+    shutil.rmtree(tmp_path / "skills" / "relationship-continuity")
+    snapshot = tmp_path / ".skills_prompt_snapshot.json"
+    snapshot.write_text('{"stale": true}\n', encoding="utf-8")
+
+    assert upgrade_companion_capabilities(tmp_path) is True
+
+    assert not snapshot.exists()
+    assert (tmp_path / "skills" / "relationship-continuity" / "SKILL.md").is_file()

@@ -47,7 +47,7 @@ _HONEYOS_CORE_TOOLS = [
     "bfl_flux3_keyframes_to_video", "bfl_flux3_video_continuation",
     "bfl_flux3_get_result", "bfl_flux3_prompting_guide",
     # Skills
-    "skills_list", "skill_view", "skill_manage",
+    "skills_list", "skill_view", "skill_manage", "skill_marketplace",
     # Browser automation
     "browser_navigate", "browser_snapshot", "browser_click",
     "browser_type", "browser_scroll", "browser_back",
@@ -192,7 +192,7 @@ TOOLSETS = {
 
     "skills": {
         "description": "Access, create, edit, and manage skill documents with specialized instructions and knowledge",
-        "tools": ["skills_list", "skill_view", "skill_manage"],
+        "tools": ["skills_list", "skill_view", "skill_manage", "skill_marketplace"],
         "includes": []
     },
 

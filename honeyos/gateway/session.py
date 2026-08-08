@@ -1094,6 +1094,21 @@ def build_session_key(
       - Without identifiers, messages fall back to one session per platform/chat_type.
     """
     ns = _session_key_namespace(profile)
+
+    # HoneyOS is intentionally a single-owner companion. Its private Web,
+    # Feishu, and Weixin lanes are transports for one relationship rather than
+    # separate conversations. Collapse only those owner-only DMs, and only
+    # under the branded runtime identity; the general gateway keeps its
+    # historical per-platform isolation unchanged.
+    runtime_id = os.getenv("HONEYOS_RUNTIME_ID", "").strip().lower()
+    if (
+        runtime_id.startswith("honeyos-companion-")
+        and source.chat_type == "dm"
+        and source.platform
+        in {Platform.API_SERVER, Platform.FEISHU, Platform.WEIXIN}
+    ):
+        return f"{ns}:companion:dm:owner"
+
     platform = source.platform.value
     slack_scope_id = (
         str(source.scope_id)

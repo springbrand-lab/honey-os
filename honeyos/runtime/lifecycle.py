@@ -17,7 +17,7 @@ def invoke_hook(hook_name: str, **kwargs: Any) -> List[Any]:
     except Exception:
         logger.warning("Built-in observability hook failed", exc_info=True)
 
-    from honeyos import plugins
+    from honeyos.runtime import plugins
 
     return plugins.invoke_hook(hook_name, **kwargs)
 
@@ -32,7 +32,7 @@ def has_hook(hook_name: str) -> bool:
     except Exception:
         logger.warning("Unable to inspect built-in observability hooks", exc_info=True)
 
-    from honeyos import plugins
+    from honeyos.runtime import plugins
 
     return plugins.has_hook(hook_name)
 
@@ -58,6 +58,6 @@ def finalize_session(**kwargs: Any) -> List[Any]:
         except Exception:
             logger.warning("Core Relay session finalization failed", exc_info=True)
 
-    from honeyos import plugins
+    from honeyos.runtime import plugins
 
     return plugins.invoke_hook("on_session_finalize", **kwargs)

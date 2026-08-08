@@ -199,3 +199,30 @@ def test_setup_can_select_feishu_only(tmp_path):
 
     assert result == 0
     assert events == [("feishu", tmp_path.resolve())]
+
+
+def test_setup_can_start_with_local_web_only(tmp_path):
+    initialize_home(tmp_path)
+    events = []
+    answers = iter(["", "https://api.example.com/v1", "test-model", "4"])
+
+    result = run_setup(
+        tmp_path,
+        input_fn=lambda _prompt: next(answers),
+        secret_fn=lambda _prompt: "valid-key",
+        validate_fn=lambda _choice, _key: None,
+        weixin_setup_fn=lambda home: events.append(("weixin", home)) or 0,
+        feishu_setup_fn=lambda home: events.append(("feishu", home)) or 0,
+        gateway_run_fn=lambda command, *, home, arguments=(): events.append(
+            ("gateway", command, tuple(arguments), home)
+        )
+        or 0,
+        ready_check_fn=lambda home: events.append(("ready", home)) or True,
+    )
+
+    assert result == 0
+    assert events == [
+        ("gateway", "install", ("--no-start-now",), tmp_path.resolve()),
+        ("gateway", "start", (), tmp_path.resolve()),
+        ("ready", tmp_path.resolve()),
+    ]

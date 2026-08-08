@@ -148,8 +148,10 @@ def stop_service(identity: ServiceIdentity, runner: Runner = _run) -> int:
 
 def restart_service(identity: ServiceIdentity, runner: Runner = _run) -> int:
     if platform.system() == "Darwin":
-        stopped = stop_service(identity, runner=runner)
-        return start_service(identity, runner=runner) if stopped in {0, 3, 5, 113} else stopped
+        # launchctl bootout unregisters the job entirely, so a subsequent
+        # kickstart cannot find it. Re-render and bootstrap the exact HoneyOS
+        # service definition instead.
+        return install_service(identity, runner=runner)
     return _returncode(runner(["systemctl", "--user", "restart", identity.linux_unit]))
 
 

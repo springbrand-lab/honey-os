@@ -19,6 +19,7 @@ from honeyos.cli.service import (
     start_service,
     stop_service,
 )
+from honeyos.migration.legacy import clear_product_runtime_environment
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -32,11 +33,22 @@ def _parser() -> argparse.ArgumentParser:
     commands.add_parser("setup", help="Connect a model and private chat channel")
     commands.add_parser("init", help="Initialize the private companion")
     commands.add_parser("start", help="Start the background companion")
+    commands.add_parser("web", help="Open the private local chat")
     commands.add_parser("stop", help="Stop the background companion")
     commands.add_parser("restart", help="Restart the background companion")
     commands.add_parser("status", help="Show companion status")
     commands.add_parser("logs", help="Show companion logs")
     commands.add_parser("doctor", help="Check the installation")
+    passthrough_commands = {
+        "skills": "Search, install, and manage companion skills",
+        "model": "Configure the companion model",
+        "tools": "Configure companion capabilities",
+        "computer-use": "Install and check desktop control",
+    }
+    for command, help_text in passthrough_commands.items():
+        passthrough = commands.add_parser(command, help=help_text, add_help=False)
+        passthrough.add_argument("-h", "--help", action="store_true", dest="runtime_help")
+        passthrough.add_argument("runtime_args", nargs=argparse.REMAINDER)
 
     channel = commands.add_parser("channel", help="Connect a private chat channel")
     channel_commands = channel.add_subparsers(dest="channel_command", required=True)
@@ -62,13 +74,7 @@ def _parser() -> argparse.ArgumentParser:
 
 def _runtime_environment(home: Path) -> dict[str, str]:
     environment = os.environ.copy()
-    for legacy_variable in (
-        "HONEYOS_HOME",
-        "HONEYOS_HOME",
-        "HONEYOS_RUNTIME_ID",
-        "HONEYOS_PRODUCT_NAME",
-    ):
-        environment.pop(legacy_variable, None)
+    clear_product_runtime_environment(environment)
     environment["HONEYOS_HOME"] = str(home)
     environment["HONEYOS_RUNTIME_ID"] = RUNTIME_ID
     environment["HONEYOS_PRODUCT_NAME"] = PRODUCT_NAME
@@ -121,12 +127,24 @@ def _run_setup(home: Path, identity: ServiceIdentity) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     try:
-        args = parser.parse_args(list(argv) if argv is not None else None)
+        args, unknown = parser.parse_known_args(
+            list(argv) if argv is not None else None
+        )
     except argparse.ArgumentError as exc:
         print(f"honeyos: error: {exc}", file=sys.stderr)
         return 2
     except SystemExit as exc:
         return int(exc.code or 0)
+
+    passthrough_names = {"skills", "model", "tools", "computer-use"}
+    if unknown and args.command not in passthrough_names:
+        print(
+            f"honeyos: error: unrecognized arguments: {' '.join(unknown)}",
+            file=sys.stderr,
+        )
+        return 2
+    if unknown:
+        args.runtime_args = [*unknown, *args.runtime_args]
 
     explicit_home = Path(args.home) if args.home else None
     home = activate_home(explicit_home)
@@ -143,6 +161,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         _initialize_embedded(home)
         installed = install_service(identity)
         return start_service(identity) if installed == 0 else installed
+    if args.command == "web":
+        _initialize_embedded(home)
+        installed = install_service(identity)
+        started = start_service(identity) if installed == 0 else installed
+        if started != 0:
+            return started
+        from honeyos.companion.web import (
+            companion_web_url,
+            open_companion_web,
+            wait_for_companion_web,
+        )
+
+        url = companion_web_url()
+        print(f"{PRODUCT_NAME} 本地聊天：{url}")
+        wait_for_companion_web()
+        open_companion_web()
+        return 0
     if args.command == "stop":
         return stop_service(identity)
     if args.command == "restart":
@@ -162,6 +197,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         finally:
             os.environ.clear()
             os.environ.update(previous)
+    if args.command in passthrough_names:
+        _initialize_embedded(home)
+        runtime_arguments = [args.command]
+        if args.runtime_help:
+            runtime_arguments.append("--help")
+        runtime_arguments.extend(args.runtime_args)
+        return _run_embedded(runtime_arguments, home)
     if args.command == "channel":
         _initialize_embedded(home)
         from honeyos.companion.channels import setup_feishu, setup_weixin

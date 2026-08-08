@@ -115,6 +115,115 @@ def test_pairing_approve_accepts_feishu(monkeypatch, tmp_path):
     ]
 
 
+def test_skills_command_routes_to_full_honeyos_runtime(monkeypatch, tmp_path):
+    observed = []
+    monkeypatch.setattr(
+        "honeyos.cli.main._run_embedded",
+        lambda arguments, home: observed.append((arguments, home)) or 0,
+    )
+
+    assert (
+        main(
+            [
+                "--home",
+                str(tmp_path),
+                "skills",
+                "search",
+                "relationship",
+                "--limit",
+                "5",
+            ]
+        )
+        == 0
+    )
+    assert observed == [
+        (
+            ["skills", "search", "relationship", "--limit", "5"],
+            tmp_path.resolve(),
+        )
+    ]
+
+
+def test_runtime_capability_commands_route_through_honeyos(monkeypatch, tmp_path):
+    observed = []
+    monkeypatch.setattr(
+        "honeyos.cli.main._run_embedded",
+        lambda arguments, home: observed.append((arguments, home)) or 0,
+    )
+
+    for arguments in (
+        ["model", "list"],
+        ["tools"],
+        ["computer-use", "doctor", "--json"],
+    ):
+        assert main(["--home", str(tmp_path), *arguments]) == 0
+
+    assert observed == [
+        (["model", "list"], tmp_path.resolve()),
+        (["tools"], tmp_path.resolve()),
+        (["computer-use", "doctor", "--json"], tmp_path.resolve()),
+    ]
+
+
+def test_runtime_capability_command_forwards_direct_help(monkeypatch, tmp_path):
+    observed = []
+    monkeypatch.setattr(
+        "honeyos.cli.main._run_embedded",
+        lambda arguments, home: observed.append((arguments, home)) or 0,
+    )
+
+    assert main(["--home", str(tmp_path), "model", "--help"]) == 0
+
+    assert observed == [(["model", "--help"], tmp_path.resolve())]
+
+
+def test_runtime_capability_command_forwards_direct_options(monkeypatch, tmp_path):
+    observed = []
+    monkeypatch.setattr(
+        "honeyos.cli.main._run_embedded",
+        lambda arguments, home: observed.append((arguments, home)) or 0,
+    )
+
+    assert (
+        main(
+            [
+                "--home",
+                str(tmp_path),
+                "model",
+                "--portal-url",
+                "https://portal.example.test",
+                "--refresh",
+            ]
+        )
+        == 0
+    )
+
+    assert observed == [
+        (
+            [
+                "model",
+                "--portal-url",
+                "https://portal.example.test",
+                "--refresh",
+            ],
+            tmp_path.resolve(),
+        )
+    ]
+
+
+def test_runtime_environment_clears_previous_product_homes(monkeypatch, tmp_path):
+    from honeyos.cli.main import _runtime_environment
+
+    monkeypatch.setenv("HERMES_HOME", "/tmp/hermes-home")
+    monkeypatch.setenv("H2OS_HOME", "/tmp/h2os-home")
+
+    environment = _runtime_environment(tmp_path)
+
+    assert "HERMES_HOME" not in environment
+    assert "H2OS_HOME" not in environment
+    assert environment["HONEYOS_HOME"] == str(tmp_path)
+
+
 def test_start_installs_then_starts_honeyos_service(monkeypatch, tmp_path):
     observed = []
     monkeypatch.setattr(
