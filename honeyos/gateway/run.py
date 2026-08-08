@@ -653,7 +653,7 @@ def _format_exec_approval_fallback(
     return (
         f"{presentation.narration}\n\n**{presentation.summary}**\n\n"
         f"如果愿意，可以这样告诉我：\n- " + "\n- ".join(choices)
-        + f"\n\n<details><summary>看看具体会做什么</summary>\n\n```\n{cmd_preview}\n```\n</details>"
+        + f"\n\n具体信息（不看也没关系）：\n```\n{cmd_preview}\n```"
     )
 
 

@@ -23,6 +23,17 @@ def test_permission_presentation_separates_relationship_copy_from_trusted_facts(
     assert "curl" in presentation.technical_detail
 
 
+def test_curl_fail_on_http_error_flag_is_not_mislabeled_as_an_upload():
+    presentation = build_permission_presentation(
+        command="curl -f https://example.com/status",
+        description="network request requiring confirmation",
+        allow_session=False,
+        allow_permanent=False,
+    )
+
+    assert presentation.summary != "把一个文件发到 example.com"
+
+
 def test_feishu_permission_card_is_compact_chinese_and_collapsible():
     presentation = build_permission_presentation(
         command="python3 build.py",

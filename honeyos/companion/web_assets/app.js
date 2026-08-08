@@ -319,7 +319,7 @@ function renderActionTrail(state) {
 function renderTurnState(state) {
   if (state.phase === "awaiting_permission" && state.permission) renderPermission(state);
   else if (state.activities.length) renderActionTrail(state);
-  else if (state.phase === "present") renderPresence(state);
+  else if (state.phase === "present" || state.phase === "acting") renderPresence(state);
   else hideTurnStatus();
   scrollToLatest();
 }

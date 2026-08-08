@@ -104,6 +104,13 @@
         ...current,
         phase: "acting",
         permission: null,
+        presence: {
+          activity_id: "permission-resumed",
+          kind: "presence",
+          state: "active",
+          title: payload.choice === "deny" ? "好，这次先不做" : "好，我继续了",
+          detail: "",
+        },
         updatedAt,
       };
     }

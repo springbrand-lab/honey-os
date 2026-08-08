@@ -36,7 +36,10 @@ def _host_from_text(text: str) -> str:
 def _trusted_facts(command: str, description: str) -> tuple[str, tuple[str, ...]]:
     combined = f"{description}\n{command}".lower()
     host = _host_from_text(f"{description} {command}")
-    if "curl" in combined and any(flag in combined for flag in (" -t ", "--upload-file", " -f ", "multipart")):
+    curl_upload = bool(
+        re.search(r"(?:^|\s)(?:-T|--upload-file|-F)(?:\s|=)", command)
+    )
+    if "curl" in combined and (curl_upload or "multipart" in combined):
         return (
             f"把一个文件发到 {host}",
             ("会把本机文件发到外部网站", f"接收方是 {host}"),
