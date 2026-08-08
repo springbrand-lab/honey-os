@@ -34,6 +34,35 @@ def test_bootstrap_migrates_legacy_before_returning_home(
     assert list(tmp_path.glob(".h2os.backup-*"))
 
 
+def test_bootstrap_recovers_when_an_incomplete_new_home_blocks_legacy_migration(
+    tmp_path: Path,
+) -> None:
+    bootstrap = _bootstrap_module()
+    old = tmp_path / ".h2os"
+    old.mkdir()
+    (old / "config.yaml").write_text("agent:\n  mode: companion\n", encoding="utf-8")
+    memories = old / "memories"
+    memories.mkdir()
+    (memories / "IDENTITY.md").write_text("阿凛", encoding="utf-8")
+    incomplete = tmp_path / ".honeyos"
+    incomplete.mkdir()
+    (incomplete / "SOUL.md").write_text("partial install", encoding="utf-8")
+    stopped: list[bool] = []
+
+    home = bootstrap.activate_home(
+        home=incomplete,
+        legacy_home=old,
+        stop_legacy=lambda: stopped.append(True),
+    )
+
+    assert stopped == [True]
+    assert (home / "config.yaml").is_file()
+    assert (home / "memories" / "IDENTITY.md").read_text(encoding="utf-8") == "阿凛"
+    backups = list(tmp_path.glob(".honeyos.incomplete-*"))
+    assert len(backups) == 1
+    assert (backups[0] / "SOUL.md").read_text(encoding="utf-8") == "partial install"
+
+
 def test_bootstrap_never_reads_or_changes_hermes_home(tmp_path: Path) -> None:
     bootstrap = _bootstrap_module()
     hermes = tmp_path / ".hermes"

@@ -173,6 +173,9 @@ def test_web_assets_are_packaged():
     assert (assets / "index.html").is_file()
     assert (assets / "app.js").is_file()
     assert (assets / "styles.css").is_file()
+    file_guard = assets / "file-open.js"
+    assert file_guard.is_file()
+    assert "window.location.replace" in file_guard.read_text(encoding="utf-8")
 
 
 def _api_adapter() -> APIServerAdapter:
@@ -193,6 +196,7 @@ def test_api_server_registers_companion_web_routes():
     routes = {(method, path) for method, path, _handler in adapter._http_route_table()}
 
     assert ("GET", "/") in routes
+    assert ("GET", "/file-open.js") in routes
     assert ("GET", "/honeyos/app.js") in routes
     assert ("GET", "/honeyos/styles.css") in routes
     assert ("GET", "/api/companion/bootstrap") in routes

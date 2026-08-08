@@ -1202,7 +1202,7 @@ def _security_headers_for_path(path: str) -> Dict[str, str]:
     """Return strict API headers or the bundled UI's same-origin CSP."""
 
     headers = dict(_SECURITY_HEADERS)
-    if path == "/" or path.startswith("/honeyos/"):
+    if path in {"/", "/file-open.js"} or path.startswith("/honeyos/"):
         headers["Content-Security-Policy"] = (
             "default-src 'self'; "
             "script-src 'self'; style-src 'self'; connect-src 'self'; "
@@ -2043,6 +2043,7 @@ class APIServerAdapter(BasePlatformAdapter):
         """
         routes: List[tuple] = [
             ("GET", "/", self._handle_companion_index),
+            ("GET", "/file-open.js", self._handle_companion_file_guard),
             ("GET", "/honeyos/app.js", self._handle_companion_script),
             ("GET", "/honeyos/styles.css", self._handle_companion_styles),
             ("GET", "/api/companion/bootstrap", self._handle_companion_bootstrap),
@@ -2154,6 +2155,13 @@ class APIServerAdapter(BasePlatformAdapter):
     async def _handle_companion_script(self, request: "web.Request") -> "web.Response":
         return await self._handle_companion_asset(
             request, "app.js", "application/javascript"
+        )
+
+    async def _handle_companion_file_guard(
+        self, request: "web.Request"
+    ) -> "web.Response":
+        return await self._handle_companion_asset(
+            request, "file-open.js", "application/javascript"
         )
 
     async def _handle_companion_styles(self, request: "web.Request") -> "web.Response":
