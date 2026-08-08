@@ -1465,6 +1465,8 @@ def handle_function_call(
         # unaffected by wall-clock adjustments during the call.
         _dispatch_start = time.monotonic()
         _approval_tokens = None
+        _intent_token = None
+        reset_turn_intent_grants = None
         try:
             from honeyos.tools.approval import (
                 reset_current_observability_context,
@@ -1477,6 +1479,18 @@ def handle_function_call(
         except Exception:
             reset_current_observability_context = None
         try:
+            from honeyos.tools.permission_policy import (
+                grants_from_user_task,
+                reset_turn_intent_grants,
+                set_turn_intent_grants,
+            )
+
+            _intent_token = set_turn_intent_grants(
+                grants_from_user_task(user_task or "", turn_id=turn_id or "")
+            )
+        except Exception:
+            reset_turn_intent_grants = None
+        try:
             if function_name == "execute_code":
                 # Prefer the caller-provided list so subagents can't overwrite
                 # the parent's tool set via the process-global.
@@ -1487,6 +1501,7 @@ def handle_function_call(
                         task_id=task_id,
                         session_id=session_id,
                         enabled_tools=sandbox_enabled,
+                        user_task=user_task,
                     )
             else:
                 def _dispatch(next_args: Dict[str, Any]) -> Any:
@@ -1513,6 +1528,11 @@ def handle_function_call(
                     api_request_id=api_request_id or "",
                 )
         finally:
+            if _intent_token is not None and reset_turn_intent_grants is not None:
+                try:
+                    reset_turn_intent_grants(_intent_token)
+                except Exception:
+                    pass
             if _approval_tokens is not None and reset_current_observability_context is not None:
                 try:
                     reset_current_observability_context(_approval_tokens)
