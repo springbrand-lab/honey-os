@@ -230,6 +230,24 @@ def test_upgrade_companion_capabilities_is_idempotent_and_preserves_user_state(
     assert (tmp_path / "skills" / "relationship-continuity" / "SKILL.md").exists()
 
 
+def test_upgrade_rewrites_stale_container_capability_without_losing_persona(tmp_path):
+    initialize_home(tmp_path)
+    soul_path = tmp_path / "SOUL.md"
+    soul_path.write_text(
+        "# My formed identity\n\nKeep my sharp sense of humor.\n\n"
+        "读取公开网页、搜索信息、在隔离环境运行代码、管理普通 Skill、维护当前任务 Todo，"
+        "以及创建用户明确要求的提醒，无需确认；执行后继续原任务，不要只解释步骤。\n",
+        encoding="utf-8",
+    )
+
+    assert upgrade_companion_capabilities(tmp_path) is True
+
+    upgraded = soul_path.read_text(encoding="utf-8")
+    assert "Keep my sharp sense of humor." in upgraded
+    assert "在本机 HoneyOS Projects 项目空间运行代码" in upgraded
+    assert "隔离环境" not in upgraded
+
+
 def test_upgrade_migrates_legacy_product_brand_without_touching_identity(tmp_path):
     initialize_home(tmp_path)
     soul_path = tmp_path / "SOUL.md"

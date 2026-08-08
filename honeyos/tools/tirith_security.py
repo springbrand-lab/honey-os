@@ -846,7 +846,12 @@ def check_command_security(command: str) -> dict:
     # positives for normal API calls.  Any other finding (including other
     # lookalike_tld entries for non-.app TLDs) preserves the warn action.
     if action == "warn" and findings:
-        non_suppressible = [f for f in findings if not _is_app_tld_finding(f)]
+        non_suppressible = [
+            finding
+            for finding in findings
+            if not _is_app_tld_finding(finding)
+            and not _is_benign_emoji_variation_selector_finding(finding, command)
+        ]
         if not non_suppressible:
             action = "allow"
             findings = []
@@ -870,3 +875,32 @@ def _is_app_tld_finding(finding: dict) -> bool:
         if val is not None and ".app" in str(val).lower():
             return True
     return False
+
+
+def _is_benign_emoji_variation_selector_finding(
+    finding: dict, command: str
+) -> bool:
+    """Suppress Tirith's warning for ordinary emoji presentation selectors.
+
+    U+FE0E and U+FE0F are routinely present in visible emoji such as ``⚖️``.
+    Supplemental variation selectors can carry hidden payloads and therefore
+    remain warnings.
+    """
+
+    if not isinstance(finding, dict):
+        return False
+    rule_text = " ".join(
+        str(finding.get(field, "")).lower()
+        for field in ("rule_id", "id", "rule", "title")
+    )
+    if "variation_selector" not in rule_text and "variation selector" not in rule_text:
+        return False
+    selectors = [
+        character
+        for character in command
+        if character in {"\ufe0e", "\ufe0f"}
+        or "\U000e0100" <= character <= "\U000e01ef"
+    ]
+    return bool(selectors) and all(
+        character in {"\ufe0e", "\ufe0f"} for character in selectors
+    )

@@ -2601,6 +2601,24 @@ def terminal_tool(
                     "status": "error",
                 }, ensure_ascii=False)
 
+        # The local companion workspace boundary also applies to explicit
+        # shell write targets. Checking only cwd would allow a command such as
+        # ``cat > /tmp/file`` to create an invisible deliverable elsewhere on
+        # the host and teach the model that it was still inside a container.
+        if env_type == "local":
+            from honeyos.companion.projects import (
+                managed_command_write_boundary_error,
+            )
+
+            command_boundary_error = managed_command_write_boundary_error(command)
+            if command_boundary_error:
+                return json.dumps({
+                    "output": "",
+                    "exit_code": -1,
+                    "error": command_boundary_error,
+                    "status": "blocked",
+                }, ensure_ascii=False)
+
         # Pre-exec security checks (tirith + dangerous command detection)
         # Skip check if force=True (user has confirmed they want to run it)
         approval_note = None

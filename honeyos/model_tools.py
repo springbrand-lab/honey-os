@@ -1392,25 +1392,42 @@ def handle_function_call(
         # ACP/Zed edit approval runs before any file mutation.  The requester
         # is bound via ContextVar only for ACP sessions, so CLI/gateway paths
         # are unaffected when it is unset.
+        maybe_require_edit_approval = None
         try:
             from acp_adapter.edit_approval import maybe_require_edit_approval
-
-            edit_block_message = maybe_require_edit_approval(function_name, function_args)
-            if edit_block_message is not None:
-                _emit_post_tool_call_hook(
-                    function_name=function_name,
-                    function_args=function_args,
-                    result=edit_block_message,
-                    task_id=task_id,
-                    session_id=session_id,
-                    tool_call_id=tool_call_id,
-                    turn_id=turn_id,
-                    api_request_id=api_request_id,
-                    status="blocked",
-                    error_type="edit_approval_denied",
-                    middleware_trace=list(_tool_middleware_trace),
+        except ModuleNotFoundError as _edit_approval_import_err:
+            # ACP is an optional editor integration and is intentionally not
+            # shipped in the standalone HoneyOS runtime.  Its absence means
+            # there is no ACP approval requester for this session; normal
+            # HoneyOS file tools must continue through their own boundary
+            # checks.  Missing dependencies *inside* an installed adapter are
+            # still treated as guard failures below.
+            missing_name = _edit_approval_import_err.name or ""
+            if not (
+                missing_name == "acp_adapter"
+                or missing_name.startswith("acp_adapter.")
+            ):
+                raise
+        try:
+            if maybe_require_edit_approval is not None:
+                edit_block_message = maybe_require_edit_approval(
+                    function_name, function_args
                 )
-                return edit_block_message
+                if edit_block_message is not None:
+                    _emit_post_tool_call_hook(
+                        function_name=function_name,
+                        function_args=function_args,
+                        result=edit_block_message,
+                        task_id=task_id,
+                        session_id=session_id,
+                        tool_call_id=tool_call_id,
+                        turn_id=turn_id,
+                        api_request_id=api_request_id,
+                        status="blocked",
+                        error_type="edit_approval_denied",
+                        middleware_trace=list(_tool_middleware_trace),
+                    )
+                    return edit_block_message
         except Exception as _edit_approval_err:
             logger.debug("ACP edit approval guard error: %s", _edit_approval_err)
             if function_name in {"write_file", "patch"}:

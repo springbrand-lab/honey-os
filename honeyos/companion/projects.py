@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import json
+import re
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -14,6 +15,22 @@ PROJECTS_ENV = "HONEYOS_PROJECTS_HOME"
 DEFAULT_PROJECTS_DIR = "HoneyOS Projects"
 RECOVERY_DIR = "从旧版本恢复"
 RECOVERY_MARKER = ".local-project-recovery-v1.json"
+
+_ABSOLUTE_SHELL_PATH = r"(?:/|~/|\$HOME(?:/|$)|\$\{HOME\}(?:/|$))"
+_REDIRECT_TARGET_RE = re.compile(
+    r"(?<![<>])>{1,2}\s*(?:"
+    rf'"(?P<double>{_ABSOLUTE_SHELL_PATH}[^"\n]*)"|'
+    rf"'(?P<single>{_ABSOLUTE_SHELL_PATH}[^'\n]*)'|"
+    rf"(?P<bare>{_ABSOLUTE_SHELL_PATH}[^\s;&|<>]*)"
+    r")"
+)
+_TEE_TARGET_RE = re.compile(
+    r"(?:^|[;&|]\s*|\s)tee(?:\s+-[A-Za-z]+)*\s+(?:"
+    rf'"(?P<double>{_ABSOLUTE_SHELL_PATH}[^"\n]*)"|'
+    rf"'(?P<single>{_ABSOLUTE_SHELL_PATH}[^'\n]*)'|"
+    rf"(?P<bare>{_ABSOLUTE_SHELL_PATH}[^\s;&|<>]*)"
+    r")"
+)
 
 
 @dataclass(frozen=True)
@@ -92,6 +109,48 @@ def managed_project_boundary_error(path: Path) -> str | None:
         f"({root}). Put the project there; access to another user directory "
         "requires an explicit directory-authorization feature."
     )
+
+
+def _expand_shell_home_path(raw_path: str) -> Path:
+    """Resolve the small set of explicit home forms accepted by the scanner."""
+
+    if raw_path == "$HOME" or raw_path == "${HOME}":
+        return Path.home()
+    if raw_path.startswith("$HOME/"):
+        return Path.home() / raw_path[len("$HOME/") :]
+    if raw_path.startswith("${HOME}/"):
+        return Path.home() / raw_path[len("${HOME}/") :]
+    return Path(raw_path).expanduser()
+
+
+def managed_command_write_boundary_error(command: str) -> str | None:
+    """Block obvious absolute shell write targets outside HoneyOS Projects.
+
+    File tools already enforce this boundary themselves.  Shell redirection
+    needs an equivalent preflight because checking only the command's working
+    directory does not constrain ``> /tmp/file`` or ``tee ~/Desktop/file``.
+    Relative targets remain project-local through the managed terminal cwd.
+    """
+
+    if active_managed_project_root() is None:
+        return None
+    for pattern in (_REDIRECT_TARGET_RE, _TEE_TARGET_RE):
+        for match in pattern.finditer(command):
+            raw_path = next(
+                value
+                for value in (
+                    match.group("double"),
+                    match.group("single"),
+                    match.group("bare"),
+                )
+                if value is not None
+            )
+            boundary_error = managed_project_boundary_error(
+                _expand_shell_home_path(raw_path)
+            )
+            if boundary_error:
+                return boundary_error
+    return None
 
 
 def _load_completed_tasks(marker: Path) -> set[str]:
