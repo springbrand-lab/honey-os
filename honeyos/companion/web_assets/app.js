@@ -12,6 +12,7 @@ const elements = {
   presence: document.querySelector("#presence-line"),
   presenceCopy: document.querySelector("#presence-copy"),
   actionTrail: document.querySelector("#action-trail"),
+  permissionCard: document.querySelector("#permission-card"),
   scrollLatest: document.querySelector("#scroll-to-latest"),
 };
 
@@ -96,6 +97,7 @@ function hideTurnStatus() {
   elements.turnStatus.hidden = true;
   elements.presence.hidden = true;
   elements.actionTrail.hidden = true;
+  elements.permissionCard.hidden = true;
 }
 
 function showTurnStatus() {
@@ -113,6 +115,109 @@ function renderPresence(state) {
   showTurnStatus();
   elements.presence.hidden = false;
   elements.actionTrail.hidden = true;
+  elements.permissionCard.hidden = true;
+}
+
+function permissionChoiceLabel(choice) {
+  return {
+    once: "好，你继续",
+    session: "本次对话都可以",
+    always: "以后同类操作都可以",
+    deny: "先别动",
+  }[choice] || choice;
+}
+
+async function answerPermission(choice) {
+  const permission = turnState.permission;
+  if (!permission) return;
+  const buttons = elements.permissionCard.querySelectorAll("button");
+  buttons.forEach((button) => { button.disabled = true; });
+  try {
+    const response = await fetch(
+      "/api/sessions/" + encodeURIComponent(sessionId) + "/approval",
+      {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "X-HoneyOS-Session-Key": sessionKey,
+        },
+        body: JSON.stringify({ choice }),
+      },
+    );
+    if (!response.ok) throw new Error("approval_unavailable");
+    turnState = HoneyOSRunState.reduce(
+      turnState,
+      { name: "approval.responded", payload: { choice } },
+      Date.now(),
+    );
+    elements.permissionCard.replaceChildren();
+    elements.permissionCard.hidden = true;
+    renderTurnState(turnState);
+  } catch {
+    buttons.forEach((button) => { button.disabled = false; });
+    showError("approval_unavailable");
+  }
+}
+
+function renderPermission(state) {
+  const permission = state.permission;
+  if (!permission) return;
+  const card = document.createElement("section");
+  card.className = "permission-card-inner";
+
+  const narration = document.createElement("p");
+  narration.className = "permission-narration";
+  narration.textContent = permission.narration || "这一步需要你点个头，我再继续。";
+  const summary = document.createElement("strong");
+  summary.className = "permission-summary";
+  summary.textContent = permission.summary;
+
+  const actions = document.createElement("div");
+  actions.className = "permission-actions";
+  const primaryChoices = ["once", "deny"].filter((choice) => permission.choices.includes(choice));
+  for (const choice of primaryChoices) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "permission-button " + (choice === "once" ? "primary" : "quiet");
+    button.textContent = permissionChoiceLabel(choice);
+    button.addEventListener("click", () => void answerPermission(choice));
+    actions.append(button);
+  }
+
+  const details = document.createElement("details");
+  details.className = "permission-details";
+  const detailsTitle = document.createElement("summary");
+  detailsTitle.textContent = "看看具体会做什么";
+  details.append(detailsTitle);
+  const list = document.createElement("ul");
+  for (const line of permission.boundaries) {
+    const item = document.createElement("li");
+    item.textContent = line;
+    list.append(item);
+  }
+  details.append(list);
+  if (permission.technical_detail) {
+    const technical = document.createElement("pre");
+    technical.textContent = permission.technical_detail;
+    details.append(technical);
+  }
+  const scoped = document.createElement("div");
+  scoped.className = "permission-scoped-actions";
+  for (const choice of ["session", "always"].filter((item) => permission.choices.includes(item))) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = permissionChoiceLabel(choice);
+    button.addEventListener("click", () => void answerPermission(choice));
+    scoped.append(button);
+  }
+  details.append(scoped);
+  card.append(narration, summary, actions, details);
+  elements.permissionCard.replaceChildren(card);
+  showTurnStatus();
+  elements.presence.hidden = true;
+  elements.actionTrail.hidden = true;
+  elements.permissionCard.hidden = false;
 }
 
 function activityStatusLabel(activity) {
@@ -212,7 +317,8 @@ function renderActionTrail(state) {
 }
 
 function renderTurnState(state) {
-  if (state.activities.length) renderActionTrail(state);
+  if (state.phase === "awaiting_permission" && state.permission) renderPermission(state);
+  else if (state.activities.length) renderActionTrail(state);
   else if (state.phase === "present") renderPresence(state);
   else hideTurnStatus();
   scrollToLatest();

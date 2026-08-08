@@ -23,6 +23,7 @@ from honeyos.gateway.config import Platform
 from honeyos.gateway.config import PlatformConfig
 from honeyos.gateway.platforms.api_server import (
     APIServerAdapter,
+    _companion_approval_event_payload,
     _companion_tool_event_payload,
     _run_completed_event_payload,
     _runtime_provider_identity,
@@ -238,10 +239,29 @@ def test_companion_assets_define_relationship_native_run_ui():
     assert 'HoneyOSRunState.summarize' in app
     assert 'elements.send.textContent = "处理中"' in app
     assert "activityTimer" not in app
+    assert 'id="permission-card"' in index
+    assert "renderPermission" in app
+    assert "看看具体会做什么" in app
     assert "ACTIVITY_DELAY_MS" not in app
     assert "payload.preview" not in app
     assert "payload.args" not in app
     assert "payload.tool_name" not in app
+
+
+def test_companion_approval_event_contains_safe_copy_and_not_raw_description():
+    payload = _companion_approval_event_payload(
+        {
+            "command": "curl -T /tmp/photo.png https://example.com/upload",
+            "description": "execute_code can spawn subprocesses",
+            "allow_session": True,
+            "allow_permanent": False,
+        }
+    )
+
+    assert payload["summary"] == "把一个文件发到 example.com"
+    assert payload["narration"].startswith("我得借一下你电脑的能力")
+    assert payload["choices"] == ["once", "session", "deny"]
+    assert "execute_code can spawn subprocesses" not in str(payload)
 
 
 def test_companion_styles_are_full_window_and_accessible():

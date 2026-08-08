@@ -401,6 +401,91 @@ button {
   width: 100%;
 }
 
+.permission-card {
+  width: 100%;
+}
+
+.permission-card-inner {
+  padding: 15px;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--action) 88%, var(--surface-solid));
+  box-shadow: 0 12px 30px color-mix(in srgb, var(--shadow) 55%, transparent);
+}
+
+.permission-narration {
+  margin: 0 0 10px;
+  color: var(--text-soft);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.permission-summary {
+  display: block;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.permission-actions,
+.permission-scoped-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 13px;
+}
+
+.permission-button,
+.permission-scoped-actions button {
+  min-height: 36px;
+  padding: 7px 13px;
+  border: 1px solid var(--line-strong);
+  border-radius: 11px;
+  color: var(--text-soft);
+  background: var(--surface-solid);
+  cursor: pointer;
+}
+
+.permission-button.primary {
+  border-color: transparent;
+  color: var(--accent-ink);
+  background: var(--accent);
+}
+
+.permission-button:disabled,
+.permission-scoped-actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.permission-details {
+  margin-top: 12px;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.permission-details > summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.permission-details ul {
+  margin: 10px 0 0;
+  padding-left: 19px;
+  line-height: 1.6;
+}
+
+.permission-details pre {
+  overflow: auto;
+  max-height: 150px;
+  margin: 10px 0 0;
+  padding: 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .action-current {
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--accent) 12%, transparent);

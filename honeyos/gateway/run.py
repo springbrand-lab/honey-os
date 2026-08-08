@@ -633,22 +633,27 @@ def _format_exec_approval_fallback(
     smart_denied: bool = False,
 ) -> str:
     """Render the text fallback from approval capabilities, not platform names."""
-    cmd_preview = command[:200] + "..." if len(command) > 200 else command
-    heading = "⚠️ **Dangerous command requires approval:**"
-    if smart_denied:
-        heading = "⚠️ **Smart DENY — owner override for one operation:**"
+    from honeyos.companion.permission_ui import build_permission_presentation
 
-    choices = [f"Reply `{command_prefix}approve` to execute this one operation"]
+    presentation = build_permission_presentation(
+        command=command,
+        description=description,
+        allow_session=allow_session,
+        allow_permanent=allow_permanent,
+    )
+    cmd_preview = presentation.technical_detail[:200]
+    if len(presentation.technical_detail) > 200:
+        cmd_preview += "..."
+    choices = [f"回复 `{command_prefix}approve`，好，我就继续"]
     if not smart_denied and allow_session:
-        choices.append(
-            f"`{command_prefix}approve session` to approve this pattern for the session"
-        )
+        choices.append(f"`{command_prefix}approve session`，本次对话同类操作都可以")
         if allow_permanent:
-            choices.append(f"`{command_prefix}approve always` to approve permanently")
-    choices.append(f"`{command_prefix}deny` to cancel")
+            choices.append(f"`{command_prefix}approve always`，以后同类操作都可以")
+    choices.append(f"`{command_prefix}deny`，这次先别动")
     return (
-        f"{heading}\n```\n{cmd_preview}\n```\nReason: {description}\n\n"
-        + ", ".join(choices[:-1]) + f", or {choices[-1]}."
+        f"{presentation.narration}\n\n**{presentation.summary}**\n\n"
+        f"如果愿意，可以这样告诉我：\n- " + "\n- ".join(choices)
+        + f"\n\n<details><summary>看看具体会做什么</summary>\n\n```\n{cmd_preview}\n```\n</details>"
     )
 
 

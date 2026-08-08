@@ -73,10 +73,43 @@ _api_request_profile: ContextVar[Optional[str]] = ContextVar(
     "api_server_request_profile", default=None
 )
 
-def _approval_event_choices(*, smart_denied: bool, allow_permanent: bool) -> list[str]:
+def _approval_event_choices(
+    *, smart_denied: bool, allow_permanent: bool, allow_session: bool = True
+) -> list[str]:
     if smart_denied:
         return ["once", "deny"]
+    if not allow_session:
+        return ["once", "deny"]
     return ["once", "session", "always", "deny"] if allow_permanent else ["once", "session", "deny"]
+
+
+def _companion_approval_event_payload(approval_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Project a blocking approval into the browser's safe permission UI."""
+    from honeyos.companion.permission_ui import build_permission_presentation
+    from honeyos.gateway.run import _redact_approval_command
+
+    command = _redact_approval_command(str(approval_data.get("command") or ""))
+    allow_session = approval_data.get("allow_session") is not False
+    allow_permanent = approval_data.get("allow_permanent") is not False
+    smart_denied = bool(approval_data.get("smart_denied"))
+    presentation = build_permission_presentation(
+        command=command,
+        description=str(approval_data.get("description") or ""),
+        allow_session=allow_session,
+        allow_permanent=allow_permanent,
+    )
+    return {
+        "approval_id": str(approval_data.get("approval_id") or uuid.uuid4().hex),
+        "narration": presentation.narration,
+        "summary": presentation.summary,
+        "boundaries": list(presentation.boundaries),
+        "technical_detail": presentation.technical_detail,
+        "choices": _approval_event_choices(
+            smart_denied=smart_denied,
+            allow_permanent=allow_permanent,
+            allow_session=allow_session,
+        ),
+    }
 
 
 try:
@@ -2138,6 +2171,7 @@ class APIServerAdapter(BasePlatformAdapter):
             ("POST", "/api/sessions/{session_id}/fork", self._handle_fork_session),
             ("POST", "/api/sessions/{session_id}/chat", self._handle_session_chat),
             ("POST", "/api/sessions/{session_id}/chat/stream", self._handle_session_chat_stream),
+            ("POST", "/api/sessions/{session_id}/approval", self._handle_companion_approval),
             ("POST", "/api/sessions/{session_id}/model", self._handle_session_model_lock),
             ("POST", "/v1/chat/completions", self._handle_chat_completions),
             ("POST", "/v1/responses", self._handle_responses),
@@ -4088,6 +4122,17 @@ class APIServerAdapter(BasePlatformAdapter):
                     }
                 _enqueue(event_type, payload)
 
+        def _approval_notify(approval_data: Dict[str, Any]) -> None:
+            if not companion_view:
+                return
+            _enqueue(
+                "approval.request",
+                {
+                    "message_id": message_id,
+                    **_companion_approval_event_payload(approval_data),
+                },
+            )
+
         async def _run_and_signal() -> None:
             try:
                 await queue.put(_event_payload("run.started", {
@@ -4109,6 +4154,7 @@ class APIServerAdapter(BasePlatformAdapter):
                     requested_runtime=runtime_request.get("requested") or {},
                     route_source=runtime_request.get("route_source") or "global",
                     confirmed_runtime_lock=lock_active,
+                    approval_callback=_approval_notify if companion_view else None,
                     **agent_overrides,
                 )
                 final_response = _resolve_media_to_data_urls(result.get("final_response", "") if isinstance(result, dict) else "")
@@ -4193,6 +4239,43 @@ class APIServerAdapter(BasePlatformAdapter):
         except Exception as exc:
             logger.debug("[api_server] session SSE stream error: %s", exc)
         return response
+
+    async def _handle_companion_approval(self, request: "web.Request") -> "web.Response":
+        """Resolve the local companion's currently visible permission card."""
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+        session_key, key_err = self._parse_session_key_header(request)
+        if key_err is not None:
+            return key_err
+        if not session_key:
+            return web.json_response(
+                _openai_error("Missing companion session key", code="session_key_required"),
+                status=400,
+            )
+        _, session_err = await self._get_existing_session_or_404(
+            request.match_info["session_id"]
+        )
+        if session_err is not None:
+            return session_err
+        body, body_err = await self._read_json_body(request)
+        if body_err is not None:
+            return body_err
+        choice = str(body.get("choice") or "")
+        if choice not in {"once", "session", "always", "deny"}:
+            return web.json_response(
+                _openai_error("Invalid permission choice", code="invalid_approval_choice"),
+                status=400,
+            )
+        from honeyos.tools.approval import resolve_gateway_approval
+
+        resolved = resolve_gateway_approval(session_key, choice)
+        if resolved <= 0:
+            return web.json_response(
+                _openai_error("This permission request has expired", code="approval_not_pending"),
+                status=409,
+            )
+        return web.json_response({"choice": choice, "resolved": resolved})
 
     async def _handle_session_model_lock(self, request: "web.Request") -> "web.Response":
         """POST /api/sessions/{session_id}/model — backend-ack a Browser model lock."""
@@ -6328,6 +6411,7 @@ class APIServerAdapter(BasePlatformAdapter):
         requested_runtime: Optional[Dict[str, Any]] = None,
         route_source: str = "global",
         confirmed_runtime_lock: bool = False,
+        approval_callback=None,
     ) -> tuple:
         """
         Create an agent and run a conversation in a thread executor.
@@ -6363,12 +6447,23 @@ class APIServerAdapter(BasePlatformAdapter):
         def _run():
             from honeyos.gateway.session_context import clear_session_vars
 
+            from honeyos.tools.approval import (
+                register_gateway_notify,
+                reset_current_session_key,
+                set_current_session_key,
+                unregister_gateway_notify,
+            )
+
             with self._profile_scope(request_profile):
                 tokens = self._bind_api_server_session(
                     chat_id=session_id or "",
                     session_key=gateway_session_key or session_id or "",
                     session_id=session_id or "",
                 )
+                approval_session_key = gateway_session_key or session_id or ""
+                approval_token = set_current_session_key(approval_session_key)
+                if approval_callback is not None and approval_session_key:
+                    register_gateway_notify(approval_session_key, approval_callback)
                 agent = None
                 try:
                     agent = self._create_agent(
@@ -6524,7 +6619,12 @@ class APIServerAdapter(BasePlatformAdapter):
                     # in gateway/run.py's _run_sync_with_timeout_lifecycle.
                     if agent is not None:
                         _clear_turn_process_ownership(agent)
-                    clear_session_vars(tokens)
+                    try:
+                        if approval_callback is not None and approval_session_key:
+                            unregister_gateway_notify(approval_session_key)
+                    finally:
+                        reset_current_session_key(approval_token)
+                        clear_session_vars(tokens)
 
         self._activate_admitted_request()
         self._inflight_agent_runs += 1

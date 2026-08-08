@@ -1721,26 +1721,13 @@ class RelayAdapter(BasePlatformAdapter):
         button→text fallback takes over (same contract as a native adapter's
         failed button send).
         """
-        options: list = [{"id": "once", "label": "Allow Once", "style": "primary"}]
-        if not smart_denied and allow_session:
-            options.append({"id": "session", "label": "Allow Session"})
-            if allow_permanent:
-                options.append({
-                    "id": "always",
-                    "label": "Always Allow",
-                })
-        options.append({"id": "deny", "label": "Deny", "style": "danger"})
-
-        cmd_preview = command if len(command) <= 1500 else command[:1500] + "..."
-        text = (
-            "⚠️ **Command Approval Required**\n\n"
-            f"```\n{cmd_preview}\n```\n"
-            f"Reason: {description}"
+        prompt = self._build_companion_approval_prompt(
+            command=command,
+            description=description,
+            allow_session=allow_session,
+            allow_permanent=allow_permanent,
+            smart_denied=smart_denied,
         )
-        if smart_denied:
-            text += (
-                "\n\n**Smart DENY:** owner override applies to this one operation only."
-            )
 
         prompt_id = self._mint_prompt(
             "exec_approval",
@@ -1749,16 +1736,45 @@ class RelayAdapter(BasePlatformAdapter):
         result = await self._send_prompt(
             chat_id,
             prompt_kind="approval",
-            text=text,
+            text=prompt["text"],
             prompt_id=prompt_id,
-            options=options,
-            metadata=metadata,
+            options=prompt["options"],
+            metadata={**(metadata or {}), "permission": prompt},
         )
         if result is not None:
             return result
         # Lane unavailable: unregister and let run.py's text fallback run.
         self._pending_prompts.pop(prompt_id, None)
         return SendResult(success=False, error="relay prompt op unavailable")
+
+    @staticmethod
+    def _build_companion_approval_prompt(
+        *, command: str, description: str, allow_session: bool,
+        allow_permanent: bool, smart_denied: bool,
+    ) -> Dict[str, Any]:
+        from honeyos.companion.permission_ui import build_permission_presentation
+
+        presentation = build_permission_presentation(
+            command=command,
+            description=description,
+            allow_session=allow_session,
+            allow_permanent=allow_permanent,
+        )
+        options: list[dict] = [
+            {"id": "once", "label": "好，你继续", "style": "primary"},
+        ]
+        if not smart_denied and presentation.allow_session:
+            options.append({"id": "session", "label": "本次对话都可以"})
+            if presentation.allow_permanent:
+                options.append({"id": "always", "label": "以后同类操作都可以"})
+        options.append({"id": "deny", "label": "先别动"})
+        return {
+            "text": presentation.narration,
+            "summary": presentation.summary,
+            "boundaries": list(presentation.boundaries),
+            "technical_detail": presentation.technical_detail,
+            "options": options,
+        }
 
     async def send_slash_confirm(
         self,

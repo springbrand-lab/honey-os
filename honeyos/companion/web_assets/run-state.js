@@ -6,6 +6,7 @@
     "present",
     "acting",
     "responding",
+    "awaiting_permission",
     "completed",
     "failed",
   ]);
@@ -19,6 +20,7 @@
       content: "",
       presence: null,
       activities: [],
+      permission: null,
       error: "",
     };
   }
@@ -79,6 +81,29 @@
         ...current,
         phase: "responding",
         content: current.content + String(payload.delta || ""),
+        updatedAt,
+      };
+    }
+    if (name === "approval.request") {
+      return {
+        ...current,
+        phase: "awaiting_permission",
+        permission: {
+          approval_id: String(payload.approval_id || "approval"),
+          narration: String(payload.narration || ""),
+          summary: String(payload.summary || "需要你确认这一步"),
+          boundaries: Array.isArray(payload.boundaries) ? payload.boundaries.map(String) : [],
+          technical_detail: String(payload.technical_detail || ""),
+          choices: Array.isArray(payload.choices) ? payload.choices.map(String) : ["once", "deny"],
+        },
+        updatedAt,
+      };
+    }
+    if (name === "approval.responded") {
+      return {
+        ...current,
+        phase: "acting",
+        permission: null,
         updatedAt,
       };
     }

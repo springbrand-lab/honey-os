@@ -2034,6 +2034,61 @@ class FeishuAdapter(BasePlatformAdapter):
     _EA_SMART_DENY_LINE = "\n\n**Smart DENY:** owner override applies to this one operation only."
     _EA_CMD_BUDGET = 3000
 
+    @staticmethod
+    def _build_companion_permission_card(
+        *, presentation, approval_id: int, smart_denied: bool
+    ) -> Dict[str, Any]:
+        """Build a quiet, companion-native card with facts collapsed."""
+
+        def _btn(label: str, action_name: str, btn_type: str = "default") -> dict:
+            return {
+                "tag": "button",
+                "text": {"tag": "plain_text", "content": label},
+                "type": btn_type,
+                "value": {"honeyos_action": action_name, "approval_id": approval_id},
+            }
+
+        primary_actions = [
+            _btn("好，你继续", "approve_once", "primary"),
+            _btn("先别动", "deny"),
+        ]
+        detail_elements: list[dict] = [
+            {
+                "tag": "markdown",
+                "content": "\n".join(f"• {line}" for line in presentation.boundaries),
+            },
+            {
+                "tag": "markdown",
+                "content": f"**技术详情**\n```\n{presentation.technical_detail[:3000]}\n```",
+            },
+        ]
+        scoped: list[dict] = []
+        if not smart_denied and presentation.allow_session:
+            scoped.append(_btn("本次对话都可以", "approve_session"))
+            if presentation.allow_permanent:
+                scoped.append(_btn("以后同类操作都可以", "approve_always"))
+        if scoped:
+            detail_elements.append({"tag": "action", "actions": scoped})
+
+        return {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "title": {"content": presentation.summary, "tag": "plain_text"},
+                "template": "grey",
+            },
+            "elements": [
+                {"tag": "action", "actions": primary_actions},
+                {
+                    "tag": "collapsible_panel",
+                    "expanded": False,
+                    "header": {
+                        "title": {"tag": "plain_text", "content": "看看具体会做什么"},
+                    },
+                    "elements": detail_elements,
+                },
+            ],
+        }
+
     async def send_exec_approval(
         self, chat_id: str, command: str, session_key: str,
         description: str = "dangerous command",
@@ -2053,38 +2108,26 @@ class FeishuAdapter(BasePlatformAdapter):
 
         try:
             approval_id = next(self._approval_counter)
+            from honeyos.companion.permission_ui import build_permission_presentation
 
-            def _btn(label: str, action_name: str, btn_type: str = "default") -> dict:
-                return {
-                    "tag": "button",
-                    "text": {"tag": "plain_text", "content": label},
-                    "type": btn_type,
-                    "value": {"honeyos_action": action_name, "approval_id": approval_id},
-                }
-
-            actions = [_btn("✅ Allow Once", "approve_once", "primary")]
-            if not smart_denied and allow_session:
-                actions.append(_btn("✅ Session", "approve_session"))
-                if allow_permanent:
-                    actions.append(_btn("✅ Always", "approve_always"))
-            actions.append(_btn("❌ Deny", "deny", "danger"))
-            card = {
-                "config": {"wide_screen_mode": True},
-                "header": {
-                    "title": {"content": "⚠️ Command Approval Required", "tag": "plain_text"},
-                    "template": "orange",
-                },
-                "elements": [
-                    {
-                        "tag": "markdown",
-                        "content": self._format_exec_approval(command, description, smart_denied),
-                    },
-                    {
-                        "tag": "action",
-                        "actions": actions,
-                    },
-                ],
-            }
+            presentation = build_permission_presentation(
+                command=command,
+                description=description,
+                allow_session=allow_session,
+                allow_permanent=allow_permanent,
+            )
+            narration_result = await self.send(
+                chat_id,
+                presentation.narration,
+                metadata=metadata,
+            )
+            if not narration_result.success:
+                return narration_result
+            card = self._build_companion_permission_card(
+                presentation=presentation,
+                approval_id=approval_id,
+                smart_denied=smart_denied,
+            )
 
             payload = json.dumps(card, ensure_ascii=False)
             response = await self._feishu_send_with_retry(
@@ -2178,18 +2221,18 @@ class FeishuAdapter(BasePlatformAdapter):
     @staticmethod
     def _build_resolved_approval_card(*, choice: str, user_name: str) -> Dict[str, Any]:
         """Build raw card JSON for a resolved approval action."""
-        icon = "❌" if choice == "deny" else "✅"
-        label = _APPROVAL_LABEL_MAP.get(choice, "Resolved")
+        accepted = choice != "deny"
+        label = "我继续去做了" if accepted else "好，这次先不做"
         return {
             "config": {"wide_screen_mode": True},
             "header": {
-                "title": {"content": f"{icon} {label}", "tag": "plain_text"},
-                "template": "red" if choice == "deny" else "green",
+                "title": {"content": label, "tag": "plain_text"},
+                "template": "grey",
             },
             "elements": [
                 {
                     "tag": "markdown",
-                    "content": f"{icon} **{label}** by {user_name}",
+                    "content": "我会按刚才说的范围处理。" if accepted else "没有执行刚才那一步。",
                 },
             ],
         }

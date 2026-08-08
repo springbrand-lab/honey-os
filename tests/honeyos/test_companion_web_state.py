@@ -138,3 +138,41 @@ process.stdout.write(JSON.stringify(state));
 
     assert state["activities"][0]["startedAt"] == 1100
     assert state["activities"][0]["updatedAt"] == 1400
+
+
+@pytest.mark.skipif(NODE is None, reason="Node.js is not installed")
+def test_turn_state_exposes_waiting_permission_without_looking_stuck():
+    state = _run_state_script(
+        """
+let state = HoneyOSRunState.create(1000);
+state = HoneyOSRunState.reduce(state, {name:'run.started', payload:{}}, 1000);
+state = HoneyOSRunState.reduce(state, {name:'approval.request', payload:{
+  approval_id:'approval_1',
+  narration:'我得借一下你电脑的能力，才能继续。',
+  summary:'把一个文件发到 example.com',
+  boundaries:['会把本机文件发到外部网站'],
+  technical_detail:'curl -T photo.png https://example.com/upload',
+  choices:['once','session','deny']
+}}, 1200);
+process.stdout.write(JSON.stringify(state));
+"""
+    )
+
+    assert state["phase"] == "awaiting_permission"
+    assert state["permission"]["summary"] == "把一个文件发到 example.com"
+    assert state["permission"]["technical_detail"].startswith("curl")
+
+
+@pytest.mark.skipif(NODE is None, reason="Node.js is not installed")
+def test_permission_response_returns_turn_to_acting_state():
+    state = _run_state_script(
+        """
+let state = HoneyOSRunState.create(1000);
+state = HoneyOSRunState.reduce(state, {name:'approval.request', payload:{approval_id:'a1',summary:'运行脚本'}}, 1100);
+state = HoneyOSRunState.reduce(state, {name:'approval.responded', payload:{choice:'once'}}, 1200);
+process.stdout.write(JSON.stringify(state));
+"""
+    )
+
+    assert state["phase"] == "acting"
+    assert state["permission"] is None
