@@ -9,8 +9,13 @@ ARCHIVE=$(find "$REPO_DIR/dist" -maxdepth 1 -name 'honeyos-*.zip' -print | sort 
 LISTING=$(unzip -Z1 "$ARCHIVE")
 
 printf '%s\n' "$LISTING" | grep -q '/Install-HoneyOS.command$'
+printf '%s\n' "$LISTING" | grep -q '/Open-HoneyOS.command$'
 printf '%s\n' "$LISTING" | grep -q '/honeyos/__init__.py$'
 printf '%s\n' "$LISTING" | grep -q '/scripts/install_honeyos.sh$'
+if printf '%s\n' "$LISTING" | grep -q '/companion_handback.py$'; then
+    echo "The user archive contains the removed companion handback." >&2
+    exit 1
+fi
 
 if printf '%s\n' "$LISTING" | grep -Eq '^[^/]+/(tests|docs|\.git|\.venv|dist)/'; then
     echo "The user archive contains development or private files." >&2

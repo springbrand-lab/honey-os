@@ -2,7 +2,7 @@
 
 [project]
 name = "honeyos"
-version = "0.3.0"
+version = "0.3.1"
 description = "A private, local-first AI companion for Weixin and Feishu"
 readme = "README.md"
 # Upper bound is load-bearing, not cosmetic. uv resolves the project's
