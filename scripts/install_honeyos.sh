@@ -34,4 +34,14 @@ fi
 cd "$REPO_DIR"
 echo "Preparing HoneyOS…"
 uv sync --quiet --extra honeyos
+
+HONEYOS_DATA_HOME=${HONEYOS_HOME:-"${HOME}/.honeyos"}
+
+if [ -f "$HONEYOS_DATA_HOME/config.yaml" ]; then
+    echo "发现已有的 HoneyOS 和伴侣数据，正在安全升级…"
+    echo "✓ 人设、关系记忆与历史聊天会保留"
+    echo "✓ 模型、飞书和微信配置会继续使用"
+    exec uv run honeyos web
+fi
+
 exec uv run honeyos setup
