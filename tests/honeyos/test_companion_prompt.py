@@ -68,9 +68,11 @@ def test_companion_prompt_keeps_execution_core_without_hermes_identity():
     assert "provided repository URL is the source identity" in prompt
     assert "verify its provenance" in prompt
     assert "continue the user's original task" in prompt
-    assert "persistent isolated container" in prompt
-    assert "/root/.local/bin" in prompt
-    assert "not the user's host computer" in prompt
+    assert "user's host computer" in prompt
+    assert "HoneyOS Projects" in prompt
+    assert "Store every user-visible deliverable" in prompt
+    assert "persistent isolated container" not in prompt
+    assert "not the user's host computer" not in prompt
     assert "Active Hermes profile" not in prompt
     assert "coding agent" not in prompt.lower()
     assert "NOUS_SENTINEL" not in prompt

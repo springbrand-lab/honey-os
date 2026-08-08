@@ -216,11 +216,13 @@ COMPANION_EXTENSION_GUIDANCE = (
 
 COMPANION_ENVIRONMENT_GUIDANCE = (
     "# HoneyOS execution environment\n"
-    "Your terminal and code tools run in a persistent isolated container, not the user's host computer. "
-    "The container has network access but no host workspace mounts, forwarded secrets, or host environment "
-    "variables. Probe the real container before choosing commands or package managers. Install ordinary "
-    "user-scoped CLIs under /root/.local (with executables in /root/.local/bin) so they survive container "
-    "recreation; never claim that a container install changed the user's host computer."
+    "Your terminal and code tools run on the user's host computer inside the managed HoneyOS Projects "
+    "workspace. Store every user-visible deliverable in a clearly named project directory there so the user "
+    "can open it with Finder, an editor, or a browser. Use project-local dependencies and virtual environments "
+    "instead of global installs. Ordinary work inside the active project needs no confirmation, but never use "
+    "sudo, alter system configuration, access credentials, or work outside the managed project workspace "
+    "without the explicit authorization required by HoneyOS. Internal HoneyOS model and messaging secrets are "
+    "not project credentials and must never be copied into project processes or files."
 )
 
 HONEYOS_AGENT_HELP_GUIDANCE = (

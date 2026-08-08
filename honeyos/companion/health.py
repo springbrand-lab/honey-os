@@ -103,7 +103,14 @@ def first_start_report(
     )
     chat_ready = web_ready or im_ready
     storage_ready = resolved.exists() and os.access(resolved, os.W_OK)
-    docker_ready = command_lookup("docker") is not None
+    terminal = config.get("terminal") if isinstance(config.get("terminal"), dict) else {}
+    projects_path = Path(str(terminal.get("cwd", ""))).expanduser()
+    projects_ready = (
+        terminal.get("backend") == "local"
+        and projects_path.is_absolute()
+        and projects_path.is_dir()
+        and os.access(projects_path, os.W_OK)
+    )
     computer_ready = command_lookup("cua-driver") is not None
 
     return FirstStartReport(
@@ -141,10 +148,10 @@ def first_start_report(
                 "飞书尚未连接",
             ),
             HealthItem(
-                docker_ready,
-                False,
-                "Docker 已安装，可使用隔离代码执行",
-                "Docker 未安装：聊天可用，隔离代码执行暂不可用",
+                projects_ready,
+                True,
+                "本机项目空间可用，可直接查看和运行 Coding 产物",
+                "本机项目空间不可用，请检查 HoneyOS Projects 目录权限",
             ),
             HealthItem(
                 computer_ready,
