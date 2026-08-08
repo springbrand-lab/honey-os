@@ -22,6 +22,7 @@ let sending = false;
 let turnState = HoneyOSRunState.create(Date.now());
 let keepAtLatest = true;
 let companionAvatarLabel = "H";
+let actionTrailExpanded = false;
 
 function isNearLatest() {
   const remaining =
@@ -117,22 +118,29 @@ function renderPresence(state) {
 function activityStatusLabel(activity) {
   if (activity.state === "completed") return "好了";
   if (activity.state === "failed") return "换个办法";
-  return "正在做";
+  return "进行中";
 }
 
 function renderActionTrail(state) {
   const activities = state.activities || [];
-  const current =
-    [...activities].reverse().find((activity) => activity.state === "active") ||
-    activities[activities.length - 1];
-  if (!current) {
+  if (!activities.length) {
     renderPresence(state);
     return;
   }
+  const summary = HoneyOSRunState.summarize(state);
 
   const wrapper = document.createElement("div");
   wrapper.className = "action-current";
-  wrapper.dataset.state = current.state || "active";
+  wrapper.dataset.state = summary.state;
+
+  const summaryButton = document.createElement("button");
+  summaryButton.type = "button";
+  summaryButton.className = "action-summary";
+  summaryButton.setAttribute("aria-expanded", String(actionTrailExpanded));
+  summaryButton.setAttribute(
+    "aria-label",
+    actionTrailExpanded ? "收起处理过程" : "查看处理过程",
+  );
 
   const mark = document.createElement("span");
   mark.className = "action-mark";
@@ -141,22 +149,62 @@ function renderActionTrail(state) {
   const copy = document.createElement("div");
   copy.className = "action-copy";
   const title = document.createElement("p");
-  title.textContent = current.title;
+  title.textContent = summary.title;
   copy.append(title);
-  if (current.detail) {
-    const detail = document.createElement("span");
-    detail.textContent = current.detail;
-    copy.append(detail);
-  }
 
   const meta = document.createElement("span");
   meta.className = "action-meta";
-  meta.textContent =
-    activities.length > 1
-      ? activityStatusLabel(current) + "，共 " + activities.length + " 件"
-      : activityStatusLabel(current);
+  meta.textContent = summary.meta;
 
-  wrapper.append(mark, copy, meta);
+  const toggleMark = document.createElement("span");
+  toggleMark.className = "action-toggle-mark";
+  toggleMark.setAttribute("aria-hidden", "true");
+  toggleMark.dataset.expanded = String(actionTrailExpanded);
+
+  const details = document.createElement("ol");
+  details.className = "action-details";
+  details.hidden = !actionTrailExpanded;
+  for (const activity of activities) {
+    const item = document.createElement("li");
+    item.className = "action-step";
+    item.dataset.state = activity.state || "active";
+
+    const stepMark = document.createElement("span");
+    stepMark.className = "action-step-mark";
+    stepMark.setAttribute("aria-hidden", "true");
+
+    const stepCopy = document.createElement("div");
+    stepCopy.className = "action-step-copy";
+    const stepTitle = document.createElement("p");
+    stepTitle.textContent = activity.title || "正在替你处理";
+    stepCopy.append(stepTitle);
+    if (activity.detail) {
+      const stepDetail = document.createElement("span");
+      stepDetail.textContent = activity.detail;
+      stepCopy.append(stepDetail);
+    }
+
+    const stepState = document.createElement("span");
+    stepState.className = "action-step-state";
+    stepState.textContent = activityStatusLabel(activity);
+    item.append(stepMark, stepCopy, stepState);
+    details.append(item);
+  }
+
+  summaryButton.addEventListener("click", () => {
+    actionTrailExpanded = !actionTrailExpanded;
+    summaryButton.setAttribute("aria-expanded", String(actionTrailExpanded));
+    summaryButton.setAttribute(
+      "aria-label",
+      actionTrailExpanded ? "收起处理过程" : "查看处理过程",
+    );
+    toggleMark.dataset.expanded = String(actionTrailExpanded);
+    details.hidden = !actionTrailExpanded;
+    if (actionTrailExpanded) scrollToLatest();
+  });
+
+  summaryButton.append(mark, copy, meta, toggleMark);
+  wrapper.append(summaryButton, details);
   elements.actionTrail.replaceChildren(wrapper);
   showTurnStatus();
   elements.presence.hidden = true;
@@ -312,8 +360,10 @@ async function bootstrap() {
 async function sendMessage(text) {
   sending = true;
   elements.send.disabled = true;
+  elements.send.textContent = "处理中";
   activeAssistantBubble = null;
   turnState = HoneyOSRunState.create(Date.now());
+  actionTrailExpanded = false;
   hideTurnStatus();
   addMessage("user", text, { forceScroll: true });
 
@@ -344,6 +394,7 @@ async function sendMessage(text) {
   } finally {
     sending = false;
     elements.send.disabled = false;
+    elements.send.textContent = "发送";
     activeAssistantBubble = null;
     elements.input.focus();
   }

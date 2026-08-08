@@ -56,6 +56,8 @@ process.stdout.write(JSON.stringify(state));
             "state": "completed",
             "title": "找到了，我整理一下",
             "detail": "",
+            "startedAt": 1100,
+            "updatedAt": 1400,
         }
     ]
 
@@ -78,3 +80,61 @@ process.stdout.write(JSON.stringify(state));
     assert [item["activity_id"] for item in state["activities"]] == ["a1", "a2"]
     assert state["activities"][1]["state"] == "failed"
     assert state["presence"]["title"] == "我在想你刚才说的事"
+
+
+@pytest.mark.skipif(NODE is None, reason="Node.js is not installed")
+def test_completed_tool_does_not_claim_the_whole_turn_is_finished():
+    summary = _run_state_script(
+        """
+let state = HoneyOSRunState.create(1000);
+state = HoneyOSRunState.reduce(state, {name:'run.started', payload:{}}, 1000);
+state = HoneyOSRunState.reduce(state, {name:'tool.started', payload:{activity:{activity_id:'a1',kind:'checking',state:'active',title:'正在认真核对',detail:'我在看几处相关内容'}}}, 1100);
+state = HoneyOSRunState.reduce(state, {name:'tool.completed', payload:{activity:{activity_id:'a1',kind:'checking',state:'completed',title:'已经替你核对过了',detail:''}}}, 1400);
+process.stdout.write(JSON.stringify(HoneyOSRunState.summarize(state)));
+"""
+    )
+
+    assert summary == {
+        "state": "active",
+        "title": "我还在继续处理",
+        "meta": "已完成 1 步，还在继续",
+        "completed": 1,
+        "total": 1,
+    }
+
+
+@pytest.mark.skipif(NODE is None, reason="Node.js is not installed")
+def test_turn_summary_switches_to_finished_only_after_assistant_completion():
+    summary = _run_state_script(
+        """
+let state = HoneyOSRunState.create(1000);
+state = HoneyOSRunState.reduce(state, {name:'run.started', payload:{}}, 1000);
+state = HoneyOSRunState.reduce(state, {name:'tool.started', payload:{activity:{activity_id:'a1',kind:'handling',state:'active',title:'正在替你处理',detail:'我还在这里，等我一下'}}}, 1100);
+state = HoneyOSRunState.reduce(state, {name:'tool.completed', payload:{activity:{activity_id:'a1',kind:'handling',state:'completed',title:'已经替你处理好了',detail:''}}}, 1400);
+state = HoneyOSRunState.reduce(state, {name:'assistant.completed', payload:{content:'弄好了'}}, 1700);
+process.stdout.write(JSON.stringify(HoneyOSRunState.summarize(state)));
+"""
+    )
+
+    assert summary == {
+        "state": "completed",
+        "title": "刚刚替你处理好了",
+        "meta": "共 1 步，点开看过程",
+        "completed": 1,
+        "total": 1,
+    }
+
+
+@pytest.mark.skipif(NODE is None, reason="Node.js is not installed")
+def test_activity_timeline_keeps_start_and_update_times():
+    state = _run_state_script(
+        """
+let state = HoneyOSRunState.create(1000);
+state = HoneyOSRunState.reduce(state, {name:'tool.started', payload:{activity:{activity_id:'a1',kind:'checking',state:'active',title:'正在认真核对',detail:''}}}, 1100);
+state = HoneyOSRunState.reduce(state, {name:'tool.completed', payload:{activity:{activity_id:'a1',kind:'checking',state:'completed',title:'已经替你核对过了',detail:''}}}, 1400);
+process.stdout.write(JSON.stringify(state));
+"""
+    )
+
+    assert state["activities"][0]["startedAt"] == 1100
+    assert state["activities"][0]["updatedAt"] == 1400

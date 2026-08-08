@@ -233,6 +233,10 @@ def test_companion_assets_define_relationship_native_run_ui():
     assert 'class="message-avatar status-avatar"' in index
     assert 'message-avatar' in app
     assert 'state.activities.length' in app
+    assert 'aria-expanded' in app
+    assert 'action-details' in app
+    assert 'HoneyOSRunState.summarize' in app
+    assert 'elements.send.textContent = "处理中"' in app
     assert "activityTimer" not in app
     assert "ACTIVITY_DELAY_MS" not in app
     assert "payload.preview" not in app
