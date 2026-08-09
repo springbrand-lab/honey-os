@@ -97,14 +97,38 @@ def configure_model(home: Path, choice: ModelChoice, api_key: str) -> None:
 
 
 def validate_model_key(choice: ModelChoice, api_key: str) -> None:
-    """Verify the selected model with a real OpenAI-compatible chat request."""
+    """Verify the selected model can drive the HoneyOS Agent tool loop."""
 
     url = f"{choice.base_url.rstrip('/')}/chat/completions"
     body = json.dumps(
         {
             "model": choice.model,
-            "messages": [{"role": "user", "content": "Reply with OK only."}],
-            "max_tokens": 16,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": (
+                        "This is a HoneyOS Agent compatibility test. Please call the "
+                        "honeyos_compatibility_probe tool now with value "
+                        '"honeyos". Do not answer in text.'
+                    ),
+                }
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "honeyos_compatibility_probe",
+                        "description": "Verify that this model can call HoneyOS tools.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"value": {"type": "string"}},
+                            "required": ["value"],
+                            "additionalProperties": False,
+                        },
+                    },
+                }
+            ],
+            "max_tokens": 64,
             "stream": False,
         }
     ).encode("utf-8")
@@ -130,9 +154,34 @@ def validate_model_key(choice: ModelChoice, api_key: str) -> None:
                 ) from exc
             choices = payload.get("choices") if isinstance(payload, dict) else None
             message = choices[0].get("message") if choices and isinstance(choices[0], dict) else None
-            if not isinstance(message, dict) or not isinstance(message.get("content"), str):
+            if not isinstance(message, dict):
                 raise ValueError(
                     "模型服务不兼容 OpenAI Chat Completions，请检查 Base URL 和模型"
+                )
+            tool_calls = message.get("tool_calls")
+            probe_ok = False
+            if isinstance(tool_calls, list):
+                for call in tool_calls:
+                    if not isinstance(call, dict) or call.get("type") != "function":
+                        continue
+                    function = call.get("function")
+                    if not isinstance(function, dict):
+                        continue
+                    if function.get("name") != "honeyos_compatibility_probe":
+                        continue
+                    arguments = function.get("arguments")
+                    if isinstance(arguments, str):
+                        try:
+                            arguments = json.loads(arguments)
+                        except json.JSONDecodeError:
+                            arguments = None
+                    if isinstance(arguments, dict) and arguments.get("value") == "honeyos":
+                        probe_ok = True
+                        break
+            if not probe_ok:
+                raise ValueError(
+                    "模型可以聊天，但没有通过 HoneyOS 工具调用测试。"
+                    "请改用支持 Function Calling / Tool Calling 的模型。"
                 )
     except urllib.error.HTTPError as exc:
         if exc.code in {401, 403}:

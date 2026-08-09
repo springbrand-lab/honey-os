@@ -17522,41 +17522,35 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # system prompt: present-on-turn-1/absent-on-turn-2 was a guaranteed
         # system-prompt diff and agent rebuild.
         if not history and not await self.async_session_store.has_any_sessions():
-            # Default first-contact note: a brief self-introduction.
-            _intro_note = (
-                "[System note: This is the user's very first message ever. "
-                "Briefly introduce yourself and mention that /help shows available commands. "
-                "Keep the introduction concise -- one or two sentences max.]"
-            )
-            # Opt-in structured profile-build path. When enabled (default
-            # "ask") and not yet offered on this install, swap the plain intro
-            # for a consent-gated directive that offers to build a user
-            # profile and persists confirmed facts via memory(target="user").
-            # The offer fires at most once (onboarding.seen flag); set
-            # onboarding.profile_build: off in config.yaml to disable.
             try:
                 from honeyos.agent.onboarding import (
-                    PROFILE_BUILD_FLAG,
-                    is_seen,
                     mark_seen,
-                    profile_build_directive,
-                    profile_build_mode,
+                    select_first_message_directive,
                 )
                 _onb_cfg = _load_gateway_config()
-                if (
-                    profile_build_mode(_onb_cfg) == "ask"
-                    and not is_seen(_onb_cfg, PROFILE_BUILD_FLAG)
-                ):
-                    turn_sidecar_notes.append(profile_build_directive().strip())
-                    mark_seen(_honeyos_home / "config.yaml", PROFILE_BUILD_FLAG)
-                else:
-                    turn_sidecar_notes.append(_intro_note)
+                _intro_note, _seen_flag = select_first_message_directive(
+                    _onb_cfg,
+                    companion_mode=_is_honeyos_runtime(),
+                )
+                turn_sidecar_notes.append(_intro_note)
+                if _seen_flag:
+                    mark_seen(_honeyos_home / "config.yaml", _seen_flag)
             except Exception as _pb_err:
                 logger.debug(
                     "Profile-build onboarding directive failed, using plain intro: %s",
                     _pb_err,
                 )
-                turn_sidecar_notes.append(_intro_note)
+                if _is_honeyos_runtime():
+                    turn_sidecar_notes.append(
+                        "[System note: 这是用户第一次与你对话。使用用户的语言，"
+                        "以亲密关系伴侣的身份自然、简短地回应。]"
+                    )
+                else:
+                    turn_sidecar_notes.append(
+                        "[System note: This is the user's very first message ever. "
+                        "Briefly introduce yourself and mention that /help shows available "
+                        "commands. Keep the introduction concise.]"
+                    )
 
         # One-time prompt if no home channel is set for this platform
         # Skip for webhooks - they deliver directly to configured targets (github_comment, etc.)
