@@ -33,3 +33,13 @@ def test_topic_pool_styles_include_drawer_cards_and_mobile_layout():
     assert ".topic-card" in styles
     assert ".topic-pool-trigger" in styles
     assert "@media (max-width: 720px)" in styles
+
+
+def test_busy_web_chat_queues_followups_instead_of_dropping_them():
+    script = (ASSETS / "app.js").read_text(encoding="utf-8")
+
+    assert "pendingMessages" in script
+    assert "processMessageQueue" in script
+    assert "这句我也看见了，等我把上一句弄完。" in script
+    assert "if (!text || sending) return" not in script
+    assert "elements.send.disabled = true" not in script

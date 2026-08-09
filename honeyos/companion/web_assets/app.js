@@ -27,6 +27,7 @@ let sessionId = "";
 let sessionKey = "";
 let activeAssistantBubble = null;
 let sending = false;
+const pendingMessages = [];
 let turnState = HoneyOSRunState.create(Date.now());
 let keepAtLatest = true;
 let companionAvatarLabel = "H";
@@ -477,13 +478,12 @@ async function bootstrap() {
 
 async function sendMessage(text, options = {}) {
   sending = true;
-  elements.send.disabled = true;
   elements.send.textContent = "处理中";
   activeAssistantBubble = null;
   turnState = HoneyOSRunState.create(Date.now());
   actionTrailExpanded = false;
   hideTurnStatus();
-  if (!options.hideUser) {
+  if (!options.hideUser && !options.userAlreadyShown) {
     addMessage("user", options.displayText || text, { forceScroll: true });
   }
 
@@ -519,12 +519,38 @@ async function sendMessage(text, options = {}) {
     renderTurnState(turnState);
   } finally {
     sending = false;
-    elements.send.disabled = false;
     elements.send.textContent = "发送";
     activeAssistantBubble = null;
     elements.input.focus();
   }
   return completed;
+}
+
+function processMessageQueue() {
+  if (sending || pendingMessages.length === 0) return;
+  const next = pendingMessages.shift();
+  void sendMessage(next.text, {
+    ...next.options,
+    userAlreadyShown: !next.options.hideUser,
+  }).then((completed) => {
+    next.resolve(completed);
+    processMessageQueue();
+  });
+}
+
+function queueMessage(text, options = {}) {
+  if (!options.hideUser) {
+    addMessage("user", options.displayText || text, { forceScroll: true });
+  }
+  if (sending && pendingMessages.length === 0) {
+    addMessage("assistant", "这句我也看见了，等我把上一句弄完。", {
+      forceScroll: true,
+    });
+  }
+  return new Promise((resolve) => {
+    pendingMessages.push({ text, options, resolve });
+    processMessageQueue();
+  });
 }
 
 async function finishProactiveDelivery(deliveryId, success) {
@@ -554,7 +580,7 @@ async function pollProactiveTopic() {
     const data = await response.json();
     const delivery = data.delivery;
     if (!delivery?.id || !delivery?.prompt || sending) return;
-    const success = await sendMessage(delivery.prompt, {
+    const success = await queueMessage(delivery.prompt, {
       hideUser: true,
       proactiveDeliveryId: delivery.id,
     });
@@ -633,7 +659,7 @@ async function chooseTopic(topic, card, button) {
     card.remove();
     closeTopicPool();
     setTopicCount(elements.topicPoolList.querySelectorAll(".topic-card").length);
-    await sendMessage(data.prompt, {
+    await queueMessage(data.prompt, {
       displayText: data.display_text || "这个我想听你聊聊",
     });
   } catch {
@@ -761,10 +787,10 @@ function closeTopicPool() {
 elements.form.addEventListener("submit", (event) => {
   event.preventDefault();
   const text = elements.input.value.trim();
-  if (!text || sending) return;
+  if (!text) return;
   elements.input.value = "";
   elements.input.style.height = "auto";
-  void sendMessage(text);
+  void queueMessage(text);
 });
 
 elements.input.addEventListener("input", () => {
