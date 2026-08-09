@@ -548,3 +548,136 @@ async def test_companion_bootstrap_returns_only_safe_shared_chat_messages(
     assert "找到几个，我再看看。" not in response.text
     assert "reasoning" not in response.text
     assert "raw command output" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_companion_session_chat_schedules_background_memory_distillation():
+    adapter = _api_adapter()
+    scheduler = MagicMock(return_value=True)
+    adapter.gateway_runner = SimpleNamespace(
+        _schedule_honeyos_memory_distillation=scheduler
+    )
+    adapter._parse_session_key_header = MagicMock(
+        return_value=("agent:main:companion:dm:owner", None)
+    )
+    adapter._get_existing_session_or_404 = AsyncMock(
+        return_value=({"id": "shared-session", "model": "deepseek-v4-flash"}, None)
+    )
+    adapter._read_json_body = AsyncMock(return_value=({"message": "在吗"}, None))
+    adapter._effective_session_runtime_request = MagicMock(
+        return_value={
+            "requested": {},
+            "route_source": "global",
+            "require_model_lock": False,
+        }
+    )
+    adapter._persist_session_runtime_lock = MagicMock(return_value=True)
+    adapter._resolve_route = MagicMock(return_value=None)
+    adapter._request_route_conflict_error = MagicMock(return_value=None)
+    adapter._conversation_history_for_session = AsyncMock(return_value=[])
+    adapter._run_agent = AsyncMock(
+        return_value=(
+            {
+                "session_id": "shared-session",
+                "final_response": "在呢。",
+                "runtime": {
+                    "provider": "custom",
+                    "model": "deepseek-v4-flash",
+                    "base_url": "https://configured.example/v1",
+                    "api_mode": "chat_completions",
+                },
+            },
+            {},
+        )
+    )
+    request = SimpleNamespace(
+        match_info={"session_id": "shared-session"},
+        headers={"X-HoneyOS-Session-Key": "agent:main:companion:dm:owner"},
+    )
+
+    response = await adapter._handle_session_chat.__wrapped__(adapter, request)
+
+    assert response.status == 200
+    scheduler.assert_called_once()
+    call = scheduler.call_args.kwargs
+    assert call["lane_key"] == "agent:main:companion:dm:owner"
+    assert call["session_id"] == "shared-session"
+    assert call["reason"] == "periodic"
+    assert call["main_runtime"]["api_mode"] == "chat_completions"
+
+
+@pytest.mark.asyncio
+async def test_companion_stream_chat_schedules_background_memory_distillation(
+    monkeypatch,
+):
+    adapter = _api_adapter()
+    scheduler = MagicMock(return_value=True)
+    adapter.gateway_runner = SimpleNamespace(
+        _schedule_honeyos_memory_distillation=scheduler
+    )
+    adapter._parse_session_key_header = MagicMock(
+        return_value=("agent:main:companion:dm:owner", None)
+    )
+    adapter._get_existing_session_or_404 = AsyncMock(
+        return_value=({"id": "shared-session", "model": "deepseek-v4-flash"}, None)
+    )
+    adapter._read_json_body = AsyncMock(return_value=({"message": "在吗"}, None))
+    adapter._effective_session_runtime_request = MagicMock(
+        return_value={
+            "requested": {},
+            "route_source": "global",
+            "require_model_lock": False,
+        }
+    )
+    adapter._persist_session_runtime_lock = MagicMock(return_value=True)
+    adapter._resolve_route = MagicMock(return_value=None)
+    adapter._request_route_conflict_error = MagicMock(return_value=None)
+    adapter._conversation_history_for_session = AsyncMock(return_value=[])
+    adapter._turn_transcript_messages = MagicMock(return_value=[])
+    adapter._run_agent = AsyncMock(
+        return_value=(
+            {
+                "session_id": "shared-session",
+                "final_response": "在呢。",
+                "runtime": {
+                    "provider": "custom",
+                    "model": "deepseek-v4-flash",
+                    "base_url": "https://configured.example/v1",
+                    "api_mode": "chat_completions",
+                },
+            },
+            {},
+        )
+    )
+
+    class FakeStreamResponse:
+        def __init__(self, *, status, headers):
+            self.status = status
+            self.headers = headers
+            self.frames = []
+
+        async def prepare(self, _request):
+            return self
+
+        async def write(self, frame):
+            self.frames.append(frame)
+
+    monkeypatch.setattr(
+        "honeyos.gateway.platforms.api_server.web.StreamResponse",
+        FakeStreamResponse,
+    )
+    request = SimpleNamespace(
+        match_info={"session_id": "shared-session"},
+        headers={
+            "X-HoneyOS-Session-Key": "agent:main:companion:dm:owner",
+            "X-HoneyOS-Companion-View": "1",
+        },
+    )
+
+    response = await adapter._handle_session_chat_stream.__wrapped__(
+        adapter, request
+    )
+
+    assert response.status == 200
+    scheduler.assert_called_once()
+    assert scheduler.call_args.kwargs["session_id"] == "shared-session"

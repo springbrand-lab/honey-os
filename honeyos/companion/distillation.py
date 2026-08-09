@@ -108,6 +108,7 @@ def load_distillation_settings(home: Path) -> DistillationSettings:
 def _main_runtime_from_config() -> dict[str, Any]:
     try:
         from honeyos.runtime.config import load_config_readonly
+        from honeyos.runtime.runtime_provider import resolve_runtime_provider
 
         config = load_config_readonly()
     except Exception:
@@ -115,13 +116,45 @@ def _main_runtime_from_config() -> dict[str, Any]:
     model = config.get("model", {}) if isinstance(config, dict) else {}
     if not isinstance(model, dict):
         return {}
-    result = {
+    configured = {
         "provider": model.get("provider"),
         "model": model.get("default") or model.get("model"),
         "base_url": model.get("base_url"),
         "api_mode": model.get("api_mode"),
     }
-    return {key: value for key, value in result.items() if isinstance(value, str) and value}
+    configured = {
+        key: value
+        for key, value in configured.items()
+        if isinstance(value, str) and value
+    }
+    try:
+        resolved = resolve_runtime_provider(
+            requested=configured.get("provider"),
+            target_model=configured.get("model"),
+        )
+    except Exception:
+        resolved = {}
+    if not isinstance(resolved, dict):
+        resolved = {}
+    result = dict(configured)
+    result.update(
+        {
+            key: value
+            for key, value in resolved.items()
+            if key
+            in {
+                "provider",
+                "requested_provider",
+                "model",
+                "base_url",
+                "api_key",
+                "api_mode",
+                "auth_mode",
+            }
+            and (callable(value) or (isinstance(value, str) and value.strip()))
+        }
+    )
+    return result
 
 
 def _memory_distillation_task_config() -> dict[str, Any]:
@@ -147,7 +180,23 @@ async def extract_with_auxiliary_model(
 
     from honeyos.agent.auxiliary_client import async_call_llm
 
-    runtime = dict(main_runtime or _main_runtime_from_config())
+    configured_runtime = _main_runtime_from_config()
+    runtime = dict(configured_runtime)
+    supplied_runtime = {
+        key: value
+        for key, value in dict(main_runtime or {}).items()
+        if callable(value) or (isinstance(value, str) and value.strip())
+    }
+    configured_base = str(configured_runtime.get("base_url") or "").rstrip("/")
+    supplied_base = str(supplied_runtime.get("base_url") or "").rstrip("/")
+    if (
+        supplied_base
+        and configured_base
+        and supplied_base != configured_base
+        and "api_key" not in supplied_runtime
+    ):
+        runtime.pop("api_key", None)
+    runtime.update(supplied_runtime)
     config = dict(task_config or _memory_distillation_task_config())
     configured_provider = str(config.get("provider") or "auto").strip().lower()
     configured_model = str(config.get("model") or "auto").strip()
@@ -167,6 +216,9 @@ async def extract_with_auxiliary_model(
             value = runtime.get(key)
             if isinstance(value, str) and value.strip():
                 call_overrides[key] = value.strip()
+        api_key = runtime.get("api_key")
+        if callable(api_key) or (isinstance(api_key, str) and api_key.strip()):
+            call_overrides["api_key"] = api_key
 
     active_payload = [
         {"id": item.id, "kind": item.kind, "content": item.content}

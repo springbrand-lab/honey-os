@@ -8,10 +8,12 @@ import pytest
 from honeyos.companion.distillation import (
     DistillationSettings,
     MemoryDistiller,
+    _main_runtime_from_config,
     extract_with_auxiliary_model,
     repair_legacy_distillation_failures,
 )
 from honeyos.companion.continuity import StructuredMemoryStore
+from honeyos.agent.auxiliary_client import _validate_llm_response
 
 
 NOW = datetime(2026, 8, 7, 8, 0, tzinfo=timezone.utc)
@@ -112,6 +114,120 @@ async def test_auxiliary_distillation_accepts_main_runtime_api_mode(monkeypatch,
     assert "api_mode" not in {
         key for key in captured if key != "main_runtime"
     }
+
+
+@pytest.mark.asyncio
+async def test_auxiliary_distillation_inherits_configured_main_credential(
+    monkeypatch, tmp_path
+):
+    captured = {}
+
+    class _Message:
+        content = '{"operations":[]}'
+
+    class _Choice:
+        message = _Message()
+
+    class _Response:
+        choices = [_Choice()]
+
+    async def fake_call_llm(**kwargs):
+        captured.update(kwargs)
+        return _Response()
+
+    monkeypatch.setattr(
+        "honeyos.agent.auxiliary_client.async_call_llm", fake_call_llm
+    )
+    monkeypatch.setattr(
+        "honeyos.companion.distillation._main_runtime_from_config",
+        lambda: {
+            "provider": "custom",
+            "model": "deepseek-v4-flash",
+            "base_url": "https://configured.example/v1",
+            "api_key": "current-main-key",
+            "api_mode": "chat_completions",
+        },
+    )
+    distiller = MemoryDistiller(tmp_path)
+    job = distiller._prepare(
+        lane_key=LANE,
+        session_id="session-current-credential",
+        messages=_messages(20),
+        reason="periodic",
+        now=NOW,
+    )
+    assert job is not None
+
+    await extract_with_auxiliary_model(
+        job,
+        (),
+        {
+            "provider": "custom",
+            "model": "deepseek-v4-flash",
+            "base_url": "https://configured.example/v1",
+            "api_mode": "chat_completions",
+        },
+        task_config={"provider": "auto", "model": "auto"},
+    )
+
+    assert captured["main_runtime"]["api_key"] == "current-main-key"
+    assert captured["api_key"] == "current-main-key"
+
+
+def test_main_runtime_from_config_resolves_named_provider_credentials(monkeypatch):
+    monkeypatch.setattr(
+        "honeyos.runtime.config.load_config_readonly",
+        lambda: {
+            "model": {
+                "provider": "honeyos-model",
+                "default": "deepseek-v4-flash",
+                "base_url": "https://configured.example/v1",
+                "api_mode": "chat_completions",
+            }
+        },
+    )
+    monkeypatch.setattr(
+        "honeyos.runtime.runtime_provider.resolve_runtime_provider",
+        lambda requested, target_model=None: {
+            "provider": "custom",
+            "requested_provider": requested,
+            "model": target_model,
+            "base_url": "https://configured.example/v1",
+            "api_key": "current-main-key",
+            "api_mode": "chat_completions",
+        },
+    )
+
+    runtime = _main_runtime_from_config()
+
+    assert runtime["provider"] == "custom"
+    assert runtime["requested_provider"] == "honeyos-model"
+    assert runtime["api_key"] == "current-main-key"
+
+
+def test_auxiliary_validation_recovers_sse_text_from_compatible_endpoint():
+    frames = [
+        {
+            "code": 0,
+            "choices": [
+                {"index": 0, "delta": {"content": '{"operations":'}}
+            ],
+        },
+        {
+            "code": 0,
+            "choices": [{"index": 0, "delta": {"content": "[]}"}}],
+        },
+    ]
+    response = "\n\n".join(
+        f"data: {json.dumps(frame, ensure_ascii=False)}" for frame in frames
+    ) + "\n\ndata: [DONE]\n"
+
+    recovered = _validate_llm_response(
+        response,
+        task="memory_distillation",
+    )
+
+    assert recovered.choices[0].message.content == '{"operations":[]}'
 
 
 def test_upgrade_reopens_runs_exhausted_by_legacy_api_mode_bug(tmp_path):

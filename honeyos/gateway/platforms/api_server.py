@@ -3589,6 +3589,41 @@ class APIServerAdapter(BasePlatformAdapter):
             logger.warning("Failed to load session history for %s: %s", session_id, exc)
             return []
 
+    def _schedule_companion_memory_distillation(
+        self,
+        *,
+        gateway_session_key: str | None,
+        session_id: str,
+        main_runtime: Dict[str, Any] | None,
+    ) -> bool:
+        """Schedule the same post-turn memory review used by IM channels."""
+
+        if not str(gateway_session_key or "").endswith(":companion:dm:owner"):
+            return False
+        runner = self.gateway_runner
+        scheduler = getattr(
+            runner, "_schedule_honeyos_memory_distillation", None
+        )
+        if not callable(scheduler):
+            return False
+        try:
+            return bool(
+                scheduler(
+                    lane_key=str(gateway_session_key),
+                    chat_type="dm",
+                    session_id=session_id,
+                    messages=None,
+                    reason="periodic",
+                    main_runtime=dict(main_runtime or {}),
+                )
+            )
+        except Exception:
+            logger.debug(
+                "HoneyOS web memory distillation scheduling failed",
+                exc_info=True,
+            )
+            return False
+
     async def _handle_list_sessions(self, request: "web.Request") -> "web.Response":
         """GET /api/sessions — list persisted HoneyOS sessions."""
         auth_err = self._check_auth(request)
@@ -3939,6 +3974,11 @@ class APIServerAdapter(BasePlatformAdapter):
             runtime = result.get("runtime") or {}
         if not runtime and isinstance(usage, dict):
             runtime = usage.get("runtime") or {}
+        self._schedule_companion_memory_distillation(
+            gateway_session_key=gateway_session_key,
+            session_id=effective_session_id or session_id,
+            main_runtime=runtime,
+        )
         runtime = self._sanitize_runtime_metadata(
             runtime=runtime,
             requested_runtime=runtime_request.get("requested"),
@@ -4165,6 +4205,11 @@ class APIServerAdapter(BasePlatformAdapter):
                     effective_runtime = result.get("runtime") or {}
                 if not effective_runtime and isinstance(usage, dict):
                     effective_runtime = usage.get("runtime") or {}
+                self._schedule_companion_memory_distillation(
+                    gateway_session_key=gateway_session_key,
+                    session_id=effective_session_id,
+                    main_runtime=effective_runtime,
+                )
                 effective_runtime = self._sanitize_runtime_metadata(
                     runtime=effective_runtime,
                     requested_runtime=runtime_request.get("requested"),

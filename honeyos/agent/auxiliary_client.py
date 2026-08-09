@@ -8189,6 +8189,37 @@ def _recover_aux_response_message(response: Any) -> Optional[Any]:
 
 
 def _extract_aux_response_text(response: Any) -> str:
+    if isinstance(response, str):
+        parts: List[str] = []
+        saw_sse = False
+        for raw_line in response.splitlines():
+            line = raw_line.strip()
+            if not line.startswith("data:"):
+                continue
+            saw_sse = True
+            payload_text = line[5:].strip()
+            if not payload_text or payload_text == "[DONE]":
+                continue
+            try:
+                payload = json.loads(payload_text)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            choices = payload.get("choices") if isinstance(payload, dict) else None
+            if not isinstance(choices, list):
+                continue
+            for choice in choices:
+                if not isinstance(choice, dict):
+                    continue
+                container = choice.get("delta") or choice.get("message") or choice
+                content = (
+                    container.get("content")
+                    if isinstance(container, dict)
+                    else None
+                )
+                if isinstance(content, str):
+                    parts.append(content)
+        return "".join(parts).strip() if saw_sse else ""
+
     output_text = _obj_get(response, "output_text")
     if isinstance(output_text, str) and output_text.strip():
         return output_text.strip()
