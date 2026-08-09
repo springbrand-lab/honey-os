@@ -53,6 +53,9 @@ COMPANION_TOOLSETS = (
 _LEGACY_MANAGED_SOUL_SHA256 = (
     "5df20481e8fab3c260cfc37352ee5014c3b277a9e0a7248ac37df84f7e6000b9"
 )
+_PROACTIVE_SOUL_MARKER = "<!-- honeyos:proactive-companion-v1 -->"
+_PROACTIVE_SOUL_END_MARKER = "<!-- honeyos:end-proactive-companion-v1 -->"
+_LEGACY_PROACTIVE_SOUL_PREFIX = "HoneyOS 也提供已经安装的短期 Topic Pool。"
 
 _COMPANION_SKILLS = (
     ("relationship-continuity", "honeyos", None),
@@ -82,6 +85,18 @@ def _companion_skill_source(name: str, category: str) -> Path:
     if category == "honeyos":
         return Path(__file__).parent / "companion_skills" / name
     return Path(__file__).parents[1] / "skills" / category / name
+
+
+def _managed_proactive_soul_block(template: str) -> str:
+    """Return the versioned proactive-companion contract from the template."""
+
+    _before, marker, remainder = template.partition(_PROACTIVE_SOUL_MARKER)
+    if not marker:
+        raise ValueError("companion SOUL template is missing the proactive marker")
+    managed, end_marker, _after = remainder.partition(_PROACTIVE_SOUL_END_MARKER)
+    if not end_marker:
+        raise ValueError("companion SOUL template is missing the proactive end marker")
+    return f"{marker}{managed}{end_marker}"
 
 
 def seed_companion_skills(home: Path) -> tuple[Path, ...]:
@@ -579,12 +594,28 @@ def upgrade_companion_capabilities(home: Path) -> bool:
     soul_digest = hashlib.sha256(soul.encode("utf-8")).hexdigest()
     if soul_digest == _LEGACY_MANAGED_SOUL_SHA256:
         _atomic_replace(soul_path, template, mode=0o644)
+        soul = template
         changed = True
     elif "# Capability Growth" not in soul:
         _heading, _separator, growth = template.partition("# Capability Growth")
         addition = "# Capability Growth" + growth
         updated_soul = soul.rstrip() + "\n\n" + addition.strip() + "\n"
         _atomic_replace(soul_path, updated_soul, mode=0o644)
+        soul = updated_soul
+        changed = True
+
+    if _PROACTIVE_SOUL_MARKER not in soul:
+        proactive_block = _managed_proactive_soul_block(template)
+        legacy_start = soul.find(_LEGACY_PROACTIVE_SOUL_PREFIX)
+        if legacy_start >= 0:
+            legacy_end = soul.find("\n\n", legacy_start)
+            if legacy_end < 0:
+                legacy_end = len(soul)
+            updated_soul = soul[:legacy_start] + proactive_block + soul[legacy_end:]
+        else:
+            updated_soul = soul.rstrip() + "\n\n" + proactive_block.strip() + "\n"
+        _atomic_replace(soul_path, updated_soul, mode=0o644)
+        soul = updated_soul
         changed = True
 
     for skill_name, category, _command in _COMPANION_SKILLS:

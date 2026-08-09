@@ -234,6 +234,49 @@ def test_upgrade_companion_capabilities_is_idempotent_and_preserves_user_state(
     assert (tmp_path / "skills" / "relationship-continuity" / "SKILL.md").exists()
 
 
+def test_upgrade_adds_proactive_consent_contract_to_existing_growth_section(tmp_path):
+    initialize_home(tmp_path)
+    soul_path = tmp_path / "SOUL.md"
+    soul_path.write_text(
+        "# My formed identity\n\nKeep my teasing voice.\n\n"
+        "# Capability Growth\n\nKeep my custom capability notes.\n",
+        encoding="utf-8",
+    )
+
+    assert upgrade_companion_capabilities(tmp_path) is True
+    first = soul_path.read_text(encoding="utf-8")
+    assert upgrade_companion_capabilities(tmp_path) is False
+
+    assert "Keep my teasing voice." in first
+    assert "Keep my custom capability notes." in first
+    assert first.count("honeyos:proactive-companion-v1") == 1
+    assert "必须在当轮调用 `proactive_companion`" in first
+    assert "不要声称只能在用户在线时主动说话" in first
+    assert "不要让用户另设定时任务" in first
+    assert soul_path.read_text(encoding="utf-8") == first
+
+
+def test_upgrade_replaces_unversioned_proactive_contract_without_duplication(tmp_path):
+    initialize_home(tmp_path)
+    soul_path = tmp_path / "SOUL.md"
+    unversioned = "HoneyOS 也提供已经安装的短期 Topic Pool。旧版主动消息说明。"
+    soul_path.write_text(
+        "# My formed identity\n\nKeep me.\n\n# Initiative\n\n"
+        + unversioned
+        + "\n\nKeep the next paragraph.\n\n# Capability Growth\n",
+        encoding="utf-8",
+    )
+
+    assert upgrade_companion_capabilities(tmp_path) is True
+
+    upgraded = soul_path.read_text(encoding="utf-8")
+    assert unversioned not in upgraded
+    assert upgraded.count("HoneyOS 也提供已经安装的短期 Topic Pool。") == 1
+    assert upgraded.count("honeyos:proactive-companion-v1") == 1
+    assert "Keep the next paragraph." in upgraded
+    assert "Keep me." in upgraded
+
+
 def test_upgrade_rewrites_stale_container_capability_without_losing_persona(tmp_path):
     initialize_home(tmp_path)
     soul_path = tmp_path / "SOUL.md"
