@@ -31,6 +31,7 @@ def test_initialize_home_creates_companion_contract(tmp_path, monkeypatch):
     assert config["platform_toolsets"]["weixin"] == [
         "companion_profile",
         "companion_memory",
+        "proactive_companion",
         "memory",
         "session_search",
         "web",
@@ -101,6 +102,7 @@ def test_initialize_home_creates_companion_contract(tmp_path, monkeypatch):
         "youtube-content",
         "ocr-and-documents",
         "grounded-citations",
+        "topic-scout",
     }.issubset(seeded_skills)
     assert "hermes-agent" not in seeded_skills
     bundled_manifest = (tmp_path / "skills" / ".bundled_manifest").read_text(
@@ -109,6 +111,7 @@ def test_initialize_home_creates_companion_contract(tmp_path, monkeypatch):
     assert "relationship-continuity:" in bundled_manifest
     assert "shared-rituals:" in bundled_manifest
     assert "honeyos-self-extension:" in bundled_manifest
+    assert "topic-scout:" in bundled_manifest
     assert all(len(line.partition(":")[2]) == 32 for line in bundled_manifest.splitlines())
     assert result.home == tmp_path.resolve()
 

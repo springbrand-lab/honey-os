@@ -33,6 +33,7 @@ _SUPPORTED_PLATFORMS = frozenset(DEFAULT_IM_PLATFORMS)
 COMPANION_TOOLSETS = (
     "companion_profile",
     "companion_memory",
+    "proactive_companion",
     "memory",
     "session_search",
     "web",
@@ -64,6 +65,7 @@ _COMPANION_SKILLS = (
     ("youtube-content", "honeyos", None),
     ("ocr-and-documents", "honeyos", None),
     ("grounded-citations", "honeyos", None),
+    ("topic-scout", "honeyos", None),
     ("computer-use", "honeyos", "cua-driver"),
     ("apple-reminders", "honeyos", "remindctl"),
     ("apple-notes", "honeyos", "memo"),

@@ -32,6 +32,7 @@ _TOOL_KINDS = {
     "remembering": frozenset({
         "memory",
         "companion_memory",
+        "proactive_companion",
         "todo",
         "todo_write",
         "cronjob",

@@ -411,6 +411,27 @@ class TopicPoolStore:
             )
         return cursor.rowcount == 1
 
+    def consume_topic(self, topic_id: str, *, at: datetime | None = None) -> TopicItem | None:
+        """Mark an open topic consumed when the user explicitly chooses it."""
+
+        timestamp = at or self.now_fn()
+        with self._connect() as connection:
+            self._expire(connection, timestamp)
+            cursor = connection.execute(
+                """
+                UPDATE topic_pool_items
+                   SET status = 'consumed', consumed_at = ?, reserved_at = NULL
+                 WHERE id = ? AND status = 'open'
+                """,
+                (_iso(timestamp), str(topic_id)),
+            )
+            if cursor.rowcount != 1:
+                return None
+            row = connection.execute(
+                "SELECT * FROM topic_pool_items WHERE id = ?", (str(topic_id),)
+            ).fetchone()
+        return self._topic_from_row(row) if row else None
+
     def preferences(self) -> ProactivePreferences:
         with self._connect() as connection:
             row = connection.execute(
@@ -770,4 +791,3 @@ class TopicPoolStore:
         if payload["paused_until"] is not None:
             payload["paused_until"] = payload["paused_until"].isoformat()
         return payload
-

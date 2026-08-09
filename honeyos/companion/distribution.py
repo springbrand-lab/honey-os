@@ -15,6 +15,7 @@ from honeyos.companion.doctor import DoctorCheck, run_doctor
 _REQUIRED_COMPANION_TOOL_NAMES = {
     "companion_profile",
     "companion_memory",
+    "proactive_companion",
     "memory",
     "session_search",
     "browser_navigate",
