@@ -79,7 +79,26 @@ def test_model_validation_uses_real_non_streaming_chat_completion(monkeypatch):
         observed["request"] = request
         observed["timeout"] = timeout
         return _Response(
-            {"choices": [{"message": {"role": "assistant", "content": "OK"}}]}
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call_probe",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "honeyos_compatibility_probe",
+                                        "arguments": '{"value":"honeyos"}',
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
         )
 
     monkeypatch.setattr(urllib.request, "urlopen", open_request)
@@ -97,12 +116,57 @@ def test_model_validation_uses_real_non_streaming_chat_completion(monkeypatch):
     assert request.full_url == "https://api.example.com/v1/chat/completions"
     assert request.get_method() == "POST"
     assert request.headers["Authorization"] == "Bearer valid-key"
-    assert body == {
-        "model": "test-model",
-        "messages": [{"role": "user", "content": "Reply with OK only."}],
-        "max_tokens": 16,
-        "stream": False,
-    }
+    assert body["model"] == "test-model"
+    assert body["stream"] is False
+    assert body["tools"] == [
+        {
+            "type": "function",
+            "function": {
+                "name": "honeyos_compatibility_probe",
+                "description": "Verify that this model can call HoneyOS tools.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"value": {"type": "string"}},
+                    "required": ["value"],
+                    "additionalProperties": False,
+                },
+            },
+        }
+    ]
+    assert "call the honeyos_compatibility_probe tool" in body["messages"][0]["content"]
+
+
+def test_model_validation_rejects_chat_only_model_without_tool_calls(monkeypatch):
+    monkeypatch.setattr(
+        urllib.request,
+        "urlopen",
+        lambda _request, timeout: _Response(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "I would call honeyos_compatibility_probe.",
+                        }
+                    }
+                ]
+            }
+        ),
+    )
+    choice = ModelChoice(
+        provider="custom",
+        model="deepseek-r1",
+        base_url="https://api.example.com/v1",
+        key_env="HONEYOS_MODEL_API_KEY",
+    )
+
+    try:
+        validate_model_key(choice, "valid-key")
+    except ValueError as exc:
+        assert "工具调用" in str(exc)
+        assert "Function Calling" in str(exc)
+    else:
+        raise AssertionError("chat-only model was accepted as an Agent model")
 
 
 def test_model_validation_rejects_string_instead_of_openai_response(monkeypatch):

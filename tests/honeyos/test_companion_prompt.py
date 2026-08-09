@@ -6,6 +6,7 @@ from unittest.mock import patch
 from honeyos.agent.agent_init import _resolve_agent_mode
 from honeyos.agent.system_prompt import build_system_prompt_parts
 from honeyos.companion.config import initialize_home
+from honeyos.agent import onboarding
 
 
 def _agent(mode: str):
@@ -56,6 +57,43 @@ def test_resolve_agent_mode_is_strict_and_backward_compatible():
     assert _resolve_agent_mode({"agent": {"mode": " Companion "}}) == "companion"
     assert _resolve_agent_mode({"agent": {"mode": "unknown"}}) == "assistant"
     assert _resolve_agent_mode({"agent": "broken"}) == "assistant"
+
+
+def test_companion_first_contact_avoids_generic_agent_onboarding():
+    selector = getattr(onboarding, "select_first_message_directive", None)
+
+    assert selector is not None
+    directive, seen_flag = selector(
+        {"onboarding": {"profile_build": "ask", "seen": {}}},
+        companion_mode=True,
+    )
+
+    assert seen_flag is None
+    assert "亲密关系伴侣" in directive
+    assert "用户正在使用的语言" in directive
+    assert "如果用户已经给出" in directive
+    assert "直接按该设定回应" in directive
+    assert "希望你叫什么" in directive
+    assert "边聊边形成" in directive
+    assert "一次最多问一个" in directive
+    assert "/help" not in directive
+    assert "commands" not in directive.lower()
+    assert "tool_search" not in directive
+    assert "API" not in directive
+    assert "用户资料" not in directive
+
+
+def test_assistant_first_contact_keeps_existing_profile_offer():
+    selector = getattr(onboarding, "select_first_message_directive", None)
+
+    assert selector is not None
+    directive, seen_flag = selector(
+        {"onboarding": {"profile_build": "ask", "seen": {}}},
+        companion_mode=False,
+    )
+
+    assert seen_flag == onboarding.PROFILE_BUILD_FLAG
+    assert "OFFER" in directive
 
 
 def test_companion_prompt_keeps_execution_core_without_hermes_identity():

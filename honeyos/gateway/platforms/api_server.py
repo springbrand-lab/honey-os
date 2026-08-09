@@ -4078,6 +4078,7 @@ class APIServerAdapter(BasePlatformAdapter):
         seq = 0
         activity_seq = 0
         active_activity_ids: Dict[str, List[str]] = {}
+        active_activity_args: Dict[str, Any] = {}
         companion_view = request.headers.get("X-HoneyOS-Companion-View") == "1"
 
         def _event_payload(name: str, payload: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
@@ -4107,12 +4108,13 @@ class APIServerAdapter(BasePlatformAdapter):
             if delta:
                 _enqueue("assistant.delta", {"message_id": message_id, "delta": delta})
 
-        def _started_activity_id(tool_name: str | None) -> str:
+        def _started_activity_id(tool_name: str | None, args: Any) -> str:
             nonlocal activity_seq
             activity_seq += 1
             activity_id = f"activity_{activity_seq}"
             key = str(tool_name or "_unknown")
             active_activity_ids.setdefault(key, []).append(activity_id)
+            active_activity_args[activity_id] = args
             return activity_id
 
         def _finished_activity_id(tool_name: str | None) -> str:
@@ -4138,18 +4140,19 @@ class APIServerAdapter(BasePlatformAdapter):
                     _enqueue("tool.progress", {"message_id": message_id, "tool_name": tool_name or "_thinking", "delta": preview or ""})
             elif event_type in {"tool.started", "tool.completed", "tool.failed"}:
                 if companion_view:
-                    activity_id = (
-                        _started_activity_id(tool_name)
-                        if event_type == "tool.started"
-                        else _finished_activity_id(tool_name)
-                    )
+                    if event_type == "tool.started":
+                        activity_id = _started_activity_id(tool_name, args)
+                        activity_args = args
+                    else:
+                        activity_id = _finished_activity_id(tool_name)
+                        activity_args = active_activity_args.pop(activity_id, args)
                     payload = _companion_tool_event_payload(
                         event_type=event_type,
                         message_id=message_id,
                         tool_name=tool_name,
                         activity_id=activity_id,
                         preview=preview,
-                        args=args,
+                        args=activity_args,
                     )
                 else:
                     # Keep the legacy raw fields for authenticated API clients

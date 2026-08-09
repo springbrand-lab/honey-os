@@ -73,8 +73,8 @@ def test_activity_projection_hides_raw_tool_details():
         "activity_id": "activity",
         "kind": "checking",
         "state": "active",
-        "title": "正在认真核对",
-        "detail": "我在看几处相关内容",
+        "title": "正在找相关内容",
+        "detail": "我先替你找找看",
     }
     assert "web_search" not in str(activity)
     assert "secret" not in str(activity)
@@ -122,7 +122,7 @@ def test_activity_projection_collapses_success_and_softens_failure():
         "activity_id": "activity",
         "kind": "checking",
         "state": "completed",
-        "title": "已经替你核对过了",
+        "title": "已经看过相关内容了",
         "detail": "",
     }
     assert failed == {
@@ -132,6 +132,61 @@ def test_activity_projection_collapses_success_and_softens_failure():
         "title": "刚才没走通，我换个办法",
         "detail": "",
     }
+
+
+def test_activity_projection_gives_skill_steps_distinct_safe_copy():
+    steps = [
+        project_activity("tool.completed", "skills_list"),
+        project_activity("tool.completed", "skill_view", args={"name": "private-skill"}),
+        project_activity(
+            "tool.completed",
+            "skill_marketplace",
+            args={"action": "search", "query": "private image request"},
+        ),
+        project_activity(
+            "tool.completed",
+            "skill_marketplace",
+            args={"action": "install", "identifier": "private/image-skill"},
+        ),
+    ]
+
+    assert [step["title"] for step in steps] == [
+        "已经看过现有能力了",
+        "已经读完使用说明了",
+        "找到了可以用的能力",
+        "新能力已经准备好了",
+    ]
+    assert len({step["title"] for step in steps}) == len(steps)
+    assert "private" not in str(steps)
+    assert "image-skill" not in str(steps)
+
+
+def test_activity_projection_distinguishes_common_work_without_leaking_details():
+    steps = [
+        project_activity(
+            "tool.completed",
+            "web_search",
+            args={"query": "private query"},
+        ),
+        project_activity(
+            "tool.completed",
+            "web_fetch",
+            args={"url": "https://secret.example"},
+        ),
+        project_activity(
+            "tool.completed",
+            "write_file",
+            args={"path": "/Users/private/secret.html"},
+        ),
+    ]
+
+    assert [step["title"] for step in steps] == [
+        "已经找到相关内容了",
+        "已经看过相关内容了",
+        "文件已经替你写好了",
+    ]
+    assert "private" not in str(steps)
+    assert "secret" not in str(steps)
 
 
 def test_initialize_home_enables_loopback_web_without_an_account(tmp_path):

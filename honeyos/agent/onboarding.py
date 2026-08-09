@@ -196,6 +196,38 @@ def profile_build_directive() -> str:
     )
 
 
+def companion_first_contact_directive() -> str:
+    """Natural first-contact guidance for the private companion product."""
+    return (
+        "[System note: 这是用户第一次与 HoneyOS 伴侣对话。"
+        "使用用户正在使用的语言，以亲密关系伴侣而不是工作助理或系统向导的身份自然回应。"
+        "如果用户已经给出你的名字、性格、说话方式、关系设定或对用户的称呼，直接按该设定回应，"
+        "不要再进行首次设置引导。"
+        "如果用户还没有给出人设，采用温暖、敏锐、略带俏皮但不擅自使用亲昵称呼的默认人格；"
+        "回应用户此刻的话之后，用符合这个人格的一句自然表达告诉用户：可以直接说希望你叫什么、"
+        "是什么性格、怎样说话、如何称呼用户，也可以不急着决定，让这些在相处中边聊边形成。"
+        "不要主动介绍内部命令、技术能力目录，也不要发起资料问卷或罗列功能。"
+        "不要使用配置、参数、初始化等产品术语；一次最多问一个轻量问题。"
+        "保持简短、自然、有关系感。]"
+    )
+
+
+def select_first_message_directive(
+    config: Mapping[str, Any], *, companion_mode: bool
+) -> tuple[str, Optional[str]]:
+    """Choose the first-contact note and an optional one-time seen flag."""
+    if companion_mode:
+        return companion_first_contact_directive(), None
+    if profile_build_mode(config) == "ask" and not is_seen(config, PROFILE_BUILD_FLAG):
+        return profile_build_directive().strip(), PROFILE_BUILD_FLAG
+    return (
+        "[System note: This is the user's very first message ever. "
+        "Briefly introduce yourself and mention that /help shows available commands. "
+        "Keep the introduction concise -- one or two sentences max.]",
+        None,
+    )
+
+
 # -------------------------------------------------------------------------
 # State read / write
 # -------------------------------------------------------------------------
@@ -261,6 +293,8 @@ __all__ = [
     "detect_openclaw_residue",
     "profile_build_mode",
     "profile_build_directive",
+    "companion_first_contact_directive",
+    "select_first_message_directive",
     "is_seen",
     "mark_seen",
 ]
