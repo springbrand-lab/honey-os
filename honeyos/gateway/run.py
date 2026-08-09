@@ -43,7 +43,7 @@ import time
 from collections import OrderedDict
 from contextvars import copy_context
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Awaitable, Callable, Dict, Optional, Any, List, Tuple, Union, cast
 
 from honeyos.agent.async_utils import consume_detached_task_result, safe_schedule_threadsafe
@@ -11459,6 +11459,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         except Exception:
             logger.debug("Failed to start gateway loop heartbeat", exc_info=True)
 
+        if _is_honeyos_runtime():
+            self._start_topic_pool_poller()
+
         # Emit gateway:startup hook
         hook_count = len(self.hooks.loaded_hooks)
         if hook_count:
@@ -14599,6 +14602,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             return None
 
         # HoneyOS presents one private companion across web and IM surfaces.
+        # Record only authorized, real owner messages.  Topic Pool routing uses
+        # this durable clock to choose the most recently used channel; internal
+        # proactive turns, bot messages and groups must never move it.
+        if not is_internal:
+            self._record_topic_pool_channel_activity(event, source, is_internal=False)
+
+        # HoneyOS presents one private companion across web and IM surfaces.
         # Route explicit natural-language model changes through the mature
         # /model control path before busy-session and prompt interception so
         # switching is atomic, durable, and uses the existing credential and
@@ -15792,7 +15802,24 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         _run_generation = self._begin_session_run_generation(_quick_key)
 
         try:
-            _agent_result = await self._handle_message_with_agent(event, source, _quick_key, _run_generation)
+            try:
+                _agent_result = await self._handle_message_with_agent(
+                    event, source, _quick_key, _run_generation
+                )
+            except Exception:
+                await self._finish_proactive_topic_event(
+                    event,
+                    success=False,
+                    error="agent turn failed",
+                )
+                raise
+            await self._register_proactive_topic_delivery_completion(
+                event=event,
+                source=source,
+                session_key=_quick_key,
+                run_generation=_run_generation,
+                agent_result=_agent_result,
+            )
             # Goal continuation: after the agent returns a final response
             # for this turn, check any standing /goal — the judge will
             # either mark it done, pause it (budget), or enqueue a
@@ -19018,6 +19045,223 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 task.add_done_callback(_bg.discard)
         except Exception:
             logger.debug("Failed to start heartbeat poller", exc_info=True)
+
+    def _topic_pool_store_instance(self):
+        store = getattr(self, "_topic_pool_store", None)
+        if store is not None:
+            return store
+        from honeyos.companion.topic_pool import TopicPoolStore
+
+        store = TopicPoolStore(_honeyos_home)
+        self._topic_pool_store = store
+        return store
+
+    def _record_topic_pool_channel_activity(
+        self,
+        event: "MessageEvent",
+        source: Any,
+        *,
+        is_internal: bool,
+    ) -> bool:
+        """Persist the latest real owner DM source for proactive routing."""
+
+        if is_internal or bool(getattr(event, "internal", False)):
+            return False
+        if getattr(source, "chat_type", None) != "dm":
+            return False
+        if bool(getattr(source, "is_bot", False)):
+            return False
+        if not getattr(source, "user_id", None) and getattr(source, "platform", None) != Platform.API_SERVER:
+            return False
+        try:
+            store = self._topic_pool_store_instance()
+            store.record_channel_activity(
+                source.to_dict(),
+                at=getattr(event, "timestamp", None) or datetime.now(timezone.utc),
+            )
+            return True
+        except Exception:
+            logger.debug("Topic Pool channel activity update failed", exc_info=True)
+            return False
+
+    @staticmethod
+    def _topic_pool_now() -> datetime:
+        try:
+            from honeyos.core.time import get_timezone
+
+            return datetime.now(get_timezone())
+        except Exception:
+            return datetime.now(timezone.utc)
+
+    async def _run_topic_collection_if_due(self) -> bool:
+        try:
+            from honeyos.companion.topic_scout import TopicScout
+
+            scout = getattr(self, "_topic_scout", None)
+            if scout is None:
+                scout = TopicScout(
+                    _honeyos_home,
+                    store=self._topic_pool_store_instance(),
+                )
+                self._topic_scout = scout
+            result = await scout.collect_if_due(now=self._topic_pool_now())
+            return not bool(result.skipped_reason)
+        except Exception:
+            logger.warning("Topic Scout background collection failed", exc_info=True)
+            return False
+
+    async def _run_topic_pool_pulse(self, *, now: datetime | None = None) -> bool:
+        """Reserve and enqueue at most one due proactive topic turn."""
+
+        store = self._topic_pool_store_instance()
+        try:
+            reservation = await asyncio.to_thread(
+                store.reserve_due_delivery,
+                now=now or self._topic_pool_now(),
+            )
+        except Exception:
+            logger.debug("Topic Pool reservation failed", exc_info=True)
+            return False
+        if reservation is None:
+            return False
+        try:
+            from honeyos.companion.topic_delivery import build_proactive_event
+            from honeyos.gateway.session import SessionSource
+
+            source = SessionSource.from_dict(reservation.channel.source)
+            adapter = self._adapter_for_source(source)
+            session_key = self._session_key_for_source(source)
+            if adapter is None or not session_key:
+                await asyncio.to_thread(
+                    store.finish_delivery,
+                    reservation.delivery_id,
+                    success=False,
+                    error="recent channel is unavailable",
+                )
+                return False
+            if session_key in getattr(self, "_running_agents", {}):
+                await asyncio.to_thread(
+                    store.finish_delivery,
+                    reservation.delivery_id,
+                    success=False,
+                    error="recent conversation is busy",
+                )
+                return False
+            event = build_proactive_event(reservation, source)
+            self._enqueue_fifo(session_key, event, adapter)
+            return True
+        except Exception:
+            logger.warning("Topic Pool enqueue failed", exc_info=True)
+            await asyncio.to_thread(
+                store.finish_delivery,
+                reservation.delivery_id,
+                success=False,
+                error="enqueue failed",
+            )
+            return False
+
+    async def _finish_proactive_topic_event(
+        self,
+        event: "MessageEvent",
+        *,
+        success: bool,
+        error: str = "",
+    ) -> bool:
+        try:
+            from honeyos.companion.topic_delivery import is_proactive_topic_event
+
+            if not is_proactive_topic_event(event):
+                return False
+            delivery_id = str(
+                (getattr(event, "metadata", None) or {}).get(
+                    "honeyos_proactive_delivery_id"
+                )
+                or ""
+            )
+            if not delivery_id:
+                return False
+            return bool(
+                await asyncio.to_thread(
+                    self._topic_pool_store_instance().finish_delivery,
+                    delivery_id,
+                    success=success,
+                    error=error,
+                )
+            )
+        except Exception:
+            logger.debug("Topic Pool delivery finalization failed", exc_info=True)
+            return False
+
+    async def _register_proactive_topic_delivery_completion(
+        self,
+        *,
+        event: "MessageEvent",
+        source: Any,
+        session_key: str,
+        run_generation: int,
+        agent_result: Any,
+    ) -> None:
+        try:
+            from honeyos.companion.topic_delivery import is_proactive_topic_event
+
+            if not is_proactive_topic_event(event):
+                return
+            if isinstance(agent_result, dict):
+                final_text = str(agent_result.get("final_response") or "")
+            else:
+                final_text = str(agent_result or "")
+            if not final_text.strip():
+                await self._finish_proactive_topic_event(
+                    event,
+                    success=False,
+                    error="companion produced no visible message",
+                )
+                return
+            adapter = self._adapter_for_source(source)
+
+            async def _mark_delivered() -> None:
+                await self._finish_proactive_topic_event(event, success=True)
+
+            if adapter and hasattr(adapter, "register_post_delivery_callback"):
+                adapter.register_post_delivery_callback(
+                    session_key,
+                    _mark_delivered,
+                    generation=run_generation,
+                )
+                return
+            await _mark_delivered()
+        except Exception:
+            await self._finish_proactive_topic_event(
+                event,
+                success=False,
+                error="delivery callback registration failed",
+            )
+
+    def _start_topic_pool_poller(self) -> None:
+        """Start the durable Scout/pulse loop once for a HoneyOS gateway."""
+
+        existing = getattr(self, "_topic_pool_poll_task", None)
+        if existing is not None and not existing.done():
+            return
+
+        async def _poll_loop() -> None:
+            # Give adapters and session restore a chance to settle before the
+            # first background check.
+            await asyncio.sleep(10)
+            while True:
+                await self._run_topic_collection_if_due()
+                await self._run_topic_pool_pulse()
+                await asyncio.sleep(60)
+
+        try:
+            task = asyncio.create_task(_poll_loop())
+            self._topic_pool_poll_task = task
+            background = getattr(self, "_background_tasks", None)
+            if background is not None:
+                background.add(task)
+                task.add_done_callback(background.discard)
+        except Exception:
+            logger.debug("Failed to start Topic Pool poller", exc_info=True)
 
 
 
