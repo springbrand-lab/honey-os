@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import sqlite3
 
 import yaml
 
@@ -113,6 +114,13 @@ def test_initialize_home_creates_companion_contract(tmp_path, monkeypatch):
     assert "honeyos-self-extension:" in bundled_manifest
     assert "topic-scout:" in bundled_manifest
     assert all(len(line.partition(":")[2]) == 32 for line in bundled_manifest.splitlines())
+    soul = (tmp_path / "SOUL.md").read_text(encoding="utf-8")
+    topic_scout = (tmp_path / "skills" / "topic-scout" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    assert "honeyos:proactive-companion-v1" not in soul
+    assert "honeyos:topic-scout-runtime-v2" in topic_scout
+    assert "必须在当轮调用 `proactive_companion`" in topic_scout
     assert result.home == tmp_path.resolve()
 
 
@@ -234,7 +242,7 @@ def test_upgrade_companion_capabilities_is_idempotent_and_preserves_user_state(
     assert (tmp_path / "skills" / "relationship-continuity" / "SKILL.md").exists()
 
 
-def test_upgrade_adds_proactive_consent_contract_to_existing_growth_section(tmp_path):
+def test_upgrade_keeps_proactive_operations_out_of_existing_soul(tmp_path):
     initialize_home(tmp_path)
     soul_path = tmp_path / "SOUL.md"
     soul_path.write_text(
@@ -249,10 +257,8 @@ def test_upgrade_adds_proactive_consent_contract_to_existing_growth_section(tmp_
 
     assert "Keep my teasing voice." in first
     assert "Keep my custom capability notes." in first
-    assert first.count("honeyos:proactive-companion-v1") == 1
-    assert "必须在当轮调用 `proactive_companion`" in first
-    assert "不要声称只能在用户在线时主动说话" in first
-    assert "不要让用户另设定时任务" in first
+    assert "honeyos:proactive-companion-v1" not in first
+    assert "必须在当轮调用 `proactive_companion`" not in first
     assert soul_path.read_text(encoding="utf-8") == first
 
 
@@ -271,10 +277,85 @@ def test_upgrade_replaces_unversioned_proactive_contract_without_duplication(tmp
 
     upgraded = soul_path.read_text(encoding="utf-8")
     assert unversioned not in upgraded
-    assert upgraded.count("HoneyOS 也提供已经安装的短期 Topic Pool。") == 1
-    assert upgraded.count("honeyos:proactive-companion-v1") == 1
+    assert "HoneyOS 也提供已经安装的短期 Topic Pool。" not in upgraded
+    assert "honeyos:proactive-companion-v1" not in upgraded
     assert "Keep the next paragraph." in upgraded
     assert "Keep me." in upgraded
+
+
+def test_upgrade_moves_proactive_operations_to_skill_and_refreshes_old_sessions(
+    tmp_path,
+):
+    initialize_home(tmp_path)
+    soul_path = tmp_path / "SOUL.md"
+    skill_path = tmp_path / "skills" / "topic-scout" / "SKILL.md"
+    current_skill = skill_path.read_text(encoding="utf-8")
+    before_contract, _marker, remainder = current_skill.partition(
+        "<!-- honeyos:topic-scout-runtime-v2 -->"
+    )
+    _managed, _end_marker, after_contract = remainder.partition(
+        "<!-- honeyos:end-topic-scout-runtime-v2 -->"
+    )
+    skill_path.write_text(
+        before_contract.rstrip()
+        + "\n\n"
+        + after_contract.lstrip()
+        + "\nUser customization must survive.\n",
+        encoding="utf-8",
+    )
+    with soul_path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            "\n<!-- honeyos:proactive-companion-v1 -->\n"
+            "必须在当轮调用 `proactive_companion`。\n"
+            "<!-- honeyos:end-proactive-companion-v1 -->\n"
+        )
+
+    state_path = tmp_path / "state.db"
+    with sqlite3.connect(state_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE system_prompts (hash TEXT PRIMARY KEY, prompt TEXT NOT NULL);
+            CREATE TABLE sessions (
+                id TEXT PRIMARY KEY,
+                session_key TEXT,
+                system_prompt TEXT,
+                system_prompt_hash TEXT
+            );
+            INSERT INTO system_prompts(hash, prompt) VALUES
+                ('companion-old', 'old companion prompt'),
+                ('other-old', 'old unrelated prompt');
+            INSERT INTO sessions(id, session_key, system_prompt, system_prompt_hash) VALUES
+                ('companion', 'agent:main:companion:dm:owner', NULL, 'companion-old'),
+                ('other', 'agent:other:session', NULL, 'other-old');
+            """
+        )
+
+    assert upgrade_companion_capabilities(tmp_path) is True
+
+    upgraded_soul = soul_path.read_text(encoding="utf-8")
+    upgraded_skill = skill_path.read_text(encoding="utf-8")
+    assert "honeyos:proactive-companion-v1" not in upgraded_soul
+    assert "必须在当轮调用 `proactive_companion`" not in upgraded_soul
+    assert upgraded_skill.count("honeyos:topic-scout-runtime-v2") == 1
+    assert "必须在当轮调用 `proactive_companion`" in upgraded_skill
+    assert "不要声称只能在用户在线时主动说话" in upgraded_skill
+    assert "不要让用户另设定时任务" in upgraded_skill
+    assert "User customization must survive." in upgraded_skill
+    assert not (tmp_path / ".skills_prompt_snapshot.json").exists()
+
+    with sqlite3.connect(state_path) as connection:
+        rows = dict(
+            connection.execute(
+                "SELECT id, system_prompt_hash FROM sessions ORDER BY id"
+            ).fetchall()
+        )
+    assert rows == {"companion": None, "other": "other-old"}
+
+    first_soul = upgraded_soul
+    first_skill = upgraded_skill
+    assert upgrade_companion_capabilities(tmp_path) is False
+    assert soul_path.read_text(encoding="utf-8") == first_soul
+    assert skill_path.read_text(encoding="utf-8") == first_skill
 
 
 def test_upgrade_rewrites_stale_container_capability_without_losing_persona(tmp_path):

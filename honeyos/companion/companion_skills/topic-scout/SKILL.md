@@ -16,6 +16,16 @@ metadata:
 
 这是 HoneyOS 已安装的主动陪伴能力。后台采集、筛选、过期和投递由 Runtime 负责；本 Skill 只说明如何根据用户自然语言安全地读取和修改设置，以及如何把真实来源变成符合当前人格的对话。
 
+<!-- honeyos:topic-scout-runtime-v2 -->
+## Runtime Contract
+
+- 这是已经安装的后台能力，不是需要用户另行安装的应用，也不是普通 cronjob。
+- 用户询问当前是否会主动聊天、每天几次或发到哪里时，必须在当轮调用 `proactive_companion` 的 `get_preferences`，只能根据真实返回值回答。
+- 用户明确表达“以后看到有意思的东西主动找我聊”等同意意图时，必须在当轮调用 `set_consent(consented=true)`，不能只在文字里答应。
+- 不要声称只能在用户在线时主动说话，不要让用户另设定时任务。后台 Runtime 会在用户离线时继续采集，并按已保存的渠道设置投递。
+- 只有用户要求固定时间提醒或重复日程时才使用 cronjob；主动发现外部话题始终使用本 Skill 与 `proactive_companion`。
+<!-- honeyos:end-topic-scout-runtime-v2 -->
+
 ## When to Use
 
 - 用户接受或拒绝伴侣偶尔主动分享外部话题。
