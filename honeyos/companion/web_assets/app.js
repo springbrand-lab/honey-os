@@ -14,6 +14,13 @@ const elements = {
   actionTrail: document.querySelector("#action-trail"),
   permissionCard: document.querySelector("#permission-card"),
   scrollLatest: document.querySelector("#scroll-to-latest"),
+  topicPoolTrigger: document.querySelector("#topic-pool-trigger"),
+  topicPoolCount: document.querySelector("#topic-pool-count"),
+  topicPoolLayer: document.querySelector("#topic-pool-layer"),
+  topicPoolDrawer: document.querySelector("#topic-pool-drawer"),
+  topicPoolList: document.querySelector("#topic-pool-list"),
+  topicPoolClose: document.querySelector("#topic-pool-close"),
+  topicPoolBackdrop: document.querySelector("#topic-pool-backdrop"),
 };
 
 let sessionId = "";
@@ -24,6 +31,9 @@ let turnState = HoneyOSRunState.create(Date.now());
 let keepAtLatest = true;
 let companionAvatarLabel = "H";
 let actionTrailExpanded = false;
+let topicPoolOpen = false;
+let topicPoolLoading = false;
+let proactivePollTimer = null;
 
 function isNearLatest() {
   const remaining =
@@ -460,10 +470,12 @@ async function bootstrap() {
   for (const message of data.messages || []) {
     addMessage(message.role, message.content);
   }
+  void refreshTopicCount();
+  startProactivePolling();
   scrollToLatest(true);
 }
 
-async function sendMessage(text) {
+async function sendMessage(text, options = {}) {
   sending = true;
   elements.send.disabled = true;
   elements.send.textContent = "处理中";
@@ -471,23 +483,31 @@ async function sendMessage(text) {
   turnState = HoneyOSRunState.create(Date.now());
   actionTrailExpanded = false;
   hideTurnStatus();
-  addMessage("user", text, { forceScroll: true });
+  if (!options.hideUser) {
+    addMessage("user", options.displayText || text, { forceScroll: true });
+  }
 
+  let completed = false;
   try {
+    const headers = {
+      "Content-Type": "application/json",
+      "X-HoneyOS-Session-Key": sessionKey,
+      "X-HoneyOS-Companion-View": "1",
+    };
+    if (options.proactiveDeliveryId) {
+      headers["X-HoneyOS-Internal-Turn"] = "proactive-topic";
+    }
     const response = await fetch(
       "/api/sessions/" + encodeURIComponent(sessionId) + "/chat/stream",
       {
         method: "POST",
         credentials: "same-origin",
-        headers: {
-          "Content-Type": "application/json",
-          "X-HoneyOS-Session-Key": sessionKey,
-          "X-HoneyOS-Companion-View": "1",
-        },
+        headers,
         body: JSON.stringify({ message: text }),
       },
     );
     await consumeSse(response);
+    completed = true;
   } catch (error) {
     const message = error instanceof Error ? error.message : "chat_unavailable";
     turnState = HoneyOSRunState.reduce(
@@ -504,6 +524,238 @@ async function sendMessage(text) {
     activeAssistantBubble = null;
     elements.input.focus();
   }
+  return completed;
+}
+
+async function finishProactiveDelivery(deliveryId, success) {
+  try {
+    await fetch(
+      "/api/companion/proactive/" + encodeURIComponent(deliveryId) + "/complete",
+      {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ success }),
+      },
+    );
+  } catch {
+    // A stale reservation is released by the server on a later check.
+  }
+}
+
+async function pollProactiveTopic() {
+  if (!sessionId || sending || document.visibilityState !== "visible") return;
+  try {
+    const response = await fetch("/api/companion/proactive/claim", {
+      method: "POST",
+      credentials: "same-origin",
+    });
+    if (!response.ok) return;
+    const data = await response.json();
+    const delivery = data.delivery;
+    if (!delivery?.id || !delivery?.prompt || sending) return;
+    const success = await sendMessage(delivery.prompt, {
+      hideUser: true,
+      proactiveDeliveryId: delivery.id,
+    });
+    await finishProactiveDelivery(delivery.id, success);
+    if (success) void refreshTopicCount();
+  } catch {
+    // This is a quiet background check. Normal chat must remain unaffected.
+  }
+}
+
+function startProactivePolling() {
+  if (proactivePollTimer !== null) return;
+  window.setTimeout(() => void pollProactiveTopic(), 1500);
+  proactivePollTimer = window.setInterval(() => void pollProactiveTopic(), 60_000);
+}
+
+function topicPoolState(message, kind = "quiet") {
+  const state = document.createElement("div");
+  state.className = "topic-pool-state " + kind;
+  const mark = document.createElement("span");
+  mark.setAttribute("aria-hidden", "true");
+  mark.textContent = kind === "error" ? "·" : "✦";
+  const copy = document.createElement("p");
+  copy.textContent = message;
+  state.append(mark, copy);
+  return state;
+}
+
+function setTopicCount(count) {
+  if (!elements.topicPoolCount) return;
+  const safeCount = Math.max(0, Number(count) || 0);
+  elements.topicPoolCount.textContent = String(Math.min(safeCount, 99));
+  elements.topicPoolCount.hidden = safeCount === 0;
+}
+
+async function fetchTopics() {
+  const response = await fetch("/api/companion/topics", {
+    credentials: "same-origin",
+  });
+  if (!response.ok) throw new Error("topics_unavailable");
+  const data = await response.json();
+  return Array.isArray(data.topics) ? data.topics : [];
+}
+
+async function refreshTopicCount() {
+  try {
+    const topics = await fetchTopics();
+    setTopicCount(topics.length);
+  } catch {
+    setTopicCount(0);
+  }
+}
+
+function topicSourceLabel(topic) {
+  const source = String(topic.source_name || topic.source_title || "来源").trim();
+  if (!topic.observed_at) return source;
+  const observed = new Date(topic.observed_at);
+  if (Number.isNaN(observed.getTime())) return source;
+  const formatted = new Intl.DateTimeFormat("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+  }).format(observed);
+  return source + " · " + formatted;
+}
+
+async function chooseTopic(topic, card, button) {
+  if (sending) return;
+  button.disabled = true;
+  try {
+    const response = await fetch(
+      "/api/companion/topics/" + encodeURIComponent(topic.id) + "/discuss",
+      { method: "POST", credentials: "same-origin" },
+    );
+    if (!response.ok) throw new Error("topic_unavailable");
+    const data = await response.json();
+    card.remove();
+    closeTopicPool();
+    setTopicCount(elements.topicPoolList.querySelectorAll(".topic-card").length);
+    await sendMessage(data.prompt, {
+      displayText: data.display_text || "这个我想听你聊聊",
+    });
+  } catch {
+    button.disabled = false;
+    const note = document.createElement("span");
+    note.className = "topic-card-error";
+    note.textContent = "这条刚好过期了，我再看看别的。";
+    card.append(note);
+  }
+}
+
+async function dismissTopic(topic, card, button) {
+  button.disabled = true;
+  try {
+    const response = await fetch(
+      "/api/companion/topics/" + encodeURIComponent(topic.id) + "/dismiss",
+      { method: "POST", credentials: "same-origin" },
+    );
+    if (!response.ok) throw new Error("topic_unavailable");
+    card.remove();
+    const remaining = elements.topicPoolList.querySelectorAll(".topic-card").length;
+    setTopicCount(remaining);
+    if (!remaining) {
+      elements.topicPoolList.replaceChildren(
+        topicPoolState("暂时没有特别想拉你一起看的。等我再遇见点有意思的。"),
+      );
+    }
+  } catch {
+    button.disabled = false;
+  }
+}
+
+function renderTopicCard(topic) {
+  const card = document.createElement("article");
+  card.className = "topic-card";
+
+  const category = document.createElement("span");
+  category.className = "topic-card-category";
+  category.textContent = topic.category || "刚看到的";
+
+  const hook = document.createElement("h3");
+  hook.textContent = topic.hook || topic.summary || "有件事想和你聊聊";
+
+  const summary = document.createElement("p");
+  summary.className = "topic-card-summary";
+  summary.textContent = topic.summary || "";
+
+  const source = document.createElement("details");
+  source.className = "topic-card-source";
+  const sourceTitle = document.createElement("summary");
+  sourceTitle.textContent = topicSourceLabel(topic);
+  const sourceLink = document.createElement("a");
+  sourceLink.href = topic.source_url;
+  sourceLink.target = "_blank";
+  sourceLink.rel = "noreferrer noopener";
+  sourceLink.textContent = topic.source_title || "看看原始来源";
+  source.append(sourceTitle, sourceLink);
+
+  const actions = document.createElement("div");
+  actions.className = "topic-card-actions";
+  const dismiss = document.createElement("button");
+  dismiss.type = "button";
+  dismiss.className = "topic-card-dismiss";
+  dismiss.textContent = "先放着";
+  dismiss.addEventListener("click", () => void dismissTopic(topic, card, dismiss));
+  const discuss = document.createElement("button");
+  discuss.type = "button";
+  discuss.className = "topic-card-discuss";
+  discuss.textContent = "想聊这个";
+  discuss.addEventListener("click", () => void chooseTopic(topic, card, discuss));
+  actions.append(dismiss, discuss);
+
+  card.append(category, hook);
+  if (summary.textContent) card.append(summary);
+  card.append(source, actions);
+  return card;
+}
+
+async function loadTopicPool() {
+  if (topicPoolLoading) return;
+  topicPoolLoading = true;
+  elements.topicPoolList.replaceChildren(topicPoolState("我翻一下最近留下来的。"));
+  try {
+    const topics = await fetchTopics();
+    setTopicCount(topics.length);
+    if (!topics.length) {
+      elements.topicPoolList.replaceChildren(
+        topicPoolState("暂时没有特别想拉你一起看的。等我再遇见点有意思的。"),
+      );
+      return;
+    }
+    elements.topicPoolList.replaceChildren(...topics.map(renderTopicCard));
+  } catch {
+    elements.topicPoolList.replaceChildren(
+      topicPoolState("刚才没翻出来。晚一点再陪你看。", "error"),
+    );
+  } finally {
+    topicPoolLoading = false;
+  }
+}
+
+function openTopicPool() {
+  if (!elements.topicPoolLayer || topicPoolOpen) return;
+  topicPoolOpen = true;
+  elements.topicPoolLayer.hidden = false;
+  document.body.classList.add("topic-pool-visible");
+  requestAnimationFrame(() => {
+    elements.topicPoolLayer.dataset.open = "true";
+    elements.topicPoolClose.focus();
+  });
+  void loadTopicPool();
+}
+
+function closeTopicPool() {
+  if (!elements.topicPoolLayer || !topicPoolOpen) return;
+  topicPoolOpen = false;
+  elements.topicPoolLayer.dataset.open = "false";
+  document.body.classList.remove("topic-pool-visible");
+  window.setTimeout(() => {
+    if (!topicPoolOpen) elements.topicPoolLayer.hidden = true;
+  }, 180);
+  elements.topicPoolTrigger.focus();
 }
 
 elements.form.addEventListener("submit", (event) => {
@@ -534,6 +786,12 @@ elements.messages.addEventListener("scroll", () => {
 });
 
 elements.scrollLatest.addEventListener("click", () => scrollToLatest(true));
+elements.topicPoolTrigger?.addEventListener("click", openTopicPool);
+elements.topicPoolClose?.addEventListener("click", closeTopicPool);
+elements.topicPoolBackdrop?.addEventListener("click", closeTopicPool);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && topicPoolOpen) closeTopicPool();
+});
 
 if (window.location.protocol !== "file:") {
   bootstrap().catch((error) => {

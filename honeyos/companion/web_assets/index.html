@@ -24,7 +24,21 @@
               <p id="companion-status">在这儿</p>
             </div>
           </div>
-          <p class="shared-space-label">我们的聊天</p>
+          <div class="header-actions">
+            <button
+              class="topic-pool-trigger"
+              id="topic-pool-trigger"
+              data-topic-pool-trigger
+              type="button"
+              aria-haspopup="dialog"
+              aria-controls="topic-pool-drawer"
+            >
+              <span class="topic-pool-trigger-mark" aria-hidden="true">✦</span>
+              <span>最近看到的</span>
+              <span class="topic-pool-count" id="topic-pool-count" hidden></span>
+            </button>
+            <p class="shared-space-label">我们的聊天</p>
+          </div>
         </header>
 
         <div class="messages" id="messages">
@@ -63,6 +77,39 @@
         </form>
       </section>
     </main>
+
+    <div class="topic-pool-layer" id="topic-pool-layer" hidden>
+      <button
+        class="topic-pool-backdrop"
+        id="topic-pool-backdrop"
+        type="button"
+        aria-label="关闭最近看到的内容"
+      ></button>
+      <aside
+        class="topic-pool-drawer"
+        id="topic-pool-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="topic-pool-title"
+      >
+        <header class="topic-pool-header">
+          <div>
+            <span class="topic-pool-eyebrow">刚好想到你</span>
+            <h2 id="topic-pool-title">最近看到的</h2>
+            <p>不是待办。只是有几件事，感觉也许能和你聊聊。</p>
+          </div>
+          <button
+            class="topic-pool-close"
+            id="topic-pool-close"
+            type="button"
+            aria-label="关闭最近看到的内容"
+          >
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+        <div class="topic-pool-list" id="topic-pool-list" aria-live="polite"></div>
+      </aside>
+    </div>
 
     <script src="./message-format.js"></script>
     <script src="./run-state.js"></script>

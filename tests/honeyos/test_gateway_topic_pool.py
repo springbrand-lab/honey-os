@@ -133,6 +133,26 @@ async def test_missing_recent_adapter_reopens_reserved_topic(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_non_push_web_adapter_leaves_topic_for_browser_claim(tmp_path: Path):
+    store = prepared_store(tmp_path)
+    store.record_channel_activity(
+        source(Platform.API_SERVER).to_dict(),
+        at=NOW - timedelta(hours=3),
+    )
+
+    class NonPushAdapter:
+        supports_async_delivery = False
+
+    runner = FakeRunner(store, adapter=NonPushAdapter())
+
+    result = await runner._run_topic_pool_pulse(now=NOW)
+
+    assert result is False
+    assert runner.enqueued == []
+    assert store.list_open_topics()[0].status == "open"
+
+
+@pytest.mark.asyncio
 async def test_topic_is_consumed_only_after_post_delivery_callback(tmp_path: Path):
     store = prepared_store(tmp_path)
     reservation = store.reserve_due_delivery(now=NOW)

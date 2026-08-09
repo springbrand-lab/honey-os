@@ -210,6 +210,24 @@ def test_delivery_daily_cap_is_three_and_failed_send_reopens_topic(tmp_path: Pat
     ) is None
 
 
+def test_abandoned_web_claim_is_released_after_fifteen_minutes(tmp_path: Path):
+    store = TopicPoolStore(tmp_path)
+    enable(store)
+    store.add_candidates([candidate()])
+    store.record_channel_activity(
+        {"platform": "api_server", "chat_id": "local-owner", "chat_type": "dm"},
+        at=datetime(2026, 8, 9, 6, 0, tzinfo=CN),
+    )
+    first = store.reserve_due_delivery(now=datetime(2026, 8, 9, 10, 0, tzinfo=CN))
+    assert first is not None
+
+    second = store.reserve_due_delivery(now=datetime(2026, 8, 9, 10, 16, tzinfo=CN))
+
+    assert second is not None
+    assert second.item.id == first.item.id
+    assert second.delivery_id != first.delivery_id
+
+
 def test_initialization_preserves_existing_companion_memories(tmp_path: Path):
     memories = tmp_path / "memories"
     memories.mkdir()

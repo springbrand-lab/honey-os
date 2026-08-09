@@ -635,6 +635,31 @@ class TopicPoolStore:
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             self._expire(connection, utc_now)
+            stale_before = _iso(utc_now - timedelta(minutes=15))
+            stale_rows = connection.execute(
+                """
+                SELECT id, topic_id FROM proactive_deliveries
+                 WHERE status = 'reserved' AND created_at <= ?
+                """,
+                (stale_before,),
+            ).fetchall()
+            for stale in stale_rows:
+                connection.execute(
+                    """
+                    UPDATE topic_pool_items
+                       SET status = 'open', reserved_at = NULL, delivery_id = NULL
+                     WHERE id = ? AND delivery_id = ? AND status = 'reserved'
+                    """,
+                    (str(stale["topic_id"]), str(stale["id"])),
+                )
+                connection.execute(
+                    """
+                    UPDATE proactive_deliveries
+                       SET status = 'failed', error = 'delivery claim expired'
+                     WHERE id = ? AND status = 'reserved'
+                    """,
+                    (str(stale["id"]),),
+                )
             sent_rows = connection.execute(
                 """
                 SELECT sent_at FROM proactive_deliveries

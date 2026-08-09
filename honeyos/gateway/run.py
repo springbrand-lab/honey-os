@@ -19139,6 +19139,16 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     error="recent channel is unavailable",
                 )
                 return False
+            if not bool(getattr(adapter, "supports_async_delivery", True)):
+                # The browser claims topics only while its local page is open.
+                # A request/response adapter has no channel to push into here.
+                await asyncio.to_thread(
+                    store.finish_delivery,
+                    reservation.delivery_id,
+                    success=False,
+                    error="recent channel requires an active client",
+                )
+                return False
             if session_key in getattr(self, "_running_agents", {}):
                 await asyncio.to_thread(
                     store.finish_delivery,
