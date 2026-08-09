@@ -6,6 +6,7 @@ import os
 import hashlib
 import secrets
 import shutil
+import sqlite3
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -56,6 +57,8 @@ _LEGACY_MANAGED_SOUL_SHA256 = (
 _PROACTIVE_SOUL_MARKER = "<!-- honeyos:proactive-companion-v1 -->"
 _PROACTIVE_SOUL_END_MARKER = "<!-- honeyos:end-proactive-companion-v1 -->"
 _LEGACY_PROACTIVE_SOUL_PREFIX = "HoneyOS 也提供已经安装的短期 Topic Pool。"
+_TOPIC_SCOUT_CONTRACT_MARKER = "<!-- honeyos:topic-scout-runtime-v2 -->"
+_TOPIC_SCOUT_CONTRACT_END_MARKER = "<!-- honeyos:end-topic-scout-runtime-v2 -->"
 
 _COMPANION_SKILLS = (
     ("relationship-continuity", "honeyos", None),
@@ -87,16 +90,75 @@ def _companion_skill_source(name: str, category: str) -> Path:
     return Path(__file__).parents[1] / "skills" / category / name
 
 
-def _managed_proactive_soul_block(template: str) -> str:
-    """Return the versioned proactive-companion contract from the template."""
+def _managed_topic_scout_contract(source: str) -> str:
+    """Return the versioned runtime contract from the bundled Topic Scout."""
 
-    _before, marker, remainder = template.partition(_PROACTIVE_SOUL_MARKER)
+    _before, marker, remainder = source.partition(_TOPIC_SCOUT_CONTRACT_MARKER)
     if not marker:
-        raise ValueError("companion SOUL template is missing the proactive marker")
-    managed, end_marker, _after = remainder.partition(_PROACTIVE_SOUL_END_MARKER)
+        raise ValueError("Topic Scout is missing its runtime contract marker")
+    managed, end_marker, _after = remainder.partition(
+        _TOPIC_SCOUT_CONTRACT_END_MARKER
+    )
     if not end_marker:
-        raise ValueError("companion SOUL template is missing the proactive end marker")
+        raise ValueError("Topic Scout is missing its runtime contract end marker")
     return f"{marker}{managed}{end_marker}"
+
+
+def _without_managed_proactive_soul_contract(soul: str) -> str:
+    """Remove obsolete operational Topic Pool instructions from SOUL."""
+
+    marker_start = soul.find(_PROACTIVE_SOUL_MARKER)
+    if marker_start >= 0:
+        marker_end = soul.find(_PROACTIVE_SOUL_END_MARKER, marker_start)
+        if marker_end >= 0:
+            marker_end += len(_PROACTIVE_SOUL_END_MARKER)
+            return (soul[:marker_start] + soul[marker_end:]).strip() + "\n"
+    legacy_start = soul.find(_LEGACY_PROACTIVE_SOUL_PREFIX)
+    if legacy_start >= 0:
+        legacy_end = soul.find("\n\n", legacy_start)
+        if legacy_end < 0:
+            legacy_end = len(soul)
+        return (soul[:legacy_start] + soul[legacy_end:]).strip() + "\n"
+    return soul
+
+
+def _invalidate_companion_session_prompts(home: Path) -> bool:
+    """Force old companion sessions to rebuild capabilities without losing chat."""
+
+    state_path = home / "state.db"
+    if not state_path.is_file():
+        return False
+    try:
+        with sqlite3.connect(state_path, timeout=30) as connection:
+            tables = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+            if "sessions" not in tables:
+                return False
+            cursor = connection.execute(
+                """
+                UPDATE sessions
+                SET system_prompt = NULL, system_prompt_hash = NULL
+                WHERE session_key LIKE 'agent:main:companion:%'
+                  AND (system_prompt IS NOT NULL OR system_prompt_hash IS NOT NULL)
+                """
+            )
+            if "system_prompts" in tables:
+                connection.execute(
+                    """
+                    DELETE FROM system_prompts
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM sessions
+                        WHERE sessions.system_prompt_hash = system_prompts.hash
+                    )
+                    """
+                )
+            return cursor.rowcount > 0
+    except sqlite3.Error:
+        return False
 
 
 def seed_companion_skills(home: Path) -> tuple[Path, ...]:
@@ -526,6 +588,7 @@ def upgrade_companion_capabilities(home: Path) -> bool:
 
     rendered_config = yaml.safe_dump(config, allow_unicode=True, sort_keys=False)
     changed = credential_migrated or bool(recovery.copied) or rendered_config != original_config
+    prompt_contract_changed = False
     if changed:
         _atomic_replace(config_path, rendered_config, mode=0o600)
 
@@ -557,10 +620,32 @@ def upgrade_companion_capabilities(home: Path) -> bool:
     if migrate_legacy_skill_directory(resolved):
         changed = True
 
-    if seed_companion_skills(resolved):
+    seeded_skills = seed_companion_skills(resolved)
+    if seeded_skills:
         changed = True
+        prompt_contract_changed = any(path.name == "topic-scout" for path in seeded_skills)
     if record_companion_bundled_skills(resolved):
         changed = True
+
+    topic_scout_path = resolved / "skills" / "topic-scout" / "SKILL.md"
+    if topic_scout_path.is_file():
+        topic_scout = topic_scout_path.read_text(encoding="utf-8")
+        if _TOPIC_SCOUT_CONTRACT_MARKER not in topic_scout:
+            topic_scout_source = (
+                Path(__file__).parent
+                / "companion_skills"
+                / "topic-scout"
+                / "SKILL.md"
+            ).read_text(encoding="utf-8")
+            managed_contract = _managed_topic_scout_contract(topic_scout_source)
+            topic_scout = topic_scout.rstrip() + "\n\n" + managed_contract.strip() + "\n"
+            _atomic_replace(topic_scout_path, topic_scout, mode=0o644)
+            try:
+                (resolved / ".skills_prompt_snapshot.json").unlink()
+            except FileNotFoundError:
+                pass
+            changed = True
+            prompt_contract_changed = True
 
     soul_path = resolved / "SOUL.md"
     soul = soul_path.read_text(encoding="utf-8") if soul_path.exists() else ""
@@ -604,19 +689,12 @@ def upgrade_companion_capabilities(home: Path) -> bool:
         soul = updated_soul
         changed = True
 
-    if _PROACTIVE_SOUL_MARKER not in soul:
-        proactive_block = _managed_proactive_soul_block(template)
-        legacy_start = soul.find(_LEGACY_PROACTIVE_SOUL_PREFIX)
-        if legacy_start >= 0:
-            legacy_end = soul.find("\n\n", legacy_start)
-            if legacy_end < 0:
-                legacy_end = len(soul)
-            updated_soul = soul[:legacy_start] + proactive_block + soul[legacy_end:]
-        else:
-            updated_soul = soul.rstrip() + "\n\n" + proactive_block.strip() + "\n"
+    updated_soul = _without_managed_proactive_soul_contract(soul)
+    if updated_soul != soul:
         _atomic_replace(soul_path, updated_soul, mode=0o644)
         soul = updated_soul
         changed = True
+        prompt_contract_changed = True
 
     for skill_name, category, _command in _COMPANION_SKILLS:
         if category != "honeyos":
@@ -673,5 +751,8 @@ def upgrade_companion_capabilities(home: Path) -> bool:
         if branded_marker != marker_text:
             _atomic_replace(marker, branded_marker, mode=0o644)
             changed = True
+
+    if prompt_contract_changed and _invalidate_companion_session_prompts(resolved):
+        changed = True
 
     return changed
