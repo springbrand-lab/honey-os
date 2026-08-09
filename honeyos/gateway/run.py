@@ -43,7 +43,7 @@ import time
 from collections import OrderedDict
 from contextvars import copy_context
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Awaitable, Callable, Dict, Optional, Any, List, Tuple, Union, cast
 
 from honeyos.agent.async_utils import consume_detached_task_result, safe_schedule_threadsafe
@@ -62,6 +62,12 @@ from honeyos.agent.i18n import t
 from honeyos.agent.interrupt_compat import request_hard_interrupt
 from honeyos.agent.turn_context import (
     compression_made_progress,
+)
+from honeyos.companion.status_copy import (
+    busy_acknowledgement,
+    gateway_transition_acknowledgement,
+    long_running_acknowledgement,
+    queued_command_acknowledgement,
 )
 from honeyos.runtime.config import cfg_get
 from honeyos.runtime.fallback_config import get_fallback_chain
@@ -3765,7 +3771,11 @@ class TurnRunner:
                         cfg_get(_cfg, "display", "tool_progress_command"),
                         default=False,
                     )
-                    if gate_on and not is_seen(_cfg, TOOL_PROGRESS_FLAG):
+                    if (
+                        not _is_honeyos_runtime()
+                        and gate_on
+                        and not is_seen(_cfg, TOOL_PROGRESS_FLAG)
+                    ):
                         ctx.long_tool_hint_fired[0] = True
                         ctx.progress_queue.put(tool_progress_hint_gateway())
                         mark_seen(_honeyos_home / "config.yaml", TOOL_PROGRESS_FLAG)
@@ -8853,9 +8863,17 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             thread_meta = self._thread_metadata_for_source(event.source, reply_anchor)
             if self._queue_during_drain_enabled():
                 self._queue_or_replace_pending_event(session_key, event)
-                message = f"⏳ Gateway {self._status_action_gerund()} — queued for the next turn after it comes back."
+                message = (
+                    gateway_transition_acknowledgement(queued=True)
+                    if _is_honeyos_runtime()
+                    else f"⏳ Gateway {self._status_action_gerund()} — queued for the next turn after it comes back."
+                )
             else:
-                message = f"⏳ Gateway is {self._status_action_gerund()} and is not accepting another turn right now."
+                message = (
+                    gateway_transition_acknowledgement(queued=False)
+                    if _is_honeyos_runtime()
+                    else f"⏳ Gateway is {self._status_action_gerund()} and is not accepting another turn right now."
+                )
 
             await adapter._send_with_retry(
                 chat_id=event.source.chat_id,
@@ -9219,34 +9237,46 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 f"I'll respond to your message shortly."
             )
 
-        # First-touch onboarding: the very first time a user sends a message
-        # while the agent is busy, append a one-time hint explaining the
-        # queue/interrupt knob.  Flag is persisted to config.yaml so it never
-        # fires again on this install.
-        try:
-            from honeyos.agent.onboarding import (
-                BUSY_INPUT_FLAG,
-                busy_input_hint_gateway,
-                is_seen,
-                mark_seen,
-            )
-            _user_cfg = _load_gateway_config()
-            if not is_seen(_user_cfg, BUSY_INPUT_FLAG):
-                if is_steer_mode:
-                    _hint_mode = "steer"
-                elif is_queue_mode:
-                    _hint_mode = "queue"
-                elif is_redirect_mode:
-                    _hint_mode = "redirect"
-                else:
-                    _hint_mode = "interrupt"
-                message = (
-                    f"{message}\n\n"
-                    f"{busy_input_hint_gateway(_hint_mode)}"
+        if _is_honeyos_runtime():
+            if is_steer_mode:
+                _companion_busy_state = "steer"
+            elif is_redirect_mode:
+                _companion_busy_state = "redirect"
+            elif is_queue_mode:
+                _companion_busy_state = "queue"
+            else:
+                _companion_busy_state = "interrupt"
+            message = busy_acknowledgement(_companion_busy_state)
+
+        if not _is_honeyos_runtime():
+            # First-touch onboarding: the very first time a user sends a message
+            # while the agent is busy, append a one-time hint explaining the
+            # queue/interrupt knob.  HoneyOS deliberately keeps these runtime
+            # controls out of companion chat.
+            try:
+                from honeyos.agent.onboarding import (
+                    BUSY_INPUT_FLAG,
+                    busy_input_hint_gateway,
+                    is_seen,
+                    mark_seen,
                 )
-                mark_seen(_honeyos_home / "config.yaml", BUSY_INPUT_FLAG)
-        except Exception as _onb_err:
-            logger.debug("Failed to apply busy-input onboarding hint: %s", _onb_err)
+                _user_cfg = _load_gateway_config()
+                if not is_seen(_user_cfg, BUSY_INPUT_FLAG):
+                    if is_steer_mode:
+                        _hint_mode = "steer"
+                    elif is_queue_mode:
+                        _hint_mode = "queue"
+                    elif is_redirect_mode:
+                        _hint_mode = "redirect"
+                    else:
+                        _hint_mode = "interrupt"
+                    message = (
+                        f"{message}\n\n"
+                        f"{busy_input_hint_gateway(_hint_mode)}"
+                    )
+                    mark_seen(_honeyos_home / "config.yaml", BUSY_INPUT_FLAG)
+            except Exception as _onb_err:
+                logger.debug("Failed to apply busy-input onboarding hint: %s", _onb_err)
 
         reply_anchor = self._reply_anchor_for_event(event)
         thread_meta = self._thread_metadata_for_source(event.source, reply_anchor)
@@ -11458,6 +11488,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     self._loop_heartbeat_task.add_done_callback(_bg.discard)
         except Exception:
             logger.debug("Failed to start gateway loop heartbeat", exc_info=True)
+
+        if _is_honeyos_runtime():
+            self._start_topic_pool_poller()
 
         # Emit gateway:startup hook
         hook_count = len(self.hooks.loaded_hooks)
@@ -14339,6 +14372,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             )
             self._enqueue_fifo(quick_key, queued_event, adapter)
         depth = self._queue_depth(quick_key, adapter=self._adapter_for_source(source))
+        if _is_honeyos_runtime():
+            return queued_command_acknowledgement(depth)
         if depth <= 1:
             return "Queued for the next turn."
         return f"Queued for the next turn. ({depth} queued)"
@@ -14597,6 +14632,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     # Record rate limit so subsequent messages are silently ignored
                     pairing_store._record_rate_limit(platform_name, source.user_id)
             return None
+
+        # HoneyOS presents one private companion across web and IM surfaces.
+        # Record only authorized, real owner messages.  Topic Pool routing uses
+        # this durable clock to choose the most recently used channel; internal
+        # proactive turns, bot messages and groups must never move it.
+        if not is_internal:
+            self._record_topic_pool_channel_activity(event, source, is_internal=False)
 
         # HoneyOS presents one private companion across web and IM surfaces.
         # Route explicit natural-language model changes through the mature
@@ -14955,6 +14997,10 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             if self._draining:
                 if self._queue_during_drain_enabled():
                     self._queue_or_replace_pending_event(_quick_key, event)
+                if _is_honeyos_runtime():
+                    return gateway_transition_acknowledgement(
+                        queued=self._queue_during_drain_enabled()
+                    )
                 return (
                     f"⏳ Gateway {self._status_action_gerund()} — queued for the next turn after it comes back."
                     if self._queue_during_drain_enabled()
@@ -15792,7 +15838,24 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         _run_generation = self._begin_session_run_generation(_quick_key)
 
         try:
-            _agent_result = await self._handle_message_with_agent(event, source, _quick_key, _run_generation)
+            try:
+                _agent_result = await self._handle_message_with_agent(
+                    event, source, _quick_key, _run_generation
+                )
+            except Exception:
+                await self._finish_proactive_topic_event(
+                    event,
+                    success=False,
+                    error="agent turn failed",
+                )
+                raise
+            await self._register_proactive_topic_delivery_completion(
+                event=event,
+                source=source,
+                session_key=_quick_key,
+                run_generation=_run_generation,
+                agent_result=_agent_result,
+            )
             # Goal continuation: after the agent returns a final response
             # for this turn, check any standing /goal — the judge will
             # either mark it done, pause it (budget), or enqueue a
@@ -19018,6 +19081,233 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 task.add_done_callback(_bg.discard)
         except Exception:
             logger.debug("Failed to start heartbeat poller", exc_info=True)
+
+    def _topic_pool_store_instance(self):
+        store = getattr(self, "_topic_pool_store", None)
+        if store is not None:
+            return store
+        from honeyos.companion.topic_pool import TopicPoolStore
+
+        store = TopicPoolStore(_honeyos_home)
+        self._topic_pool_store = store
+        return store
+
+    def _record_topic_pool_channel_activity(
+        self,
+        event: "MessageEvent",
+        source: Any,
+        *,
+        is_internal: bool,
+    ) -> bool:
+        """Persist the latest real owner DM source for proactive routing."""
+
+        if is_internal or bool(getattr(event, "internal", False)):
+            return False
+        if getattr(source, "chat_type", None) != "dm":
+            return False
+        if bool(getattr(source, "is_bot", False)):
+            return False
+        if not getattr(source, "user_id", None) and getattr(source, "platform", None) != Platform.API_SERVER:
+            return False
+        try:
+            store = self._topic_pool_store_instance()
+            store.record_channel_activity(
+                source.to_dict(),
+                at=getattr(event, "timestamp", None) or datetime.now(timezone.utc),
+            )
+            return True
+        except Exception:
+            logger.debug("Topic Pool channel activity update failed", exc_info=True)
+            return False
+
+    @staticmethod
+    def _topic_pool_now() -> datetime:
+        try:
+            from honeyos.core.time import get_timezone
+
+            return datetime.now(get_timezone())
+        except Exception:
+            return datetime.now(timezone.utc)
+
+    async def _run_topic_collection_if_due(self) -> bool:
+        try:
+            from honeyos.companion.topic_scout import TopicScout
+
+            scout = getattr(self, "_topic_scout", None)
+            if scout is None:
+                scout = TopicScout(
+                    _honeyos_home,
+                    store=self._topic_pool_store_instance(),
+                )
+                self._topic_scout = scout
+            result = await scout.collect_if_due(now=self._topic_pool_now())
+            return not bool(result.skipped_reason)
+        except Exception:
+            logger.warning("Topic Scout background collection failed", exc_info=True)
+            return False
+
+    async def _run_topic_pool_pulse(self, *, now: datetime | None = None) -> bool:
+        """Reserve and enqueue at most one due proactive topic turn."""
+
+        store = self._topic_pool_store_instance()
+        try:
+            reservation = await asyncio.to_thread(
+                store.reserve_due_delivery,
+                now=now or self._topic_pool_now(),
+            )
+        except Exception:
+            logger.debug("Topic Pool reservation failed", exc_info=True)
+            return False
+        if reservation is None:
+            return False
+        try:
+            from honeyos.companion.topic_delivery import build_proactive_event
+            from honeyos.gateway.session import SessionSource
+
+            source = SessionSource.from_dict(reservation.channel.source)
+            adapter = self._adapter_for_source(source)
+            session_key = self._session_key_for_source(source)
+            if adapter is None or not session_key:
+                await asyncio.to_thread(
+                    store.finish_delivery,
+                    reservation.delivery_id,
+                    success=False,
+                    error="recent channel is unavailable",
+                )
+                return False
+            if not bool(getattr(adapter, "supports_async_delivery", True)):
+                # The browser claims topics only while its local page is open.
+                # A request/response adapter has no channel to push into here.
+                await asyncio.to_thread(
+                    store.finish_delivery,
+                    reservation.delivery_id,
+                    success=False,
+                    error="recent channel requires an active client",
+                )
+                return False
+            if session_key in getattr(self, "_running_agents", {}):
+                await asyncio.to_thread(
+                    store.finish_delivery,
+                    reservation.delivery_id,
+                    success=False,
+                    error="recent conversation is busy",
+                )
+                return False
+            event = build_proactive_event(reservation, source)
+            self._enqueue_fifo(session_key, event, adapter)
+            return True
+        except Exception:
+            logger.warning("Topic Pool enqueue failed", exc_info=True)
+            await asyncio.to_thread(
+                store.finish_delivery,
+                reservation.delivery_id,
+                success=False,
+                error="enqueue failed",
+            )
+            return False
+
+    async def _finish_proactive_topic_event(
+        self,
+        event: "MessageEvent",
+        *,
+        success: bool,
+        error: str = "",
+    ) -> bool:
+        try:
+            from honeyos.companion.topic_delivery import is_proactive_topic_event
+
+            if not is_proactive_topic_event(event):
+                return False
+            delivery_id = str(
+                (getattr(event, "metadata", None) or {}).get(
+                    "honeyos_proactive_delivery_id"
+                )
+                or ""
+            )
+            if not delivery_id:
+                return False
+            return bool(
+                await asyncio.to_thread(
+                    self._topic_pool_store_instance().finish_delivery,
+                    delivery_id,
+                    success=success,
+                    error=error,
+                )
+            )
+        except Exception:
+            logger.debug("Topic Pool delivery finalization failed", exc_info=True)
+            return False
+
+    async def _register_proactive_topic_delivery_completion(
+        self,
+        *,
+        event: "MessageEvent",
+        source: Any,
+        session_key: str,
+        run_generation: int,
+        agent_result: Any,
+    ) -> None:
+        try:
+            from honeyos.companion.topic_delivery import is_proactive_topic_event
+
+            if not is_proactive_topic_event(event):
+                return
+            if isinstance(agent_result, dict):
+                final_text = str(agent_result.get("final_response") or "")
+            else:
+                final_text = str(agent_result or "")
+            if not final_text.strip():
+                await self._finish_proactive_topic_event(
+                    event,
+                    success=False,
+                    error="companion produced no visible message",
+                )
+                return
+            adapter = self._adapter_for_source(source)
+
+            async def _mark_delivered() -> None:
+                await self._finish_proactive_topic_event(event, success=True)
+
+            if adapter and hasattr(adapter, "register_post_delivery_callback"):
+                adapter.register_post_delivery_callback(
+                    session_key,
+                    _mark_delivered,
+                    generation=run_generation,
+                )
+                return
+            await _mark_delivered()
+        except Exception:
+            await self._finish_proactive_topic_event(
+                event,
+                success=False,
+                error="delivery callback registration failed",
+            )
+
+    def _start_topic_pool_poller(self) -> None:
+        """Start the durable Scout/pulse loop once for a HoneyOS gateway."""
+
+        existing = getattr(self, "_topic_pool_poll_task", None)
+        if existing is not None and not existing.done():
+            return
+
+        async def _poll_loop() -> None:
+            # Give adapters and session restore a chance to settle before the
+            # first background check.
+            await asyncio.sleep(10)
+            while True:
+                await self._run_topic_collection_if_due()
+                await self._run_topic_pool_pulse()
+                await asyncio.sleep(60)
+
+        try:
+            task = asyncio.create_task(_poll_loop())
+            self._topic_pool_poll_task = task
+            background = getattr(self, "_background_tasks", None)
+            if background is not None:
+                background.add(task)
+                task.add_done_callback(background.discard)
+        except Exception:
+            logger.debug("Failed to start Topic Pool poller", exc_info=True)
 
 
 
@@ -25235,11 +25525,14 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                             _status_detail = " — " + ", ".join(_parts)
                     except Exception:
                         pass
-                _heartbeat_text = (
-                    _generic_status_phrase("status")
-                    if _long_running_mode == "generic"
-                    else f"⏳ Working — {_elapsed_mins} min{_status_detail}"
-                )
+                if _is_honeyos_runtime():
+                    _heartbeat_text = long_running_acknowledgement()
+                else:
+                    _heartbeat_text = (
+                        _generic_status_phrase("status")
+                        if _long_running_mode == "generic"
+                        else f"⏳ Working — {_elapsed_mins} min{_status_detail}"
+                    )
                 try:
                     _notify_res = None
                     if _heartbeat_msg_id:

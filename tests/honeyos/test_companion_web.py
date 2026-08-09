@@ -495,6 +495,43 @@ def test_api_server_registers_companion_web_routes():
     assert ("GET", "/honeyos/app.js") in routes
     assert ("GET", "/honeyos/styles.css") in routes
     assert ("GET", "/api/companion/bootstrap") in routes
+    assert ("GET", "/api/companion/topics") in routes
+    assert ("POST", "/api/companion/topics/{topic_id}/discuss") in routes
+    assert ("POST", "/api/companion/topics/{topic_id}/dismiss") in routes
+    assert ("GET", "/api/companion/proactive-preferences") in routes
+    assert ("POST", "/api/companion/proactive/claim") in routes
+    assert (
+        "POST",
+        "/api/companion/proactive/{delivery_id}/complete",
+    ) in routes
+
+
+def test_companion_web_message_records_real_recent_channel():
+    adapter = object.__new__(APIServerAdapter)
+    runner = MagicMock()
+    runner._record_topic_pool_channel_activity.return_value = True
+    adapter.gateway_runner = runner
+
+    assert adapter._record_companion_web_activity(companion_view=True) is True
+
+    event, source = runner._record_topic_pool_channel_activity.call_args.args
+    assert event.internal is False
+    assert source.platform == Platform.API_SERVER
+    assert source.chat_id == "local-owner"
+    assert source.chat_type == "dm"
+    assert source.user_id == "local-owner"
+    assert runner._record_topic_pool_channel_activity.call_args.kwargs == {
+        "is_internal": False
+    }
+
+
+def test_non_companion_api_message_does_not_change_recent_channel():
+    adapter = object.__new__(APIServerAdapter)
+    runner = MagicMock()
+    adapter.gateway_runner = runner
+
+    assert adapter._record_companion_web_activity(companion_view=False) is False
+    runner._record_topic_pool_channel_activity.assert_not_called()
 
 
 def test_local_web_cookie_auth_is_loopback_only():
@@ -579,6 +616,14 @@ async def test_companion_bootstrap_returns_only_safe_shared_chat_messages(
         },
         {"role": "tool", "content": "raw command output"},
         {"role": "assistant", "content": "查好了，给你看。", "tool_calls": None},
+        {
+            "role": "user",
+            "content": "[HoneyOS proactive topic seed; internal, not user-authored] hidden",
+        },
+        {
+            "role": "user",
+            "content": "[HoneyOS selected topic; user chose this card] hidden",
+        },
         {"role": "assistant", "content": None, "reasoning": "hidden"},
     ]
     adapter._ensure_session_db_async = AsyncMock(return_value=db)
@@ -603,6 +648,215 @@ async def test_companion_bootstrap_returns_only_safe_shared_chat_messages(
     assert "找到几个，我再看看。" not in response.text
     assert "reasoning" not in response.text
     assert "raw command output" not in response.text
+    assert "proactive topic seed" not in response.text
+    assert "selected topic" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_companion_topic_api_lists_safe_fields_and_handles_actions(
+    monkeypatch, tmp_path
+):
+    from datetime import datetime, timedelta, timezone
+
+    from honeyos.companion.topic_pool import TopicCandidate, TopicPoolStore
+
+    monkeypatch.setattr("honeyos.core.constants.get_honeyos_home", lambda: tmp_path)
+    now = datetime.now(timezone.utc)
+    store = TopicPoolStore(tmp_path, now_fn=lambda: now)
+    first, second = store.add_candidates(
+        [
+            TopicCandidate(
+                source_id="one",
+                source_title="Source one",
+                source_url="https://example.com/one",
+                source_name="Example",
+                summary="Verified one",
+                hook="Worth discussing one",
+                category="technology",
+                observed_at=now,
+                expires_at=now + timedelta(hours=24),
+                score=0.9,
+                selection_reason="must stay private",
+            ),
+            TopicCandidate(
+                source_id="two",
+                source_title="Source two",
+                source_url="https://example.com/two",
+                source_name="Example",
+                summary="Verified two",
+                hook="Worth discussing two",
+                category="science",
+                observed_at=now,
+                expires_at=now + timedelta(hours=24),
+                score=0.8,
+                selection_reason="must stay private too",
+            ),
+        ]
+    )
+    adapter = _api_adapter()
+    request = SimpleNamespace(
+        cookies={"honeyos_local": adapter._local_web_token},
+        remote="127.0.0.1",
+        headers={},
+        match_info={},
+    )
+
+    listed_response = await adapter._handle_companion_topics(request)
+    listed = json.loads(listed_response.text)
+
+    assert listed_response.status == 200
+    assert listed["topics"][0]["hook"] == "Worth discussing one"
+    assert "selection_reason" not in listed_response.text
+    assert "score" not in listed_response.text
+
+    request.match_info = {"topic_id": first.id}
+    discuss_response = await adapter._handle_companion_topic_discuss(request)
+    discussed = json.loads(discuss_response.text)
+    assert discussed["success"] is True
+    assert discussed["display_text"] == "这个我想听你聊聊"
+    assert discussed["prompt"].startswith(
+        "[HoneyOS selected topic; user chose this card]"
+    )
+    assert "https://example.com/one" in discussed["prompt"]
+
+    request.match_info = {"topic_id": second.id}
+    dismiss_response = await adapter._handle_companion_topic_dismiss(request)
+    assert json.loads(dismiss_response.text) == {
+        "success": True,
+        "topic_id": second.id,
+        "status": "dismissed",
+    }
+
+
+@pytest.mark.asyncio
+async def test_companion_topic_api_rejects_remote_cookie_request():
+    adapter = _api_adapter()
+    request = SimpleNamespace(
+        cookies={"honeyos_local": adapter._local_web_token},
+        remote="192.168.1.20",
+        headers={},
+        match_info={},
+    )
+
+    response = await adapter._handle_companion_topics(request)
+
+    assert response.status == 401
+
+
+@pytest.mark.asyncio
+async def test_companion_web_claims_and_completes_due_proactive_topic(
+    monkeypatch, tmp_path
+):
+    from datetime import datetime, timedelta, timezone
+
+    from honeyos.companion.topic_pool import TopicCandidate, TopicPoolStore
+
+    monkeypatch.setattr("honeyos.core.constants.get_honeyos_home", lambda: tmp_path)
+    now = datetime.now(timezone.utc)
+    store = TopicPoolStore(tmp_path, now_fn=lambda: now)
+    store.update_preferences(
+        consent_asked=True,
+        consented=True,
+        quiet_start="00:00",
+        quiet_end="00:00",
+    )
+    source = SessionSource(
+        platform=Platform.API_SERVER,
+        chat_id="local-owner",
+        chat_type="dm",
+        user_id="local-owner",
+    )
+    store.record_channel_activity(source.to_dict(), at=now - timedelta(hours=3))
+    item = store.add_candidates(
+        [
+            TopicCandidate(
+                source_id="web-one",
+                source_title="Source",
+                source_url="https://example.com/web",
+                source_name="Example",
+                summary="Verified summary",
+                hook="This reminded me of you",
+                category="technology",
+                observed_at=now,
+                expires_at=now + timedelta(hours=24),
+                score=0.9,
+            )
+        ]
+    )[0]
+    adapter = _api_adapter()
+    request = SimpleNamespace(
+        cookies={"honeyos_local": adapter._local_web_token},
+        remote="127.0.0.1",
+        headers={},
+        match_info={},
+    )
+
+    claim_response = await adapter._handle_companion_proactive_claim(request)
+    claimed = json.loads(claim_response.text)
+
+    assert claimed["delivery"]["topic_id"] == item.id
+    assert claimed["delivery"]["prompt"].startswith(
+        "[HoneyOS proactive topic seed;"
+    )
+    assert store.get_topic(item.id).status == "reserved"
+
+    request.match_info = {"delivery_id": claimed["delivery"]["id"]}
+    adapter._read_json_body = AsyncMock(return_value=({"success": True}, None))
+    complete_response = await adapter._handle_companion_proactive_complete(request)
+
+    assert json.loads(complete_response.text)["success"] is True
+    assert store.get_topic(item.id).status == "consumed"
+
+
+@pytest.mark.asyncio
+async def test_companion_web_does_not_claim_topic_for_another_recent_channel(
+    monkeypatch, tmp_path
+):
+    from datetime import datetime, timedelta, timezone
+
+    from honeyos.companion.topic_pool import TopicCandidate, TopicPoolStore
+
+    monkeypatch.setattr("honeyos.core.constants.get_honeyos_home", lambda: tmp_path)
+    now = datetime.now(timezone.utc)
+    store = TopicPoolStore(tmp_path, now_fn=lambda: now)
+    store.update_preferences(
+        consent_asked=True,
+        consented=True,
+        quiet_start="00:00",
+        quiet_end="00:00",
+    )
+    store.record_channel_activity(
+        _dm(Platform.FEISHU, "owner").to_dict(),
+        at=now - timedelta(hours=3),
+    )
+    store.add_candidates(
+        [
+            TopicCandidate(
+                source_id="feishu-one",
+                source_title="Source",
+                source_url="https://example.com/feishu",
+                source_name="Example",
+                summary="Verified",
+                hook="Worth a chat",
+                category="technology",
+                observed_at=now,
+                expires_at=now + timedelta(hours=24),
+                score=0.9,
+            )
+        ]
+    )
+    adapter = _api_adapter()
+    request = SimpleNamespace(
+        cookies={"honeyos_local": adapter._local_web_token},
+        remote="127.0.0.1",
+        headers={},
+        match_info={},
+    )
+
+    response = await adapter._handle_companion_proactive_claim(request)
+
+    assert json.loads(response.text) == {"delivery": None}
+    assert store.list_open_topics()[0].status == "open"
 
 
 @pytest.mark.asyncio
