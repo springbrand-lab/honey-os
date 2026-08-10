@@ -67,3 +67,13 @@ def test_companion_product_shell_uses_real_memory_profile_and_history_apis():
     assert '"/messages"' in script
     assert "companionData.memories" in script
     assert ".innerHTML" not in script
+
+
+def test_companion_memory_page_names_and_filters_durable_memories():
+    page = (ASSETS / "index.html").read_text(encoding="utf-8")
+    script = (ASSETS / "app.js").read_text(encoding="utf-8")
+
+    assert 'data-memory-filter="long_term_memory"' in page
+    assert 'long_term_memory: "长期记忆"' in script
+    assert 'persistent_memory: "来自长期记忆"' in script
+    assert 'persistent_user: "来自对你的了解"' in script

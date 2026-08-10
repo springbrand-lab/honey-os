@@ -2397,6 +2397,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 messages.append({"role": role, "content": text})
 
         from honeyos.companion.continuity import StructuredMemoryStore
+        from honeyos.companion.persistent_memory import list_persistent_memories
         from honeyos.companion.profile import load_companion_profile
         from honeyos.companion.web import companion_profile
         from honeyos.core.constants import get_honeyos_home
@@ -2404,10 +2405,15 @@ class APIServerAdapter(BasePlatformAdapter):
         home = get_honeyos_home()
         lane_key = build_session_key(source)
         managed_profile = load_companion_profile(home)
-        memory_items = await asyncio.to_thread(
+        structured_memory_items = await asyncio.to_thread(
             StructuredMemoryStore(home).list_active,
             lane_key=lane_key,
         )
+        persistent_memory_items = await asyncio.to_thread(
+            list_persistent_memories,
+            home,
+        )
+        memory_items = (*persistent_memory_items, *structured_memory_items)
         history = []
         if db is not None:
             try:
@@ -2508,6 +2514,7 @@ class APIServerAdapter(BasePlatformAdapter):
             )
 
         from honeyos.companion.continuity import StructuredMemoryStore
+        from honeyos.companion.persistent_memory import forget_persistent_memory
         from honeyos.core.constants import get_honeyos_home
         from honeyos.gateway.session import SessionSource, build_session_key
 
@@ -2518,12 +2525,28 @@ class APIServerAdapter(BasePlatformAdapter):
             user_id="local-owner",
             user_name="主人",
         )
-        changed = await asyncio.to_thread(
-            StructuredMemoryStore(get_honeyos_home()).change_status,
-            lane_key=build_session_key(source),
-            item_id=memory_id,
-            action=action,
-        )
+        home = get_honeyos_home()
+        if memory_id.startswith("persistent_"):
+            if action != "forget":
+                return web.json_response(
+                    _openai_error(
+                        "Long-term memory can only be forgotten",
+                        code="invalid_memory_action",
+                    ),
+                    status=400,
+                )
+            changed = await asyncio.to_thread(
+                forget_persistent_memory,
+                home,
+                memory_id,
+            )
+        else:
+            changed = await asyncio.to_thread(
+                StructuredMemoryStore(home).change_status,
+                lane_key=build_session_key(source),
+                item_id=memory_id,
+                action=action,
+            )
         if not changed:
             return web.json_response(
                 _openai_error("Memory is no longer active", code="memory_unavailable"),

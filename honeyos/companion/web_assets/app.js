@@ -116,6 +116,7 @@ function formatDate(value, options = {}) {
 
 function memoryKindLabel(kind) {
   return {
+    long_term_memory: "长期记忆",
     temporary_state: "最近",
     commitment: "答应过的",
     episode: "共同经历",
@@ -125,6 +126,8 @@ function memoryKindLabel(kind) {
 
 function memoryEvidenceLabel(evidence) {
   return {
+    persistent_memory: "来自长期记忆",
+    persistent_user: "来自对你的了解",
     user_stated: "来自你明确说过的话",
     assistant_committed: "来自它明确答应过的话",
     conversation_event: "来自真实发生的聊天",
@@ -132,6 +135,7 @@ function memoryEvidenceLabel(evidence) {
 }
 
 function memoryExpiryLabel(memory) {
+  if (memory.kind === "long_term_memory") return "会一直记得";
   if (!memory.expires_at) return memory.kind === "episode" ? "会长期保留" : "没有设置到期时间";
   return "有效至 " + formatDate(memory.expires_at, { withTime: false });
 }

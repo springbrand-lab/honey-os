@@ -599,6 +599,10 @@ async def test_companion_bootstrap_returns_only_safe_shared_chat_messages(
         "名字：阿凛\n性格：冷静",
         encoding="utf-8",
     )
+    (tmp_path / "memories" / "MEMORY.md").write_text(
+        "用户喜欢晚上散步。",
+        encoding="utf-8",
+    )
 
     adapter = _api_adapter()
     store = SimpleNamespace(
@@ -648,6 +652,10 @@ async def test_companion_bootstrap_returns_only_safe_shared_chat_messages(
         {"role": "assistant", "content": "在呢。"},
         {"role": "assistant", "content": "查好了，给你看。"},
     ]
+    assert len(payload["memories"]) == 1
+    assert payload["memories"][0]["kind"] == "long_term_memory"
+    assert payload["memories"][0]["content"] == "用户喜欢晚上散步。"
+    assert payload["memories"][0]["evidence"] == "persistent_memory"
     assert "找到几个，我再看看。" not in response.text
     assert "reasoning" not in response.text
     assert "raw command output" not in response.text
@@ -685,6 +693,34 @@ async def test_companion_memory_action_updates_only_the_owner_lane(monkeypatch, 
 
     assert response.status == 200
     assert StructuredMemoryStore(tmp_path).list_active(lane_key=lane_key) == ()
+
+
+@pytest.mark.asyncio
+async def test_companion_memory_action_forgets_the_real_persistent_entry(
+    monkeypatch, tmp_path
+):
+    from honeyos.companion.persistent_memory import list_persistent_memories
+
+    monkeypatch.setattr("honeyos.core.constants.get_honeyos_home", lambda: tmp_path)
+    memory_dir = tmp_path / "memories"
+    memory_dir.mkdir()
+    memory_path = memory_dir / "MEMORY.md"
+    memory_path.write_text("第一条。\n§\n第二条。", encoding="utf-8")
+    first, second = list_persistent_memories(tmp_path)
+
+    adapter = _api_adapter()
+    adapter._read_json_body = AsyncMock(return_value=({"action": "forget"}, None))
+    request = SimpleNamespace(
+        cookies={"honeyos_local": adapter._local_web_token},
+        remote="127.0.0.1",
+        headers={},
+        match_info={"memory_id": first.id},
+    )
+
+    response = await adapter._handle_companion_memory_action(request)
+
+    assert response.status == 200
+    assert memory_path.read_text(encoding="utf-8") == second.content
 
 
 @pytest.mark.asyncio
