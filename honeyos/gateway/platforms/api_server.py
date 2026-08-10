@@ -2154,6 +2154,13 @@ class APIServerAdapter(BasePlatformAdapter):
             ("GET", "/honeyos/app.js", self._handle_companion_script),
             ("GET", "/honeyos/styles.css", self._handle_companion_styles),
             ("GET", "/api/companion/bootstrap", self._handle_companion_bootstrap),
+            ("POST", "/api/companion/new", self._handle_companion_new),
+            ("POST", "/api/companion/profile", self._handle_companion_profile_update),
+            (
+                "POST",
+                "/api/companion/memories/{memory_id}",
+                self._handle_companion_memory_action,
+            ),
             ("GET", "/api/companion/topics", self._handle_companion_topics),
             (
                 "POST",
@@ -2389,15 +2396,273 @@ class APIServerAdapter(BasePlatformAdapter):
             if text:
                 messages.append({"role": role, "content": text})
 
+        from honeyos.companion.continuity import StructuredMemoryStore
+        from honeyos.companion.profile import load_companion_profile
         from honeyos.companion.web import companion_profile
         from honeyos.core.constants import get_honeyos_home
 
+        home = get_honeyos_home()
+        lane_key = build_session_key(source)
+        managed_profile = load_companion_profile(home)
+        memory_items = await asyncio.to_thread(
+            StructuredMemoryStore(home).list_active,
+            lane_key=lane_key,
+        )
+        history = []
+        if db is not None:
+            try:
+                session_rows = await asyncio.to_thread(
+                    db.list_sessions_rich,
+                    session_key=lane_key,
+                    limit=30,
+                    order_by_last_active=True,
+                )
+                history = [
+                    {
+                        "id": str(row.get("id") or ""),
+                        "title": str(row.get("title") or "").strip(),
+                        "preview": str(row.get("preview") or "").strip(),
+                        "started_at": row.get("started_at"),
+                        "last_active": row.get("last_active"),
+                        "message_count": int(row.get("message_count") or 0),
+                        "is_current": str(row.get("id") or "") == entry.session_id,
+                    }
+                    for row in session_rows
+                    if row.get("id")
+                ]
+            except Exception:
+                logger.debug("Failed to load companion conversation history", exc_info=True)
+
+        def _memory_payload(item: Any) -> Dict[str, Any]:
+            return {
+                "id": item.id,
+                "kind": item.kind,
+                "content": item.content,
+                "status": item.status,
+                "evidence": item.evidence,
+                "importance": item.importance,
+                "created_by": item.created_by,
+                "source_session_id": item.source_session_id,
+                "source_message_ids": list(item.source_message_ids),
+                "created_at": item.created_at.isoformat(),
+                "updated_at": item.updated_at.isoformat(),
+                "expires_at": item.expires_at.isoformat() if item.expires_at else None,
+            }
+
+        distillation_model = "auto"
+        try:
+            from honeyos.runtime.config import load_config_readonly
+
+            config = load_config_readonly() or {}
+            auxiliary = config.get("auxiliary", {})
+            task = (
+                auxiliary.get("memory_distillation", {})
+                if isinstance(auxiliary, dict)
+                else {}
+            )
+            configured_model = task.get("model") if isinstance(task, dict) else None
+            if isinstance(configured_model, str) and configured_model.strip():
+                distillation_model = configured_model.strip()
+        except Exception:
+            logger.debug("Failed to read companion distillation model", exc_info=True)
+
         return web.json_response(
             {
-                "profile": companion_profile(get_honeyos_home()),
+                "profile": companion_profile(home),
+                "profile_details": {
+                    "companion_name": managed_profile.companion_name,
+                    "personality": managed_profile.personality,
+                    "speaking_style": managed_profile.speaking_style,
+                    "user_nickname": managed_profile.user_nickname,
+                    "relationship": managed_profile.relationship,
+                    "boundaries": managed_profile.boundaries,
+                },
                 "session_id": entry.session_id,
-                "session_key": build_session_key(source),
+                "session_key": lane_key,
                 "messages": messages,
+                "memories": [_memory_payload(item) for item in memory_items],
+                "history": history,
+                "settings": {
+                    "memory_location": "local",
+                    "conversation_model": str(self._model_name or ""),
+                    "distillation_model": distillation_model,
+                },
+            }
+        )
+
+    async def _handle_companion_memory_action(
+        self, request: "web.Request"
+    ) -> "web.Response":
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+        memory_id = str(request.match_info.get("memory_id") or "").strip()
+        body, err = await self._read_json_body(request)
+        if err:
+            return err
+        action = str(body.get("action") or "").strip().lower()
+        if action not in {"resolve", "forget"}:
+            return web.json_response(
+                _openai_error("Unsupported memory action", code="invalid_memory_action"),
+                status=400,
+            )
+
+        from honeyos.companion.continuity import StructuredMemoryStore
+        from honeyos.core.constants import get_honeyos_home
+        from honeyos.gateway.session import SessionSource, build_session_key
+
+        source = SessionSource(
+            platform=Platform.API_SERVER,
+            chat_id="local-owner",
+            chat_type="dm",
+            user_id="local-owner",
+            user_name="主人",
+        )
+        changed = await asyncio.to_thread(
+            StructuredMemoryStore(get_honeyos_home()).change_status,
+            lane_key=build_session_key(source),
+            item_id=memory_id,
+            action=action,
+        )
+        if not changed:
+            return web.json_response(
+                _openai_error("Memory is no longer active", code="memory_unavailable"),
+                status=404,
+            )
+        return web.json_response({"success": True, "id": memory_id, "action": action})
+
+    async def _handle_companion_profile_update(
+        self, request: "web.Request"
+    ) -> "web.Response":
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+        body, err = await self._read_json_body(request)
+        if err:
+            return err
+        allowed = {
+            "companion_name",
+            "personality",
+            "speaking_style",
+            "user_nickname",
+            "relationship",
+            "boundaries",
+        }
+        unknown = sorted(set(body) - allowed)
+        if unknown:
+            return web.json_response(
+                _openai_error(
+                    f"Unsupported profile fields: {', '.join(unknown)}",
+                    code="unsupported_profile_field",
+                ),
+                status=400,
+            )
+        try:
+            from honeyos.companion.profile import update_companion_profile
+            from honeyos.core.constants import get_honeyos_home
+
+            updated = await asyncio.to_thread(
+                update_companion_profile,
+                get_honeyos_home(),
+                companion_name=body.get("companion_name"),
+                personality=body.get("personality"),
+                speaking_style=body.get("speaking_style"),
+                user_nickname=body.get("user_nickname"),
+                relationship=body.get("relationship"),
+                boundaries=body.get("boundaries"),
+                source="user_explicit",
+            )
+        except ValueError as exc:
+            return web.json_response(
+                _openai_error(str(exc), code="invalid_profile"),
+                status=400,
+            )
+        return web.json_response(
+            {
+                "success": True,
+                "profile": {
+                    "companion_name": updated.companion_name,
+                    "personality": updated.personality,
+                    "speaking_style": updated.speaking_style,
+                    "user_nickname": updated.user_nickname,
+                    "relationship": updated.relationship,
+                    "boundaries": updated.boundaries,
+                },
+            }
+        )
+
+    async def _handle_companion_new(
+        self, request: "web.Request"
+    ) -> "web.Response":
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+        runner = self.gateway_runner or request.app.get("gateway_runner")
+        session_store = getattr(runner, "async_session_store", None)
+        if session_store is None:
+            return web.json_response(
+                _openai_error(
+                    "Companion session store is unavailable",
+                    code="companion_session_unavailable",
+                ),
+                status=503,
+            )
+
+        from honeyos.gateway.session import SessionSource, build_session_key
+
+        source = SessionSource(
+            platform=Platform.API_SERVER,
+            chat_id="local-owner",
+            chat_type="dm",
+            user_id="local-owner",
+            user_name="主人",
+        )
+        lane_key = build_session_key(source)
+        old_entry = await session_store.get_or_create_session(source)
+        transcript = []
+        try:
+            transcript = await session_store.load_transcript(
+                old_entry.session_id,
+                include_row_ids=True,
+            )
+        except Exception:
+            logger.debug("Failed to capture companion handoff transcript", exc_info=True)
+        new_entry = await session_store.reset_session(lane_key)
+        if new_entry is None:
+            new_entry = await session_store.get_or_create_session(source, force_new=True)
+
+        if old_entry and new_entry and transcript:
+            try:
+                from honeyos.companion.continuity import record_reset_handoff
+
+                await asyncio.to_thread(
+                    record_reset_handoff,
+                    lane_key=lane_key,
+                    chat_type="dm",
+                    source_session_id=old_entry.session_id,
+                    target_session_id=new_entry.session_id,
+                    messages=transcript,
+                )
+            except Exception:
+                logger.debug("Failed to save companion handoff", exc_info=True)
+            scheduler = getattr(runner, "_schedule_honeyos_memory_distillation", None)
+            if callable(scheduler):
+                try:
+                    scheduler(
+                        lane_key=lane_key,
+                        chat_type="dm",
+                        session_id=old_entry.session_id,
+                        messages=transcript,
+                        reason="new",
+                        main_runtime=None,
+                    )
+                except Exception:
+                    logger.debug("Failed to schedule companion /new distillation", exc_info=True)
+        return web.json_response(
+            {
+                "success": True,
+                "session_id": new_entry.session_id,
+                "session_key": lane_key,
             }
         )
 

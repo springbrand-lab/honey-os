@@ -13,6 +13,19 @@ def test_topic_pool_drawer_has_accessible_controls_and_relationship_copy():
     assert "想聊这个" not in page  # actions are rendered from live topic data
 
 
+def test_companion_product_shell_exposes_user_facing_memory_and_relationship_pages():
+    page = (ASSETS / "index.html").read_text(encoding="utf-8")
+
+    assert 'data-view="chat"' in page
+    assert 'data-view="memories"' in page
+    assert 'data-view="relationship"' in page
+    assert 'data-view="history"' in page
+    assert 'data-view="settings"' in page
+    assert "它记得的事" in page
+    assert "双方明确说过的" in page
+    assert "记忆保存在本地" in page
+
+
 def test_topic_pool_script_uses_safe_dom_and_separate_visible_chat_copy():
     script = (ASSETS / "app.js").read_text(encoding="utf-8")
 
@@ -43,3 +56,14 @@ def test_busy_web_chat_queues_followups_instead_of_dropping_them():
     assert "这句我也看见了，等我把上一句弄完。" in script
     assert "if (!text || sending) return" not in script
     assert "elements.send.disabled = true" not in script
+
+
+def test_companion_product_shell_uses_real_memory_profile_and_history_apis():
+    script = (ASSETS / "app.js").read_text(encoding="utf-8")
+
+    assert '"/api/companion/profile"' in script
+    assert '"/api/companion/new"' in script
+    assert '"/api/companion/memories/"' in script
+    assert '"/messages"' in script
+    assert "companionData.memories" in script
+    assert ".innerHTML" not in script

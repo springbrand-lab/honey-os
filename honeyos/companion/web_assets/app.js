@@ -21,6 +21,25 @@ const elements = {
   topicPoolList: document.querySelector("#topic-pool-list"),
   topicPoolClose: document.querySelector("#topic-pool-close"),
   topicPoolBackdrop: document.querySelector("#topic-pool-backdrop"),
+  views: Array.from(document.querySelectorAll("[data-view]")),
+  viewButtons: Array.from(document.querySelectorAll("[data-view-target]")),
+  navigationItems: Array.from(document.querySelectorAll(".navigation-item")),
+  memoryList: document.querySelector("#memory-list"),
+  memoryCount: document.querySelector("#memory-count"),
+  memoryTabs: Array.from(document.querySelectorAll("[data-memory-filter]")),
+  profileForm: document.querySelector("#profile-form"),
+  profileFormStatus: document.querySelector("#profile-form-status"),
+  relationshipSummary: document.querySelector("#relationship-summary"),
+  relationshipNickname: document.querySelector("#relationship-nickname"),
+  relationshipAvatar: document.querySelector("#relationship-companion-avatar"),
+  historyList: document.querySelector("#history-list"),
+  historyPreview: document.querySelector("#history-preview"),
+  historySearch: document.querySelector("#history-search"),
+  newChatButton: document.querySelector("#new-chat-button"),
+  conversationModel: document.querySelector("#conversation-model"),
+  distillationModel: document.querySelector("#distillation-model"),
+  proactiveSetting: document.querySelector("#proactive-setting"),
+  toast: document.querySelector("#app-toast"),
 };
 
 let sessionId = "";
@@ -35,6 +54,360 @@ let actionTrailExpanded = false;
 let topicPoolOpen = false;
 let topicPoolLoading = false;
 let proactivePollTimer = null;
+let activeView = "chat";
+let memoryFilter = "all";
+let companionData = {
+  memories: [],
+  history: [],
+  profile: {},
+  settings: {},
+};
+let toastTimer = null;
+
+function showToast(message) {
+  if (!elements.toast) return;
+  window.clearTimeout(toastTimer);
+  elements.toast.textContent = message;
+  elements.toast.hidden = false;
+  requestAnimationFrame(() => { elements.toast.dataset.visible = "true"; });
+  toastTimer = window.setTimeout(() => {
+    elements.toast.dataset.visible = "false";
+    window.setTimeout(() => { elements.toast.hidden = true; }, 180);
+  }, 2600);
+}
+
+function openView(viewName) {
+  const target = elements.views.find((view) => view.dataset.view === viewName);
+  if (!target) return;
+  activeView = viewName;
+  for (const view of elements.views) {
+    view.classList.toggle("is-active", view === target);
+  }
+  for (const item of elements.navigationItems) {
+    item.classList.toggle("is-active", item.dataset.viewTarget === viewName);
+  }
+  document.body.dataset.activeView = viewName;
+  if (viewName === "chat") {
+    requestAnimationFrame(() => {
+      scrollToLatest(true);
+      elements.input?.focus();
+    });
+  }
+}
+
+function formatDate(value, options = {}) {
+  if (value === null || value === undefined || value === "") return "";
+  const numeric = Number(value);
+  const date = Number.isFinite(numeric)
+    ? new Date(numeric < 10_000_000_000 ? numeric * 1000 : numeric)
+    : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const now = new Date();
+  if (options.relative && date.toDateString() === now.toDateString()) return "今天";
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (options.relative && date.toDateString() === yesterday.toDateString()) return "昨天";
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    ...(options.withTime ? { hour: "2-digit", minute: "2-digit" } : {}),
+  }).format(date);
+}
+
+function memoryKindLabel(kind) {
+  return {
+    temporary_state: "最近",
+    commitment: "答应过的",
+    episode: "共同经历",
+    open_loop: "待续",
+  }[kind] || "记忆";
+}
+
+function memoryEvidenceLabel(evidence) {
+  return {
+    user_stated: "来自你明确说过的话",
+    assistant_committed: "来自它明确答应过的话",
+    conversation_event: "来自真实发生的聊天",
+  }[evidence] || "来自你们的聊天";
+}
+
+function memoryExpiryLabel(memory) {
+  if (!memory.expires_at) return memory.kind === "episode" ? "会长期保留" : "没有设置到期时间";
+  return "有效至 " + formatDate(memory.expires_at, { withTime: false });
+}
+
+function emptyPageState(title, copy) {
+  const state = document.createElement("div");
+  state.className = "page-empty-state";
+  const mark = document.createElement("span");
+  mark.setAttribute("aria-hidden", "true");
+  mark.textContent = "◇";
+  const heading = document.createElement("strong");
+  heading.textContent = title;
+  const text = document.createElement("p");
+  text.textContent = copy;
+  state.append(mark, heading, text);
+  return state;
+}
+
+async function updateMemory(memory, action, button) {
+  button.disabled = true;
+  try {
+    const response = await fetch(
+      "/api/companion/memories/" + encodeURIComponent(memory.id),
+      {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      },
+    );
+    if (!response.ok) throw new Error("memory_unavailable");
+    companionData.memories = companionData.memories.filter((item) => item.id !== memory.id);
+    renderMemories();
+    showToast(action === "resolve" ? "已经标记为完成" : "这件事已经忘记了");
+  } catch {
+    button.disabled = false;
+    showToast("刚才没有改成功，请稍后再试");
+  }
+}
+
+function renderMemoryCard(memory) {
+  const card = document.createElement("article");
+  card.className = "memory-card";
+  card.dataset.kind = memory.kind;
+
+  const header = document.createElement("div");
+  header.className = "memory-card-header";
+  const kind = document.createElement("span");
+  kind.className = "memory-kind";
+  kind.textContent = memoryKindLabel(memory.kind);
+  const expiry = document.createElement("span");
+  expiry.className = "memory-expiry";
+  expiry.textContent = memoryExpiryLabel(memory);
+  header.append(kind, expiry);
+
+  const content = document.createElement("h2");
+  content.textContent = memory.content;
+  const provenance = document.createElement("p");
+  provenance.className = "memory-provenance";
+  const sourceDate = formatDate(memory.created_at);
+  provenance.textContent = memoryEvidenceLabel(memory.evidence) + (sourceDate ? " · " + sourceDate : "");
+
+  const actions = document.createElement("div");
+  actions.className = "memory-actions";
+  if (memory.kind === "open_loop" || memory.kind === "commitment") {
+    const resolve = document.createElement("button");
+    resolve.type = "button";
+    resolve.className = "memory-primary-action";
+    resolve.textContent = "已经完成";
+    resolve.addEventListener("click", () => void updateMemory(memory, "resolve", resolve));
+    actions.append(resolve);
+  }
+  const forget = document.createElement("button");
+  forget.type = "button";
+  forget.className = "memory-quiet-action";
+  forget.textContent = "忘记";
+  forget.addEventListener("click", () => void updateMemory(memory, "forget", forget));
+  actions.append(forget);
+
+  card.append(header, content, provenance, actions);
+  return card;
+}
+
+function renderMemories() {
+  if (!elements.memoryList) return;
+  const memories = companionData.memories.filter(
+    (memory) => memoryFilter === "all" || memory.kind === memoryFilter,
+  );
+  if (elements.memoryCount) {
+    elements.memoryCount.textContent = String(companionData.memories.length);
+    elements.memoryCount.hidden = companionData.memories.length === 0;
+  }
+  if (!memories.length) {
+    elements.memoryList.replaceChildren(
+      emptyPageState(
+        memoryFilter === "all" ? "还没有整理出需要延续的事情" : "这一类暂时是空的",
+        "继续自然地聊天就好。值得留下的内容会慢慢出现在这里。",
+      ),
+    );
+    return;
+  }
+  elements.memoryList.replaceChildren(...memories.map(renderMemoryCard));
+}
+
+function fillProfileForm(profile) {
+  if (!elements.profileForm) return;
+  for (const key of [
+    "companion_name",
+    "personality",
+    "speaking_style",
+    "user_nickname",
+    "relationship",
+    "boundaries",
+  ]) {
+    const field = elements.profileForm.elements.namedItem(key);
+    if (field) field.value = profile[key] || "";
+  }
+  elements.relationshipSummary.textContent = profile.relationship || "正在认识彼此";
+  elements.relationshipNickname.textContent = profile.user_nickname
+    ? "它会叫你“" + profile.user_nickname + "”"
+    : "称呼可以由你决定";
+}
+
+async function saveProfile(event) {
+  event.preventDefault();
+  const submit = elements.profileForm.querySelector('button[type="submit"]');
+  submit.disabled = true;
+  elements.profileFormStatus.textContent = "正在保存";
+  const body = {};
+  const formData = new FormData(elements.profileForm);
+  for (const [key, value] of formData.entries()) body[key] = String(value).trim();
+  try {
+    const response = await fetch("/api/companion/profile", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error?.message || "profile_unavailable");
+    companionData.profile = data.profile || body;
+    fillProfileForm(companionData.profile);
+    const name = companionData.profile.companion_name || "Honey";
+    companionAvatarLabel = Array.from(name)[0] || "H";
+    elements.name.textContent = name;
+    elements.avatar.textContent = companionAvatarLabel;
+    elements.statusAvatar.textContent = companionAvatarLabel;
+    elements.relationshipAvatar.textContent = companionAvatarLabel;
+    elements.profileFormStatus.textContent = "已保存";
+    showToast("你们的资料已经更新");
+  } catch (error) {
+    elements.profileFormStatus.textContent = error instanceof Error ? error.message : "保存失败";
+  } finally {
+    submit.disabled = false;
+  }
+}
+
+function historyTitle(item) {
+  if (item.is_current) return item.title || "正在进行的聊天";
+  if (item.title) return item.title;
+  if (item.preview) return item.preview.length > 28 ? item.preview.slice(0, 28) + "…" : item.preview;
+  return "一段聊天";
+}
+
+function renderHistoryList(query = "") {
+  if (!elements.historyList) return;
+  const normalized = query.trim().toLowerCase();
+  const history = companionData.history.filter((item) => {
+    if (!normalized) return true;
+    return (item.title + " " + item.preview).toLowerCase().includes(normalized);
+  });
+  if (!history.length) {
+    elements.historyList.replaceChildren(
+      emptyPageState("没有找到相关聊天", "换个词再找找看。"),
+    );
+    return;
+  }
+  const rows = history.map((item) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "history-item";
+    const copy = document.createElement("span");
+    const title = document.createElement("strong");
+    title.textContent = historyTitle(item);
+    const preview = document.createElement("small");
+    preview.textContent = item.preview || (item.is_current ? "这段聊天刚刚开始" : "没有可显示的文字预览");
+    copy.append(title, preview);
+    const meta = document.createElement("em");
+    meta.textContent = (formatDate(item.last_active || item.started_at, { relative: true }) || "") + "  ›";
+    button.append(copy, meta);
+    button.addEventListener("click", () => void loadHistoryPreview(item, button));
+    return button;
+  });
+  elements.historyList.replaceChildren(...rows);
+}
+
+async function loadHistoryPreview(item, button) {
+  for (const row of elements.historyList.querySelectorAll(".history-item")) {
+    row.classList.toggle("is-active", row === button);
+  }
+  elements.historyPreview.replaceChildren(emptyPageState("正在打开", "我把这段聊天找出来。"));
+  try {
+    const response = await fetch(
+      "/api/sessions/" + encodeURIComponent(item.id) + "/messages",
+      { credentials: "same-origin" },
+    );
+    if (!response.ok) throw new Error("history_unavailable");
+    const data = await response.json();
+    const messages = (data.data || []).filter(
+      (message) => ["user", "assistant"].includes(message.role) && typeof message.content === "string",
+    );
+    const heading = document.createElement("header");
+    const title = document.createElement("h2");
+    title.textContent = historyTitle(item);
+    const meta = document.createElement("p");
+    meta.textContent = formatDate(item.last_active || item.started_at, { withTime: true });
+    heading.append(title, meta);
+    const transcript = document.createElement("div");
+    transcript.className = "history-transcript";
+    for (const message of messages) {
+      const bubble = document.createElement("p");
+      bubble.className = "history-message " + message.role;
+      bubble.textContent = message.content;
+      transcript.append(bubble);
+    }
+    if (!messages.length) transcript.append(emptyPageState("这段聊天没有可显示的消息", "工具过程不会出现在这里。"));
+    elements.historyPreview.replaceChildren(heading, transcript);
+  } catch {
+    elements.historyPreview.replaceChildren(emptyPageState("刚才没有打开", "稍后再试一次。"));
+  }
+}
+
+async function startNewConversation() {
+  if (!window.confirm("开启新的聊天窗口？之前的聊天仍会保留。")) return;
+  elements.newChatButton.disabled = true;
+  elements.newChatButton.textContent = "正在开启…";
+  try {
+    const response = await fetch("/api/companion/new", {
+      method: "POST",
+      credentials: "same-origin",
+    });
+    if (!response.ok) throw new Error("new_session_unavailable");
+    window.location.reload();
+  } catch {
+    elements.newChatButton.disabled = false;
+    elements.newChatButton.textContent = "＋ 开启新的聊天";
+    showToast("刚才没有开启成功，请稍后再试");
+  }
+}
+
+function hydrateCompanionPages(data) {
+  companionData.memories = Array.isArray(data.memories) ? data.memories : [];
+  companionData.history = Array.isArray(data.history) ? data.history : [];
+  companionData.profile = data.profile_details || {};
+  companionData.settings = data.settings || {};
+  renderMemories();
+  fillProfileForm(companionData.profile);
+  renderHistoryList();
+  const label = companionAvatarLabel;
+  if (elements.relationshipAvatar) elements.relationshipAvatar.textContent = label;
+  if (elements.conversationModel) {
+    elements.conversationModel.textContent = companionData.settings.conversation_model || "当前配置";
+  }
+  if (elements.distillationModel) {
+    elements.distillationModel.textContent = companionData.settings.distillation_model === "auto"
+      ? "跟随对话模型"
+      : companionData.settings.distillation_model || "跟随对话模型";
+  }
+  void fetch("/api/companion/proactive-preferences", { credentials: "same-origin" })
+    .then((response) => response.ok ? response.json() : null)
+    .then((payload) => {
+      if (!payload?.preferences || !elements.proactiveSetting) return;
+      elements.proactiveSetting.textContent = payload.preferences.enabled === false ? "已关闭" : "按当前规则";
+    })
+    .catch(() => {});
+}
 
 function isNearLatest() {
   const remaining =
@@ -468,6 +841,7 @@ async function bootstrap() {
   companionAvatarLabel = Array.from(data.profile.name || "H")[0];
   elements.avatar.textContent = companionAvatarLabel;
   elements.statusAvatar.textContent = companionAvatarLabel;
+  hydrateCompanionPages(data);
   for (const message of data.messages || []) {
     addMessage(message.role, message.content);
   }
@@ -815,8 +1189,28 @@ elements.scrollLatest.addEventListener("click", () => scrollToLatest(true));
 elements.topicPoolTrigger?.addEventListener("click", openTopicPool);
 elements.topicPoolClose?.addEventListener("click", closeTopicPool);
 elements.topicPoolBackdrop?.addEventListener("click", closeTopicPool);
+for (const button of elements.viewButtons) {
+  button.addEventListener("click", () => openView(button.dataset.viewTarget));
+}
+for (const tab of elements.memoryTabs) {
+  tab.addEventListener("click", () => {
+    memoryFilter = tab.dataset.memoryFilter || "all";
+    for (const item of elements.memoryTabs) item.classList.toggle("is-active", item === tab);
+    renderMemories();
+  });
+}
+elements.profileForm?.addEventListener("submit", saveProfile);
+elements.historySearch?.addEventListener("input", () => {
+  renderHistoryList(elements.historySearch.value);
+});
+elements.newChatButton?.addEventListener("click", () => void startNewConversation());
+for (const button of document.querySelectorAll("[data-coming-soon]")) {
+  button.addEventListener("click", () => showToast(button.dataset.comingSoon));
+}
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && topicPoolOpen) closeTopicPool();
+  if (event.key !== "Escape") return;
+  if (topicPoolOpen) closeTopicPool();
+  else if (activeView !== "chat") openView("chat");
 });
 
 if (window.location.protocol !== "file:") {

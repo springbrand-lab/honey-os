@@ -14,14 +14,41 @@
     <div class="room-light room-light-one" aria-hidden="true"></div>
     <div class="room-light room-light-two" aria-hidden="true"></div>
 
-    <main class="companion-app" aria-label="HoneyOS 私人聊天">
-      <section class="conversation" aria-live="polite">
+    <main class="companion-app" aria-label="HoneyOS 私人空间">
+      <nav class="app-navigation" aria-label="主要页面">
+        <button class="brand-button" type="button" data-view-target="chat" aria-label="回到聊天">
+          <span class="brand-mark" aria-hidden="true">H</span>
+          <span class="brand-copy">HoneyOS</span>
+        </button>
+        <div class="navigation-items">
+          <button class="navigation-item is-active" type="button" data-view-target="chat">
+            <span aria-hidden="true">◌</span><span>聊天</span>
+          </button>
+          <button class="navigation-item" type="button" data-view-target="memories">
+            <span aria-hidden="true">◇</span><span>记得的事</span>
+            <span class="navigation-badge" id="memory-count" hidden></span>
+          </button>
+          <button class="navigation-item" type="button" data-view-target="relationship">
+            <span aria-hidden="true">∞</span><span>我们</span>
+          </button>
+          <button class="navigation-item" type="button" data-view-target="history">
+            <span aria-hidden="true">⌁</span><span>聊天记录</span>
+          </button>
+          <button class="navigation-item" type="button" data-view-target="settings">
+            <span aria-hidden="true">·</span><span>设置</span>
+          </button>
+        </div>
+        <p class="navigation-footnote">只属于你们的空间</p>
+      </nav>
+
+      <div class="app-content">
+      <section class="conversation app-view is-active" data-view="chat" aria-live="polite">
         <header class="companion-header">
           <div class="companion-presence">
-            <div class="avatar" id="avatar" aria-hidden="true">H</div>
+            <button class="avatar avatar-button" id="avatar" type="button" data-view-target="relationship" aria-label="查看伴侣资料">H</button>
             <div class="identity">
               <h1 id="companion-name">Honey</h1>
-              <p id="companion-status">在这儿</p>
+              <p><span class="status-dot" aria-hidden="true"></span><span id="companion-status">在这儿</span></p>
             </div>
           </div>
           <div class="header-actions">
@@ -37,7 +64,7 @@
               <span>最近看到的</span>
               <span class="topic-pool-count" id="topic-pool-count" hidden></span>
             </button>
-            <p class="shared-space-label">我们的聊天</p>
+            <button class="header-circle-button" type="button" data-view-target="history" aria-label="查看聊天记录">⌁</button>
           </div>
         </header>
 
@@ -71,12 +98,119 @@
         </aside>
 
         <form class="composer" id="composer">
+          <button class="composer-icon-button" type="button" aria-label="添加内容" data-coming-soon="图片和文件消息将在下一版开放">＋</button>
+          <button class="composer-icon-button voice-button" type="button" aria-label="发送语音" data-coming-soon="语音消息将在下一版开放">◖</button>
           <label class="sr-only" for="message-input">消息</label>
           <textarea id="message-input" rows="1" maxlength="12000" placeholder="和我说句话"></textarea>
           <button class="send-button" id="send-button" type="submit">发送</button>
         </form>
       </section>
+
+      <section class="app-page app-view" data-view="memories" aria-labelledby="memories-title">
+        <header class="page-header">
+          <div>
+            <span class="page-eyebrow">你可以随时修改或忘记</span>
+            <h1 id="memories-title">它记得的事</h1>
+            <p>不是一份秘密档案，而是你们正在延续的事情。</p>
+          </div>
+          <button class="page-close" type="button" data-view-target="chat" aria-label="回到聊天">×</button>
+        </header>
+        <div class="memory-tabs" role="tablist" aria-label="记忆类型">
+          <button class="memory-tab is-active" type="button" data-memory-filter="all">全部</button>
+          <button class="memory-tab" type="button" data-memory-filter="temporary_state">最近</button>
+          <button class="memory-tab" type="button" data-memory-filter="commitment">答应过的</button>
+          <button class="memory-tab" type="button" data-memory-filter="episode">共同经历</button>
+          <button class="memory-tab" type="button" data-memory-filter="open_loop">待续</button>
+        </div>
+        <div class="page-scroll memory-list" id="memory-list"></div>
+      </section>
+
+      <section class="app-page app-view" data-view="relationship" aria-labelledby="relationship-title">
+        <header class="page-header">
+          <div>
+            <span class="page-eyebrow">双方明确说过的，才会留在这里</span>
+            <h1 id="relationship-title">我们</h1>
+            <p>关于它、关于你，也关于你们怎样相处。</p>
+          </div>
+          <button class="page-close" type="button" data-view-target="chat" aria-label="回到聊天">×</button>
+        </header>
+        <div class="page-scroll relationship-layout">
+          <section class="relationship-hero">
+            <div class="profile-orbit companion-orbit" id="relationship-companion-avatar">H</div>
+            <span class="relationship-link" aria-hidden="true">∞</span>
+            <div class="profile-orbit user-orbit">你</div>
+            <div>
+              <strong id="relationship-summary">正在认识彼此</strong>
+              <span id="relationship-nickname">称呼可以由你决定</span>
+            </div>
+          </section>
+          <form class="profile-form" id="profile-form">
+            <label><span>它的名字</span><input name="companion_name" maxlength="24" placeholder="例如：小树" /></label>
+            <label><span>它的性格</span><textarea name="personality" rows="2" maxlength="800" placeholder="例如：温柔，但不会一味顺从"></textarea></label>
+            <label><span>说话方式</span><textarea name="speaking_style" rows="2" maxlength="800" placeholder="例如：自然、直接、不说教"></textarea></label>
+            <label><span>它怎么称呼你</span><input name="user_nickname" maxlength="24" placeholder="由你明确决定" /></label>
+            <label><span>你们的关系</span><input name="relationship" maxlength="800" placeholder="只有明确确认后才填写" /></label>
+            <label><span>长期边界</span><textarea name="boundaries" rows="3" maxlength="800" placeholder="例如：工作时间不要主动联系"></textarea></label>
+            <div class="form-footer">
+              <span class="form-status" id="profile-form-status"></span>
+              <button type="submit">保存</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <section class="app-page app-view" data-view="history" aria-labelledby="history-title">
+        <header class="page-header">
+          <div>
+            <span class="page-eyebrow">换窗口，不等于重新认识</span>
+            <h1 id="history-title">聊天记录</h1>
+            <p>过去的对话仍然保留，需要时可以回来看看。</p>
+          </div>
+          <button class="page-close" type="button" data-view-target="chat" aria-label="回到聊天">×</button>
+        </header>
+        <div class="history-toolbar">
+          <label class="history-search"><span aria-hidden="true">⌕</span><input id="history-search" type="search" placeholder="搜索标题和最近话题" /></label>
+          <button class="new-chat-button" id="new-chat-button" type="button">＋ 开启新的聊天</button>
+        </div>
+        <div class="page-scroll history-layout">
+          <div class="history-list" id="history-list"></div>
+          <aside class="history-preview" id="history-preview">
+            <div class="history-preview-empty"><span>⌁</span><p>选择一段聊天，在这里查看。</p></div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="app-page app-view" data-view="settings" aria-labelledby="settings-title">
+        <header class="page-header">
+          <div>
+            <span class="page-eyebrow">保持简单，也保持透明</span>
+            <h1 id="settings-title">设置</h1>
+            <p>这里不会塞进一整套开发者控制台。</p>
+          </div>
+          <button class="page-close" type="button" data-view-target="chat" aria-label="回到聊天">×</button>
+        </header>
+        <div class="page-scroll settings-list">
+          <section class="settings-group">
+            <h2>隐私与记忆</h2>
+            <button type="button" data-view-target="memories"><span><strong>记忆保存在本地</strong><small>当前使用本机 SQLite 和记忆文件</small></span><em>已开启 ›</em></button>
+            <button type="button" data-view-target="memories"><span><strong>查看所有记忆</strong><small>可以完成、修改或让它忘记</small></span><em>›</em></button>
+          </section>
+          <section class="settings-group">
+            <h2>模型</h2>
+            <div class="settings-row"><span><strong>对话模型</strong><small>负责与你聊天和使用工具</small></span><em id="conversation-model">当前配置</em></div>
+            <div class="settings-row"><span><strong>蒸馏模型</strong><small>在后台整理近期状态和约定，不影响回复速度</small></span><em id="distillation-model">跟随对话模型</em></div>
+          </section>
+          <section class="settings-group">
+            <h2>主动联系</h2>
+            <div class="settings-row"><span><strong>允许它主动找我</strong><small>只在有值得聊的事情时出现</small></span><em id="proactive-setting">按当前规则</em></div>
+          </section>
+          <p class="settings-note">模型密钥、工具配置和系统维护仍保留在管理后台，不打扰日常聊天。</p>
+        </div>
+      </section>
+      </div>
     </main>
+
+    <div class="toast" id="app-toast" role="status" aria-live="polite" hidden></div>
 
     <div class="topic-pool-layer" id="topic-pool-layer" hidden>
       <button

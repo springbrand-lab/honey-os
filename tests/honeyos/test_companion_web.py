@@ -495,6 +495,9 @@ def test_api_server_registers_companion_web_routes():
     assert ("GET", "/honeyos/app.js") in routes
     assert ("GET", "/honeyos/styles.css") in routes
     assert ("GET", "/api/companion/bootstrap") in routes
+    assert ("POST", "/api/companion/new") in routes
+    assert ("POST", "/api/companion/profile") in routes
+    assert ("POST", "/api/companion/memories/{memory_id}") in routes
     assert ("GET", "/api/companion/topics") in routes
     assert ("POST", "/api/companion/topics/{topic_id}/discuss") in routes
     assert ("POST", "/api/companion/topics/{topic_id}/dismiss") in routes
@@ -650,6 +653,108 @@ async def test_companion_bootstrap_returns_only_safe_shared_chat_messages(
     assert "raw command output" not in response.text
     assert "proactive topic seed" not in response.text
     assert "selected topic" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_companion_memory_action_updates_only_the_owner_lane(monkeypatch, tmp_path):
+    from honeyos.companion.continuity import StructuredMemoryStore
+
+    monkeypatch.setenv("HONEYOS_RUNTIME_ID", "honeyos-companion-v0.3")
+    monkeypatch.setattr("honeyos.core.constants.get_honeyos_home", lambda: tmp_path)
+    lane_key = "agent:main:companion:dm:owner"
+    item = StructuredMemoryStore(tmp_path).record(
+        lane_key=lane_key,
+        kind="commitment",
+        content="明晚陪用户模拟面试",
+        evidence="assistant_committed",
+        source_session_id="session-old",
+        source_message_ids=(7,),
+    )
+    assert item is not None
+
+    adapter = _api_adapter()
+    adapter._read_json_body = AsyncMock(return_value=({"action": "resolve"}, None))
+    request = SimpleNamespace(
+        cookies={"honeyos_local": adapter._local_web_token},
+        remote="127.0.0.1",
+        headers={},
+        match_info={"memory_id": item.id},
+    )
+
+    response = await adapter._handle_companion_memory_action(request)
+
+    assert response.status == 200
+    assert StructuredMemoryStore(tmp_path).list_active(lane_key=lane_key) == ()
+
+
+@pytest.mark.asyncio
+async def test_companion_profile_form_is_an_explicit_profile_update(monkeypatch, tmp_path):
+    monkeypatch.setattr("honeyos.core.constants.get_honeyos_home", lambda: tmp_path)
+    adapter = _api_adapter()
+    adapter._read_json_body = AsyncMock(
+        return_value=(
+            {
+                "companion_name": "小树",
+                "speaking_style": "温柔、直接、不说教",
+                "user_nickname": "宝宝",
+            },
+            None,
+        )
+    )
+    request = SimpleNamespace(
+        cookies={"honeyos_local": adapter._local_web_token},
+        remote="127.0.0.1",
+        headers={},
+        match_info={},
+    )
+
+    response = await adapter._handle_companion_profile_update(request)
+    payload = json.loads(response.text)
+
+    assert response.status == 200
+    assert payload["profile"]["companion_name"] == "小树"
+    assert payload["profile"]["user_nickname"] == "宝宝"
+    assert "小树" in (tmp_path / "memories" / "IDENTITY.md").read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_companion_new_keeps_a_source_backed_handoff(monkeypatch, tmp_path):
+    monkeypatch.setenv("HONEYOS_RUNTIME_ID", "honeyos-companion-v0.3")
+    monkeypatch.setenv("HONEYOS_HOME", str(tmp_path))
+    monkeypatch.setattr("honeyos.core.constants.get_honeyos_home", lambda: tmp_path)
+    old_entry = SimpleNamespace(session_id="session-old")
+    new_entry = SimpleNamespace(session_id="session-new")
+    store = SimpleNamespace(
+        get_or_create_session=AsyncMock(return_value=old_entry),
+        load_transcript=AsyncMock(
+            return_value=[
+                {"role": "user", "content": "我周五要面试", "id": 1},
+                {"role": "assistant", "content": "明晚我们准备", "id": 2},
+            ]
+        ),
+        reset_session=AsyncMock(return_value=new_entry),
+    )
+    scheduler = MagicMock(return_value=True)
+    adapter = _api_adapter()
+    adapter.gateway_runner = SimpleNamespace(
+        async_session_store=store,
+        _schedule_honeyos_memory_distillation=scheduler,
+    )
+    request = SimpleNamespace(
+        cookies={"honeyos_local": adapter._local_web_token},
+        remote="127.0.0.1",
+        headers={},
+        match_info={},
+        app={},
+    )
+
+    response = await adapter._handle_companion_new(request)
+    payload = json.loads(response.text)
+
+    assert payload["session_id"] == "session-new"
+    store.reset_session.assert_awaited_once_with("agent:main:companion:dm:owner")
+    scheduler.assert_called_once()
+    assert (tmp_path / "continuity.db").exists()
 
 
 @pytest.mark.asyncio
