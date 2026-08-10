@@ -36,9 +36,15 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _local_timezone():
+    """Return the host timezone used by legacy offset-free timestamps."""
+
+    return datetime.now().astimezone().tzinfo or timezone.utc
+
+
 def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
+        return value.replace(tzinfo=_local_timezone()).astimezone(timezone.utc)
     return value.astimezone(timezone.utc)
 
 
@@ -798,7 +804,9 @@ class TopicPoolStore:
                 "SELECT value FROM topic_pool_meta WHERE key = 'last_collection_at'"
             ).fetchone()
         last = _parse_datetime(row["value"]) if row else None
-        return last is None or current - last >= timedelta(hours=max(1, int(hours)))
+        if last is None or last > current:
+            return True
+        return current - last >= timedelta(hours=max(1, int(hours)))
 
     def mark_collection(self, *, at: datetime | None = None) -> None:
         timestamp = _iso(at or self.now_fn())

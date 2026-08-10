@@ -103,6 +103,63 @@ async def test_scout_allows_empty_round_and_does_not_store_unverified_sources(tm
 
 
 @pytest.mark.asyncio
+async def test_scout_keeps_one_verified_candidate_when_model_selects_none(tmp_path: Path):
+    async def fake_search(query: str, limit: int):
+        return [raw("a")]
+
+    async def fake_fetch(item: RawCandidate):
+        return VerifiedCandidate(raw=item, excerpt="A verified source body with enough detail")
+
+    async def overcautious_filter(items, preferences, main_runtime):
+        return []
+
+    store = TopicPoolStore(tmp_path, now_fn=lambda: NOW)
+    scout = TopicScout(
+        tmp_path,
+        store=store,
+        search_fn=fake_search,
+        fetch_fn=fake_fetch,
+        filter_fn=overcautious_filter,
+        now_fn=lambda: NOW,
+    )
+
+    result = await scout.collect_once()
+
+    assert len(result.accepted) == 1
+    assert result.accepted[0].source_title == "Story a"
+    assert result.accepted[0].hook
+
+
+def test_legacy_naive_collection_timestamp_is_interpreted_as_local_time(
+    monkeypatch, tmp_path: Path
+):
+    from honeyos.companion import topic_pool
+
+    monkeypatch.setattr(topic_pool, "_local_timezone", lambda: timezone(timedelta(hours=8)))
+    store = TopicPoolStore(tmp_path, now_fn=lambda: NOW)
+    store.update_preferences(consent_asked=True, consented=True)
+    with store._connect() as connection:
+        connection.execute(
+            "INSERT INTO topic_pool_meta(key, value) VALUES ('last_collection_at', ?)",
+            ("2026-08-09T19:00:00",),
+        )
+
+    assert store.collection_due(hours=6, now=NOW) is False
+    assert store.collection_due(hours=6, now=NOW + timedelta(hours=5)) is True
+
+
+def test_future_collection_timestamp_from_legacy_timezone_bug_is_due_now(tmp_path: Path):
+    store = TopicPoolStore(tmp_path, now_fn=lambda: NOW)
+    with store._connect() as connection:
+        connection.execute(
+            "INSERT INTO topic_pool_meta(key, value) VALUES ('last_collection_at', ?)",
+            ((NOW + timedelta(hours=6)).isoformat(),),
+        )
+
+    assert store.collection_due(hours=6, now=NOW) is True
+
+
+@pytest.mark.asyncio
 async def test_collect_if_due_requires_consent_and_marks_attempt(tmp_path: Path):
     calls = 0
 
@@ -190,4 +247,3 @@ def test_filter_response_is_strict_bounded_and_cannot_invent_candidate_ids():
     selected = parse_filter_response(response, allowed_ids={"known", "known-2"})
 
     assert [item.candidate_id for item in selected] == ["known"]
-

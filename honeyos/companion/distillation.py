@@ -479,6 +479,10 @@ class MemoryDistiller:
         self, job: DistillationJob, operations: tuple[dict[str, Any], ...]
     ) -> tuple[int, int]:
         valid_source_ids = {message["_row_id"] for message in job.messages}
+        source_roles = {
+            message["_row_id"]: str(message.get("role") or "").strip().lower()
+            for message in job.messages
+        }
         active = {item.id: item for item in self.memories.list_active(
             lane_key=job.lane_key, now=job.now
         )}
@@ -494,11 +498,23 @@ class MemoryDistiller:
                 rejected += 1
                 continue
             if action == "record":
+                evidence = str(operation.get("evidence") or "").strip().lower()
+                if not evidence:
+                    kind = str(operation.get("kind") or "").strip().lower()
+                    cited_roles = {source_roles.get(item_id) for item_id in evidence_ids}
+                    if kind == "temporary_state" and "user" in cited_roles:
+                        evidence = "user_stated"
+                    elif kind == "commitment" and "assistant" in cited_roles:
+                        evidence = "assistant_committed"
+                    elif kind in {"open_loop", "episode"}:
+                        evidence = (
+                            "user_stated" if "user" in cited_roles else "conversation_event"
+                        )
                 item = self.memories.record(
                     lane_key=job.lane_key,
                     kind=str(operation.get("kind") or ""),
                     content=str(operation.get("content") or ""),
-                    evidence=str(operation.get("evidence") or ""),
+                    evidence=evidence,
                     source_session_id=job.session_id,
                     expires_at=operation.get("expires_at"),
                     source_message_ids=evidence_ids,
@@ -580,6 +596,20 @@ class MemoryDistiller:
             raw = await self.extractor(job, active_items, dict(main_runtime or {}))
             operations = self._parse_operations(raw, self.settings.max_operations)
             applied, rejected = self._apply_operations(job, operations)
+            if operations and applied == 0 and rejected:
+                error = "validation rejected every proposed memory operation"
+                with self._connect() as connection:
+                    connection.execute(
+                        "UPDATE distillation_runs SET status = 'failed', error = ? WHERE id = ?",
+                        (error, job.run_id),
+                    )
+                return DistillationResult(
+                    run_id=job.run_id,
+                    status="failed",
+                    applied=applied,
+                    rejected=rejected,
+                    error=error,
+                )
             with self._connect() as connection:
                 connection.execute(
                     """
@@ -648,6 +678,70 @@ def repair_legacy_distillation_failures(home: Path) -> int:
                 """
             )
             return max(0, int(cursor.rowcount or 0))
+    except sqlite3.Error:
+        return 0
+
+
+def repair_legacy_completed_rejections(home: Path) -> int:
+    """Replay once when the old validator completed batches but stored nothing.
+
+    The legacy run table did not persist accepted/rejected counters, so the
+    safest recoverable signature is: at least one completed batch and no
+    structured memory rows at all. Replaying is source-idempotent and this
+    migration is guarded by a durable one-shot marker.
+    """
+
+    db_path = Path(home).expanduser().resolve() / "continuity.db"
+    if not db_path.exists():
+        return 0
+    marker = "legacy-evidence-validation-v1"
+    try:
+        with sqlite3.connect(db_path, timeout=1.0) as connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS distillation_repairs (
+                    repair_key TEXT PRIMARY KEY,
+                    applied_at TEXT NOT NULL
+                )
+                """
+            )
+            if connection.execute(
+                "SELECT 1 FROM distillation_repairs WHERE repair_key = ?", (marker,)
+            ).fetchone():
+                return 0
+            completed = int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM distillation_runs WHERE status = 'completed'"
+                ).fetchone()[0]
+            )
+            memory_table_exists = connection.execute(
+                """
+                SELECT 1 FROM sqlite_master
+                WHERE type = 'table' AND name = 'structured_memories'
+                """
+            ).fetchone()
+            memories = (
+                int(connection.execute("SELECT COUNT(*) FROM structured_memories").fetchone()[0])
+                if memory_table_exists
+                else 0
+            )
+            reopened = 0
+            if completed and memories == 0:
+                cursor = connection.execute(
+                    """
+                    UPDATE distillation_runs
+                    SET status = 'failed', attempts = 0,
+                        error = 'legacy evidence validation replay', completed_at = NULL
+                    WHERE status = 'completed'
+                    """
+                )
+                reopened = max(0, int(cursor.rowcount or 0))
+                connection.execute("DELETE FROM distillation_state")
+            connection.execute(
+                "INSERT INTO distillation_repairs(repair_key, applied_at) VALUES (?, ?)",
+                (marker, _utc_now().isoformat()),
+            )
+            return reopened
     except sqlite3.Error:
         return 0
 

@@ -248,12 +248,30 @@ async def default_fetch_source(item: RawCandidate) -> VerifiedCandidate | None:
 
 _FILTER_PROMPT = """You select short-lived conversation seeds for a private AI companion.
 Return strict JSON: {"topics":[{"candidate_id":"...","hook":"...","category":"...","score":0.0,"reason":"..."}]}.
-Return zero to three items. An empty topics array is valid and preferred over weak material.
+Return one to three items whenever the input contains at least one verified, safe candidate.
+Return an empty topics array only when every candidate is unsafe, blocked, stale, promotional, or unusable.
 Use only candidate_id values from the input. Never invent facts, URLs, sources or IDs.
 Choose for user relevance, freshness, source quality, safety, novelty and conversational potential.
 The hook is a grounded angle worth continuing, not a finished article, clickbait headline, question bait or marketing copy.
 Reject duplicate, unverifiable, stale, blocked-category or purely promotional material.
 Do not write the final user-facing companion message."""
+
+
+def _verified_fallback(item: VerifiedCandidate) -> SelectedTopic:
+    """Keep one source-backed seed when a compatible model over-filters a round."""
+
+    raw = item.raw
+    detail = " ".join((raw.description or item.excerpt).split())
+    hook = raw.title.strip()
+    if detail and detail.casefold() not in hook.casefold():
+        hook = f"{hook}：{detail[:360]}"
+    return SelectedTopic(
+        candidate_id=raw.id,
+        hook=hook[:1000],
+        category=raw.category or "general",
+        score=0.6,
+        reason="verified source fallback after conservative model filtering",
+    )
 
 
 async def filter_with_auxiliary_model(
@@ -408,10 +426,10 @@ class TopicScout:
         try:
             selected = await self.filter_fn(verified, preferences, main_runtime)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Topic Scout filter failed; dropping this round: %s", exc)
-            return CollectionResult(
-                raw_count=len(raw_items), verified_count=len(verified)
-            )
+            logger.warning("Topic Scout filter failed; keeping one verified fallback: %s", exc)
+            selected = ()
+        if not selected:
+            selected = (_verified_fallback(verified[0]),)
 
         verified_by_id = {item.raw.id: item for item in verified}
         now = self.now_fn()
@@ -444,4 +462,3 @@ class TopicScout:
             raw_count=len(raw_items),
             verified_count=len(verified),
         )
-

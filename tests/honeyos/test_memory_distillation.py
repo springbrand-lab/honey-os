@@ -10,6 +10,7 @@ from honeyos.companion.distillation import (
     MemoryDistiller,
     _main_runtime_from_config,
     extract_with_auxiliary_model,
+    repair_legacy_completed_rejections,
     repair_legacy_distillation_failures,
 )
 from honeyos.companion.continuity import StructuredMemoryStore
@@ -252,6 +253,40 @@ def test_upgrade_reopens_runs_exhausted_by_legacy_api_mode_bug(tmp_path):
         assert tuple(row) == ("failed", 0, "")
 
 
+def test_upgrade_replays_completed_batches_when_legacy_validator_stored_nothing(tmp_path):
+    distiller = MemoryDistiller(tmp_path)
+    with distiller._connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO distillation_runs (
+                id, lane_key, session_id, reason, source_start_id,
+                source_end_id, source_hash, status, attempts, error,
+                created_at, completed_at
+            ) VALUES ('swallowed', ?, 's', 'periodic', 1, 20, 'hash',
+                      'completed', 1, '', ?, ?)
+            """,
+            (LANE, NOW.isoformat(), NOW.isoformat()),
+        )
+        connection.execute(
+            """
+            INSERT INTO distillation_state (
+                lane_key, session_id, last_source_row_id, updated_at
+            ) VALUES (?, 's', 20, ?)
+            """,
+            (LANE, NOW.isoformat()),
+        )
+
+    assert repair_legacy_completed_rejections(tmp_path) == 1
+    assert repair_legacy_completed_rejections(tmp_path) == 0
+    with distiller._connect() as connection:
+        run = connection.execute(
+            "SELECT status, attempts, error FROM distillation_runs WHERE id='swallowed'"
+        ).fetchone()
+        state = connection.execute("SELECT * FROM distillation_state").fetchone()
+    assert tuple(run) == ("failed", 0, "legacy evidence validation replay")
+    assert state is None
+
+
 @pytest.mark.asyncio
 async def test_new_distills_six_message_tail_and_persists_source_ids(tmp_path):
     async def extractor(_job, _active, _runtime):
@@ -395,6 +430,85 @@ async def test_invalid_inference_and_unbound_evidence_are_not_written(tmp_path):
 
     assert result is not None and result.applied == 0 and result.rejected == 2
     assert StructuredMemoryStore(tmp_path).list_active(lane_key=LANE, now=NOW) == ()
+
+
+@pytest.mark.asyncio
+async def test_missing_evidence_is_safely_derived_from_kind_and_source_role(tmp_path):
+    async def extractor(_job, _active, _runtime):
+        return json.dumps(
+            {
+                "operations": [
+                    {
+                        "action": "record",
+                        "kind": "open_loop",
+                        "content": "用户想下次继续聊记忆",
+                        "evidence_message_ids": [1],
+                    },
+                    {
+                        "action": "record",
+                        "kind": "commitment",
+                        "content": "伴侣答应下次提醒用户",
+                        "evidence_message_ids": [2],
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+    result = await MemoryDistiller(tmp_path, extractor=extractor).distill_if_due(
+        lane_key=LANE,
+        session_id="session-missing-evidence",
+        messages=_messages(20),
+        reason="periodic",
+        now=NOW,
+    )
+
+    assert result is not None and result.applied == 2 and result.rejected == 0
+    items = StructuredMemoryStore(tmp_path).list_active(lane_key=LANE, now=NOW)
+    assert {item.evidence for item in items} == {"user_stated", "assistant_committed"}
+
+
+@pytest.mark.asyncio
+async def test_all_rejected_operations_fail_run_without_advancing_cursor(tmp_path):
+    calls = 0
+
+    async def extractor(_job, _active, _runtime):
+        nonlocal calls
+        calls += 1
+        return json.dumps(
+            {
+                "operations": [
+                    {
+                        "action": "record",
+                        "kind": "temporary_state",
+                        "content": "没有用户来源",
+                        "evidence_message_ids": [2],
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+    distiller = MemoryDistiller(tmp_path, extractor=extractor)
+    first = await distiller.distill_if_due(
+        lane_key=LANE,
+        session_id="session-rejected",
+        messages=_messages(20),
+        reason="periodic",
+        now=NOW,
+    )
+    second = await distiller.distill_if_due(
+        lane_key=LANE,
+        session_id="session-rejected",
+        messages=_messages(20),
+        reason="periodic",
+        now=NOW + timedelta(minutes=1),
+    )
+
+    assert first is not None and first.status == "failed"
+    assert first.applied == 0 and first.rejected == 1
+    assert second is not None and second.run_id == first.run_id
+    assert calls == 2
 
 
 @pytest.mark.asyncio

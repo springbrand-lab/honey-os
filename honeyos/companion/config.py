@@ -612,9 +612,14 @@ def upgrade_companion_capabilities(home: Path) -> bool:
     if scrub_sensitive_companion_state(resolved):
         changed = True
 
-    from honeyos.companion.distillation import repair_legacy_distillation_failures
+    from honeyos.companion.distillation import (
+        repair_legacy_completed_rejections,
+        repair_legacy_distillation_failures,
+    )
 
     if repair_legacy_distillation_failures(resolved):
+        changed = True
+    if repair_legacy_completed_rejections(resolved):
         changed = True
 
     if migrate_legacy_skill_directory(resolved):
