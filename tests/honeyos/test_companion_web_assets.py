@@ -77,3 +77,38 @@ def test_companion_memory_page_names_and_filters_durable_memories():
     assert 'long_term_memory: "长期记忆"' in script
     assert 'persistent_memory: "来自长期记忆"' in script
     assert 'persistent_user: "来自对你的了解"' in script
+
+
+def test_companion_shell_uses_one_icon_language_and_stable_avatar_surfaces():
+    page = (ASSETS / "index.html").read_text(encoding="utf-8")
+    script = (ASSETS / "app.js").read_text(encoding="utf-8")
+
+    assert (ASSETS / "icons.svg").is_file()
+    assert 'class="app-icon"' in page
+    assert 'href="./icons.svg#chat"' in page
+    assert 'data-avatar-surface="companion"' in page
+    assert 'data-avatar-surface="user"' in page
+    assert "function avatarLabel(" in script
+    assert "function setAvatarLabel(" in script
+
+
+def test_companion_messages_expose_polished_actions_and_activity_disclosure():
+    script = (ASSETS / "app.js").read_text(encoding="utf-8")
+
+    assert 'actions.className = "message-actions"' in script
+    assert 'wrapper.className = "activity-card"' in script
+    assert 'details.className = "activity-steps"' in script
+    assert 'summaryButton.className = "activity-summary"' in script
+
+
+def test_companion_component_styles_cover_tokens_accessibility_and_responsiveness():
+    styles = (ASSETS / "styles.css").read_text(encoding="utf-8")
+
+    assert "--radius-control:" in styles
+    assert ".app-icon" in styles
+    assert ".message-actions" in styles
+    assert ".activity-card" in styles
+    assert ".composer:focus-within" in styles
+    assert ":focus-visible" in styles
+    assert "@media (prefers-reduced-motion: reduce)" in styles
+    assert "@media (max-width: 720px)" in styles
