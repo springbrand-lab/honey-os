@@ -64,6 +64,35 @@ let companionData = {
 };
 let toastTimer = null;
 
+function avatarLabel(name, fallback = "H") {
+  const value = Array.from(String(name || "").trim()).find((character) => character.trim());
+  return value || fallback;
+}
+
+function setAvatarLabel(name) {
+  companionAvatarLabel = avatarLabel(name, "H");
+  document.querySelectorAll('[data-avatar-surface="companion"]').forEach((surface) => {
+    surface.textContent = companionAvatarLabel;
+  });
+}
+
+function createIcon(name) {
+  const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  icon.setAttribute("class", "app-icon");
+  icon.setAttribute("aria-hidden", "true");
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", "./icons.svg#" + name);
+  icon.append(use);
+  return icon;
+}
+
+function setSendState(isBusy) {
+  elements.send.classList.toggle("is-busy", isBusy);
+  elements.send.setAttribute("aria-label", isBusy ? "正在处理，仍可继续发送" : "发送");
+  const label = elements.send.querySelector(".send-label");
+  if (label) label.textContent = isBusy ? "处理中" : "发送";
+}
+
 function showToast(message) {
   if (!elements.toast) return;
   window.clearTimeout(toastTimer);
@@ -279,11 +308,8 @@ async function saveProfile(event) {
     companionData.profile = data.profile || body;
     fillProfileForm(companionData.profile);
     const name = companionData.profile.companion_name || "Honey";
-    companionAvatarLabel = Array.from(name)[0] || "H";
     elements.name.textContent = name;
-    elements.avatar.textContent = companionAvatarLabel;
-    elements.statusAvatar.textContent = companionAvatarLabel;
-    elements.relationshipAvatar.textContent = companionAvatarLabel;
+    setAvatarLabel(name);
     elements.profileFormStatus.textContent = "已保存";
     showToast("你们的资料已经更新");
   } catch (error) {
@@ -371,7 +397,8 @@ async function loadHistoryPreview(item, button) {
 async function startNewConversation() {
   if (!window.confirm("开启新的聊天窗口？之前的聊天仍会保留。")) return;
   elements.newChatButton.disabled = true;
-  elements.newChatButton.textContent = "正在开启…";
+  const newChatLabel = elements.newChatButton.querySelector("span");
+  if (newChatLabel) newChatLabel.textContent = "正在开启…";
   try {
     const response = await fetch("/api/companion/new", {
       method: "POST",
@@ -381,7 +408,7 @@ async function startNewConversation() {
     window.location.reload();
   } catch {
     elements.newChatButton.disabled = false;
-    elements.newChatButton.textContent = "＋ 开启新的聊天";
+    if (newChatLabel) newChatLabel.textContent = "开启新的聊天";
     showToast("刚才没有开启成功，请稍后再试");
   }
 }
@@ -453,6 +480,7 @@ function createMessage(role) {
   avatar.className =
     "message-avatar " + (role === "user" ? "user-avatar" : "assistant-avatar");
   avatar.setAttribute("aria-hidden", "true");
+  avatar.dataset.avatarSurface = role === "user" ? "user" : "companion";
   avatar.textContent = role === "user" ? "你" : companionAvatarLabel;
   const bubble = document.createElement("div");
   bubble.className = "bubble";
@@ -460,6 +488,37 @@ function createMessage(role) {
   else row.append(avatar, bubble);
   elements.messages.append(row);
   return bubble;
+}
+
+function appendMessageActions(bubble, role, content) {
+  if (role !== "assistant") return;
+  const actions = document.createElement("div");
+  actions.className = "message-actions";
+
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.setAttribute("aria-label", "复制这条回复");
+  copy.append(createIcon("copy"));
+  copy.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      showToast("已经复制好了");
+    } catch {
+      showToast("这次没复制成功");
+    }
+  });
+
+  const helpful = document.createElement("button");
+  helpful.type = "button";
+  helpful.setAttribute("aria-label", "这条回复有帮助");
+  helpful.append(createIcon("thumb-up"));
+  helpful.addEventListener("click", () => {
+    helpful.dataset.selected = "true";
+    showToast("我记下了");
+  });
+
+  actions.append(copy, helpful);
+  bubble.append(actions);
 }
 
 function renderMessage(bubble, role, content) {
@@ -476,6 +535,7 @@ function addMessage(role, content, options = {}) {
   const shouldFollow = forceScroll || isNearLatest();
   const bubble = createMessage(role);
   renderMessage(bubble, role, content);
+  appendMessageActions(bubble, role, content);
   keepAtLatest = shouldFollow;
   scrollToLatest(forceScroll);
   return bubble;
@@ -622,52 +682,46 @@ function renderActionTrail(state) {
   }
   const summary = HoneyOSRunState.summarize(state);
 
-  const wrapper = document.createElement("div");
-  wrapper.className = "action-current";
+  const wrapper = document.createElement("details");
+  wrapper.className = "activity-card";
   wrapper.dataset.state = summary.state;
+  wrapper.open = actionTrailExpanded;
 
-  const summaryButton = document.createElement("button");
-  summaryButton.type = "button";
-  summaryButton.className = "action-summary";
-  summaryButton.setAttribute("aria-expanded", String(actionTrailExpanded));
-  summaryButton.setAttribute(
-    "aria-label",
-    actionTrailExpanded ? "收起处理过程" : "查看处理过程",
-  );
+  const summaryButton = document.createElement("summary");
+  summaryButton.className = "activity-summary";
 
   const mark = document.createElement("span");
-  mark.className = "action-mark";
+  mark.className = "activity-mark";
   mark.setAttribute("aria-hidden", "true");
 
   const copy = document.createElement("div");
-  copy.className = "action-copy";
+  copy.className = "activity-copy";
   const title = document.createElement("p");
   title.textContent = summary.title;
   copy.append(title);
 
   const meta = document.createElement("span");
-  meta.className = "action-meta";
+  meta.className = "activity-meta";
   meta.textContent = summary.meta;
 
   const toggleMark = document.createElement("span");
-  toggleMark.className = "action-toggle-mark";
+  toggleMark.className = "activity-toggle";
   toggleMark.setAttribute("aria-hidden", "true");
-  toggleMark.dataset.expanded = String(actionTrailExpanded);
+  toggleMark.append(createIcon("chevron-down"));
 
   const details = document.createElement("ol");
-  details.className = "action-details";
-  details.hidden = !actionTrailExpanded;
+  details.className = "activity-steps";
   for (const activity of activities) {
     const item = document.createElement("li");
-    item.className = "action-step";
+    item.className = "activity-step";
     item.dataset.state = activity.state || "active";
 
     const stepMark = document.createElement("span");
-    stepMark.className = "action-step-mark";
+    stepMark.className = "activity-step-mark";
     stepMark.setAttribute("aria-hidden", "true");
 
     const stepCopy = document.createElement("div");
-    stepCopy.className = "action-step-copy";
+    stepCopy.className = "activity-step-copy";
     const stepTitle = document.createElement("p");
     stepTitle.textContent = activity.title || "正在替你处理";
     stepCopy.append(stepTitle);
@@ -678,22 +732,15 @@ function renderActionTrail(state) {
     }
 
     const stepState = document.createElement("span");
-    stepState.className = "action-step-state";
+    stepState.className = "activity-step-state";
     stepState.textContent = activityStatusLabel(activity);
     item.append(stepMark, stepCopy, stepState);
     details.append(item);
   }
 
-  summaryButton.addEventListener("click", () => {
-    actionTrailExpanded = !actionTrailExpanded;
-    summaryButton.setAttribute("aria-expanded", String(actionTrailExpanded));
-    summaryButton.setAttribute(
-      "aria-label",
-      actionTrailExpanded ? "收起处理过程" : "查看处理过程",
-    );
-    toggleMark.dataset.expanded = String(actionTrailExpanded);
-    details.hidden = !actionTrailExpanded;
-    if (actionTrailExpanded) scrollToLatest();
+  wrapper.addEventListener("toggle", () => {
+    actionTrailExpanded = wrapper.open;
+    if (wrapper.open) scrollToLatest();
   });
 
   summaryButton.append(mark, copy, meta, toggleMark);
@@ -842,9 +889,7 @@ async function bootstrap() {
   sessionKey = data.session_key;
   elements.name.textContent = data.profile.name;
   elements.status.textContent = data.profile.status;
-  companionAvatarLabel = Array.from(data.profile.name || "H")[0];
-  elements.avatar.textContent = companionAvatarLabel;
-  elements.statusAvatar.textContent = companionAvatarLabel;
+  setAvatarLabel(data.profile.name || "Honey");
   hydrateCompanionPages(data);
   for (const message of data.messages || []) {
     addMessage(message.role, message.content);
@@ -856,7 +901,7 @@ async function bootstrap() {
 
 async function sendMessage(text, options = {}) {
   sending = true;
-  elements.send.textContent = "处理中";
+  setSendState(true);
   activeAssistantBubble = null;
   turnState = HoneyOSRunState.create(Date.now());
   actionTrailExpanded = false;
@@ -897,7 +942,7 @@ async function sendMessage(text, options = {}) {
     renderTurnState(turnState);
   } finally {
     sending = false;
-    elements.send.textContent = "发送";
+    setSendState(false);
     activeAssistantBubble = null;
     elements.input.focus();
   }

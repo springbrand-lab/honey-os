@@ -1303,6 +1303,7 @@ def _security_headers_for_path(path: str) -> Dict[str, str]:
         "/run-state.js",
         "/app.js",
         "/styles.css",
+        "/icons.svg",
     } or path.startswith("/honeyos/"):
         headers["Content-Security-Policy"] = (
             "default-src 'self'; "
@@ -2149,10 +2150,12 @@ class APIServerAdapter(BasePlatformAdapter):
             ("GET", "/run-state.js", self._handle_companion_run_state),
             ("GET", "/app.js", self._handle_companion_script),
             ("GET", "/styles.css", self._handle_companion_styles),
+            ("GET", "/icons.svg", self._handle_companion_icons),
             ("GET", "/honeyos/message-format.js", self._handle_companion_message_format),
             ("GET", "/honeyos/run-state.js", self._handle_companion_run_state),
             ("GET", "/honeyos/app.js", self._handle_companion_script),
             ("GET", "/honeyos/styles.css", self._handle_companion_styles),
+            ("GET", "/honeyos/icons.svg", self._handle_companion_icons),
             ("GET", "/api/companion/bootstrap", self._handle_companion_bootstrap),
             ("POST", "/api/companion/new", self._handle_companion_new),
             ("POST", "/api/companion/profile", self._handle_companion_profile_update),
@@ -2321,6 +2324,9 @@ class APIServerAdapter(BasePlatformAdapter):
 
     async def _handle_companion_styles(self, request: "web.Request") -> "web.Response":
         return await self._handle_companion_asset(request, "styles.css", "text/css")
+
+    async def _handle_companion_icons(self, request: "web.Request") -> "web.Response":
+        return await self._handle_companion_asset(request, "icons.svg", "image/svg+xml")
 
     async def _handle_companion_bootstrap(
         self, request: "web.Request"

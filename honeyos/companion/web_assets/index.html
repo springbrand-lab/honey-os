@@ -22,20 +22,20 @@
         </button>
         <div class="navigation-items">
           <button class="navigation-item is-active" type="button" data-view-target="chat">
-            <span aria-hidden="true">◌</span><span>聊天</span>
+            <svg class="app-icon" aria-hidden="true"><use href="./icons.svg#chat"></use></svg><span>聊天</span>
           </button>
           <button class="navigation-item" type="button" data-view-target="memories">
-            <span aria-hidden="true">◇</span><span>记得的事</span>
+            <svg class="app-icon" aria-hidden="true"><use href="./icons.svg#sparkle"></use></svg><span>记得的事</span>
             <span class="navigation-badge" id="memory-count" hidden></span>
           </button>
           <button class="navigation-item" type="button" data-view-target="relationship">
-            <span aria-hidden="true">∞</span><span>我们</span>
+            <svg class="app-icon" aria-hidden="true"><use href="./icons.svg#heart"></use></svg><span>我们</span>
           </button>
           <button class="navigation-item" type="button" data-view-target="history">
-            <span aria-hidden="true">⌁</span><span>聊天记录</span>
+            <svg class="app-icon" aria-hidden="true"><use href="./icons.svg#history"></use></svg><span>聊天记录</span>
           </button>
           <button class="navigation-item" type="button" data-view-target="settings">
-            <span aria-hidden="true">·</span><span>设置</span>
+            <svg class="app-icon" aria-hidden="true"><use href="./icons.svg#settings"></use></svg><span>设置</span>
           </button>
         </div>
         <p class="navigation-footnote">只属于你们的空间</p>
@@ -45,7 +45,7 @@
       <section class="conversation app-view is-active" data-view="chat" aria-live="polite">
         <header class="companion-header">
           <div class="companion-presence">
-            <button class="avatar avatar-button" id="avatar" type="button" data-view-target="relationship" aria-label="查看伴侣资料">H</button>
+            <button class="avatar avatar-button" id="avatar" type="button" data-avatar-surface="companion" data-view-target="relationship" aria-label="查看伴侣资料">H</button>
             <div class="identity">
               <h1 id="companion-name">Honey</h1>
               <p><span class="status-dot" aria-hidden="true"></span><span id="companion-status">在这儿</span></p>
@@ -60,11 +60,11 @@
               aria-haspopup="dialog"
               aria-controls="topic-pool-drawer"
             >
-              <span class="topic-pool-trigger-mark" aria-hidden="true">✦</span>
+              <svg class="app-icon topic-pool-trigger-mark" aria-hidden="true"><use href="./icons.svg#sparkle"></use></svg>
               <span>最近看到的</span>
               <span class="topic-pool-count" id="topic-pool-count" hidden></span>
             </button>
-            <button class="header-circle-button" type="button" data-view-target="history" aria-label="查看聊天记录">⌁</button>
+            <button class="header-circle-button" type="button" data-view-target="history" aria-label="查看聊天记录"><svg class="app-icon" aria-hidden="true"><use href="./icons.svg#history"></use></svg></button>
           </div>
         </header>
 
@@ -75,7 +75,7 @@
             <span>不用想好再来找我。</span>
           </div>
           <div class="turn-status turn-status-row" id="turn-status" hidden>
-            <div class="message-avatar status-avatar" id="status-avatar" aria-hidden="true">H</div>
+            <div class="message-avatar status-avatar" id="status-avatar" data-avatar-surface="companion" aria-hidden="true">H</div>
             <div class="turn-status-body">
               <div class="presence-line" id="presence-line" hidden>
                 <span class="presence-pulse" aria-hidden="true"></span>
@@ -98,11 +98,11 @@
         </aside>
 
         <form class="composer" id="composer">
-          <button class="composer-icon-button" type="button" aria-label="添加内容" data-coming-soon="图片和文件消息将在下一版开放">＋</button>
-          <button class="composer-icon-button voice-button" type="button" aria-label="发送语音" data-coming-soon="语音消息将在下一版开放">◖</button>
+          <button class="composer-icon-button" type="button" aria-label="添加内容" data-coming-soon="图片和文件消息将在下一版开放"><svg class="app-icon" aria-hidden="true"><use href="./icons.svg#plus"></use></svg></button>
+          <button class="composer-icon-button voice-button" type="button" aria-label="发送语音" data-coming-soon="语音消息将在下一版开放"><svg class="app-icon" aria-hidden="true"><use href="./icons.svg#microphone"></use></svg></button>
           <label class="sr-only" for="message-input">消息</label>
           <textarea id="message-input" rows="1" maxlength="12000" placeholder="和我说句话"></textarea>
-          <button class="send-button" id="send-button" type="submit">发送</button>
+          <button class="send-button" id="send-button" type="submit"><span class="send-label">发送</span><svg class="app-icon send-icon" aria-hidden="true"><use href="./icons.svg#arrow-up"></use></svg></button>
         </form>
       </section>
 
@@ -113,7 +113,7 @@
             <h1 id="memories-title">它记得的事</h1>
             <p>不是一份秘密档案，而是你们正在延续的事情。</p>
           </div>
-          <button class="page-close" type="button" data-view-target="chat" aria-label="回到聊天">×</button>
+          <button class="page-close" type="button" data-view-target="chat" aria-label="回到聊天"><svg class="app-icon" aria-hidden="true"><use href="./icons.svg#close"></use></svg></button>
         </header>
         <div class="memory-tabs" role="tablist" aria-label="记忆类型">
           <button class="memory-tab is-active" type="button" data-memory-filter="all">全部</button>
@@ -133,13 +133,13 @@
             <h1 id="relationship-title">我们</h1>
             <p>关于它、关于你，也关于你们怎样相处。</p>
           </div>
-          <button class="page-close" type="button" data-view-target="chat" aria-label="回到聊天">×</button>
+          <button class="page-close" type="button" data-view-target="chat" aria-label="回到聊天"><svg class="app-icon" aria-hidden="true"><use href="./icons.svg#close"></use></svg></button>
         </header>
         <div class="page-scroll relationship-layout">
           <section class="relationship-hero">
-            <div class="profile-orbit companion-orbit" id="relationship-companion-avatar">H</div>
+            <div class="profile-orbit companion-orbit" id="relationship-companion-avatar" data-avatar-surface="companion">H</div>
             <span class="relationship-link" aria-hidden="true">∞</span>
-            <div class="profile-orbit user-orbit">你</div>
+            <div class="profile-orbit user-orbit" data-avatar-surface="user">你</div>
             <div>
               <strong id="relationship-summary">正在认识彼此</strong>
               <span id="relationship-nickname">称呼可以由你决定</span>
@@ -167,16 +167,16 @@
             <h1 id="history-title">聊天记录</h1>
             <p>过去的对话仍然保留，需要时可以回来看看。</p>
           </div>
-          <button class="page-close" type="button" data-view-target="chat" aria-label="回到聊天">×</button>
+          <button class="page-close" type="button" data-view-target="chat" aria-label="回到聊天"><svg class="app-icon" aria-hidden="true"><use href="./icons.svg#close"></use></svg></button>
         </header>
         <div class="history-toolbar">
-          <label class="history-search"><span aria-hidden="true">⌕</span><input id="history-search" type="search" placeholder="搜索标题和最近话题" /></label>
-          <button class="new-chat-button" id="new-chat-button" type="button">＋ 开启新的聊天</button>
+          <label class="history-search"><svg class="app-icon" aria-hidden="true"><use href="./icons.svg#search"></use></svg><input id="history-search" type="search" placeholder="搜索标题和最近话题" /></label>
+          <button class="new-chat-button" id="new-chat-button" type="button"><svg class="app-icon" aria-hidden="true"><use href="./icons.svg#plus"></use></svg><span>开启新的聊天</span></button>
         </div>
         <div class="page-scroll history-layout">
           <div class="history-list" id="history-list"></div>
           <aside class="history-preview" id="history-preview">
-            <div class="history-preview-empty"><span>⌁</span><p>选择一段聊天，在这里查看。</p></div>
+            <div class="history-preview-empty"><svg class="app-icon" aria-hidden="true"><use href="./icons.svg#history"></use></svg><p>选择一段聊天，在这里查看。</p></div>
           </aside>
         </div>
       </section>
@@ -188,7 +188,7 @@
             <h1 id="settings-title">设置</h1>
             <p>这里不会塞进一整套开发者控制台。</p>
           </div>
-          <button class="page-close" type="button" data-view-target="chat" aria-label="回到聊天">×</button>
+          <button class="page-close" type="button" data-view-target="chat" aria-label="回到聊天"><svg class="app-icon" aria-hidden="true"><use href="./icons.svg#close"></use></svg></button>
         </header>
         <div class="page-scroll settings-list">
           <section class="settings-group">
@@ -239,7 +239,7 @@
             type="button"
             aria-label="关闭最近看到的内容"
           >
-            <span aria-hidden="true">×</span>
+            <svg class="app-icon" aria-hidden="true"><use href="./icons.svg#close"></use></svg>
           </button>
         </header>
         <div class="topic-pool-list" id="topic-pool-list" aria-live="polite"></div>
