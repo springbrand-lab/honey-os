@@ -38,11 +38,36 @@ DEFAULT_PROTECTED_PATHS = (
     "honeyos/runtime/main.py",
     "honeyos/runtime/service_manager.py",
     "honeyos/cli/service.py",
+    # Gateway ingress and the tools that enforce approvals before host-side
+    # execution are part of the trusted control plane.  Builder can still
+    # improve ordinary HoneyOS application/runtime modules.
+    "honeyos/gateway/authz_mixin.py",
+    "honeyos/gateway/pairing.py",
+    "honeyos/gateway/platforms/api_server.py",
+    "honeyos/gateway/run.py",
     "honeyos/tools/approval.py",
     "honeyos/tools/write_approval.py",
     "honeyos/tools/companion_builder_tool.py",
+    "honeyos/tools/terminal_tool.py",
+    "honeyos/tools/code_execution_tool.py",
+    "honeyos/tools/computer_use_tool.py",
+    "honeyos/tools/computer_use/permissions.py",
     "honeyos/tools/permission_policy.py",
     "honeyos/tools/threat_patterns.py",
+    "honeyos/tools/slash_confirm.py",
+    "honeyos/runtime/approval_mode.py",
+    "honeyos/runtime/approvals_suggest.py",
+    "honeyos/runtime/subcommands/approvals.py",
+    "honeyos/runtime/write_approval_commands.py",
+    "honeyos/runtime/subcommands/pairing.py",
+    "honeyos/gateway/slash_commands.py",
+    "honeyos/agent/tool_executor.py",
+    "honeyos/cli/main.py",
+    "honeyos/tools/computer_use/**",
+    "honeyos/tools/file_tools.py",
+    "honeyos/tools/memory_tool.py",
+    "honeyos/tools/companion_memory_tool.py",
+    "honeyos/tools/skill_manager_tool.py",
     "pyproject.toml",
     "uv.lock",
     "requirements*.txt",
@@ -65,6 +90,7 @@ DEFAULT_PROTECTED_PATHS = (
 # rather than by a candidate manifest.  Older manifests must be recreated so a
 # candidate cannot dilute a newly added safety boundary by editing JSON.
 BUILDER_POLICY_VERSION = 2
+TRUSTED_POLICY_SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -73,6 +99,7 @@ class PreparedBuilderChange:
     change_root: Path
     workspace: Path
     manifest_path: Path
+    trusted_policy_path: Path
 
 
 @dataclass(frozen=True)
@@ -136,6 +163,111 @@ def _validate_allowed_paths(paths: Iterable[str]) -> tuple[str, ...]:
     return tuple(normalized)
 
 
+def _canonical_json_bytes(payload: object) -> bytes:
+    """Serialize trusted metadata deterministically before binding a review."""
+
+    return json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def _trusted_policy_digest(policy: dict[str, object]) -> str:
+    return hashlib.sha256(_canonical_json_bytes(policy)).hexdigest()
+
+
+def _trusted_policy_path(change_root: Path) -> Path:
+    return change_root / "trusted-policy.json"
+
+
+def _load_json_object(path: Path, *, description: str) -> dict[str, object]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{description} is missing or invalid") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"{description} is missing or invalid")
+    return payload
+
+
+def _load_trusted_policy(change_root: Path) -> tuple[dict[str, object], str]:
+    """Load state kept outside the Builder's candidate source checkout.
+
+    Trust assumption: model-driven Builder work is restricted to the isolated
+    ``source`` workspace.  ``change_root`` lives in HoneyOS state storage and
+    is written/read only by this trusted control-plane module.  It is not a
+    user-facing secret; its separation, rather than a value copied into the
+    mutable manifest, makes the reviewed scope authoritative.
+    """
+
+    path = _trusted_policy_path(change_root)
+    policy = _load_json_object(path, description="trusted policy")
+    if (
+        policy.get("schema_version") != TRUSTED_POLICY_SCHEMA_VERSION
+        or policy.get("policy_version") != BUILDER_POLICY_VERSION
+    ):
+        raise ValueError("trusted policy is missing or invalid")
+
+    change_id = policy.get("change_id")
+    goal = policy.get("goal")
+    source_repo = policy.get("source_repo")
+    source_commit = policy.get("source_commit")
+    workspace_raw = policy.get("workspace")
+    workspace_root_raw = policy.get("workspace_root")
+    change_root_raw = policy.get("change_root")
+    allowed_raw = policy.get("allowed_paths")
+    if not all(
+        isinstance(value, str) and value
+        for value in (
+            change_id,
+            goal,
+            source_repo,
+            source_commit,
+            workspace_raw,
+            workspace_root_raw,
+            change_root_raw,
+        )
+    ) or not isinstance(allowed_raw, list):
+        raise ValueError("trusted policy is missing or invalid")
+    try:
+        normalized_id = _validate_change_id(change_id)
+        allowed = _validate_allowed_paths(allowed_raw)
+        workspace_root = Path(workspace_root_raw).expanduser().resolve()
+        workspace = Path(workspace_raw).expanduser().resolve()
+        recorded_change_root = Path(change_root_raw).expanduser().resolve()
+    except (TypeError, ValueError) as exc:
+        raise ValueError("trusted policy is missing or invalid") from exc
+
+    expected_workspace = workspace_root / "changes" / normalized_id / "source"
+    if (
+        recorded_change_root != change_root
+        or workspace != expected_workspace
+        or list(allowed) != allowed_raw
+    ):
+        raise ValueError("trusted policy is missing or invalid")
+    return policy, _trusted_policy_digest(policy)
+
+
+def _manifest_matches_trusted_policy(
+    manifest: dict[str, object], policy: dict[str, object]
+) -> bool:
+    """Require the candidate-visible manifest to be an exact policy mirror."""
+
+    mirrored_fields = (
+        "change_id",
+        "goal",
+        "source_repo",
+        "source_commit",
+        "branch",
+        "workspace",
+        "workspace_root",
+        "allowed_paths",
+    )
+    return all(manifest.get(field) == policy.get(field) for field in mirrored_fields)
+
+
 def prepare_builder_change(
     *,
     source_repo: Path | str,
@@ -164,6 +296,7 @@ def prepare_builder_change(
     workspace_change_root = workspace_root / "changes" / normalized_id
     workspace = workspace_change_root / "source"
     manifest_path = change_root / "manifest.json"
+    trusted_policy_path = _trusted_policy_path(change_root)
     if change_root.exists() or workspace_change_root.exists():
         raise FileExistsError(f"builder change already exists: {normalized_id}")
     change_root.mkdir(parents=True)
@@ -172,6 +305,7 @@ def prepare_builder_change(
         workspace_change_root.mkdir(parents=True)
 
     try:
+        source_commit = _git(source, "rev-parse", "HEAD")
         subprocess.run(
             ["git", "clone", "--quiet", "--no-hardlinks", str(source), str(workspace)],
             check=True,
@@ -180,7 +314,26 @@ def prepare_builder_change(
         )
         branch = f"honeyos-builder/{normalized_id}"
         _git(workspace, "switch", "-c", branch)
-        source_commit = _git(source, "rev-parse", "HEAD")
+        if _git(workspace, "rev-parse", "HEAD") != source_commit:
+            raise ValueError("source checkout changed while Builder was preparing a candidate")
+        trusted_policy = {
+            "schema_version": TRUSTED_POLICY_SCHEMA_VERSION,
+            "policy_version": BUILDER_POLICY_VERSION,
+            "change_id": normalized_id,
+            "goal": goal_text,
+            "source_repo": str(source),
+            "source_commit": source_commit,
+            "branch": branch,
+            "workspace": str(workspace),
+            "workspace_root": str(workspace_root),
+            "change_root": str(change_root),
+            "allowed_paths": list(allowed),
+        }
+        trusted_policy_path.write_text(
+            json.dumps(trusted_policy, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        trusted_policy_path.chmod(0o600)
         manifest = {
             "schema_version": 2,
             "policy_version": BUILDER_POLICY_VERSION,
@@ -224,6 +377,7 @@ def prepare_builder_change(
         change_root=change_root,
         workspace=workspace,
         manifest_path=manifest_path,
+        trusted_policy_path=trusted_policy_path,
     )
 
 
@@ -293,12 +447,17 @@ def _digest_update(digest: hashlib._Hash, value: bytes) -> None:
 
 
 def candidate_digest(
-    workspace: Path, source_commit: str, paths: Iterable[_ChangedPath | str]
+    workspace: Path,
+    source_commit: str,
+    paths: Iterable[_ChangedPath | str],
+    *,
+    policy_digest: str = "",
 ) -> str:
     """Return a deterministic digest of the exact candidate files reviewed."""
 
     digest = hashlib.sha256()
     _digest_update(digest, source_commit.encode("utf-8"))
+    _digest_update(digest, policy_digest.encode("ascii"))
     candidates = sorted(
         (
             path
@@ -345,25 +504,28 @@ def inspect_builder_change(change_root: Path | str) -> BuilderReviewReport:
     manifest_path = root / "manifest.json"
     if not manifest_path.is_file():
         raise ValueError("builder change manifest is missing")
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest = _load_json_object(manifest_path, description="builder change manifest")
+    policy, policy_digest = _load_trusted_policy(root)
     if (
         manifest.get("schema_version") != 2
         or manifest.get("policy_version") != BUILDER_POLICY_VERSION
         or manifest.get("protected_paths") != list(DEFAULT_PROTECTED_PATHS)
     ):
         raise ValueError("builder change policy is stale or has been modified")
-    change_id = str(manifest.get("change_id", ""))
-    workspace_root = Path(str(manifest.get("workspace_root", ""))).expanduser().resolve()
+    if not _manifest_matches_trusted_policy(manifest, policy):
+        raise ValueError("builder change manifest differs from trusted policy")
+    change_id = str(policy["change_id"])
+    workspace_root = Path(str(policy["workspace_root"])).expanduser().resolve()
     expected_workspace = workspace_root / "changes" / change_id / "source"
-    workspace = Path(str(manifest.get("workspace", ""))).expanduser().resolve()
+    workspace = Path(str(policy["workspace"])).expanduser().resolve()
     if workspace != expected_workspace or not (workspace / ".git").exists():
-        raise ValueError("builder workspace does not match its protected manifest")
+        raise ValueError("builder workspace does not match trusted policy")
 
-    source_commit = str(manifest.get("source_commit", ""))
+    source_commit = str(policy["source_commit"])
     if not source_commit or _git(workspace, "rev-parse", "HEAD") != source_commit:
         raise ValueError("builder workspace revision differs from the trusted review base")
 
-    allowed_patterns = tuple(manifest.get("allowed_paths") or ())
+    allowed_patterns = _validate_allowed_paths(policy["allowed_paths"])
     # Never trust the manifest to define its own protected surface.  It merely
     # records the policy that prepared it; the active code enforces the current
     # immutable list above.
@@ -388,13 +550,20 @@ def inspect_builder_change(change_root: Path | str) -> BuilderReviewReport:
         status = "review_ready"
     else:
         status = "no_changes"
-    digest = candidate_digest(workspace, source_commit, changed_paths)
+    digest = candidate_digest(
+        workspace,
+        source_commit,
+        changed_paths,
+        policy_digest=policy_digest,
+    )
     report_path = root / "review.json"
     report_payload = {
         "schema_version": 1,
-        "change_id": manifest.get("change_id"),
+        "change_id": policy["change_id"],
         "status": status,
         "source_commit": source_commit,
+        "allowed_paths": list(allowed_patterns),
+        "policy_digest": policy_digest,
         "candidate_digest": digest,
         "reviewed_at": datetime.now(timezone.utc).isoformat(),
         "allowed_changes": allowed,

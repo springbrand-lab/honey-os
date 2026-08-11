@@ -109,6 +109,14 @@ All activation modules, CLI commands, manifests, service-switch helpers, and
 confirmation handlers are added to `DEFAULT_PROTECTED_PATHS`. A candidate may
 not modify or widen this control plane.
 
+The Builder model can edit only its isolated candidate `source` workspace.
+Its authoritative identity, goal, base revision, and allowed scope are stored
+as a private `trusted-policy.json` record in HoneyOS state outside that
+workspace. The candidate-visible manifest is only a mirror and is rejected if
+it differs. This is a filesystem trust boundary, not a user-facing secret: a
+user who can modify HoneyOS state/control-plane files can already replace the
+running application.
+
 ### 2. Version slots
 
 Candidate source is copied out of the user-editable Builder workspace into a

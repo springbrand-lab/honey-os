@@ -67,6 +67,53 @@ No remaining implementation concerns. The development virtual environment had
 to be created because it was absent from the fresh worktree; this did not
 modify tracked project files.
 
+## Second fix after review
+
+### RED evidence
+
+Added tests for a private authoritative policy record, mutable-manifest scope
+and identity tampering, missing/tampered private policy, policy scope/digest in
+the review report, and the gateway/approval/execution enforcement files. Then
+ran:
+
+```text
+.venv/bin/python -m pytest -q tests/honeyos/test_builder_workspace.py
+```
+
+Observed result: `18 failed, 23 passed in 4.13s`. The failures showed the
+existing manifest was the only scope authority and that several actual
+gateway/terminal/code-execution/computer-use approval boundaries remained
+candidate-editable.
+
+### Fix and GREEN evidence
+
+- Added a `trusted-policy.json` record under the protected Builder state
+  change root, outside the candidate `source` workspace. It is mode `0600` and
+  records the goal, source identity/base revision, workspace identity, branch,
+  and approved scope.
+- Inspection loads that record first, validates it, and rejects any mismatch in
+  the mutable candidate-visible manifest. The review report records the trusted
+  allowed scope and policy digest; the candidate digest includes that policy
+  digest as well as the reviewed bytes.
+- Expanded the protected set to cover gateway ingress, pairing/auth, terminal,
+  execute-code, computer-use permissions, and the discovered runtime approval
+  subcommands. Ordinary `honeyos/**` business files remain reviewable when
+  within the approved scope.
+- Documented the trust assumption: model-driven Builder work can write only the
+  isolated candidate `source` directory; HoneyOS state/control-plane storage is
+  trusted. This is a filesystem boundary, not a user-facing secret.
+
+Commands:
+
+```text
+.venv/bin/python -m pytest -q tests/honeyos/test_builder_workspace.py tests/honeyos/test_builder_cli.py
+.venv/bin/ruff check honeyos/companion/builder_workspace.py tests/honeyos/test_builder_workspace.py tests/honeyos/test_builder_cli.py
+git diff --check
+```
+
+Observed results: `46 passed in 4.88s`; `All checks passed!`; no whitespace
+errors.
+
 ## Fix after review
 
 ### RED evidence

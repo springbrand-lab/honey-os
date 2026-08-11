@@ -86,6 +86,20 @@ def test_prepare_builder_change_clones_review_only_workspace(tmp_path):
     assert live_file.read_text(encoding="utf-8") == "VALUE = 'live'\n"
 
 
+def test_prepare_writes_private_authoritative_policy_outside_candidate_workspace(tmp_path):
+    prepared = _prepared_change(tmp_path)
+
+    policy_path = prepared.change_root / "trusted-policy.json"
+    policy = json.loads(policy_path.read_text(encoding="utf-8"))
+
+    assert policy_path.is_file()
+    assert not policy_path.is_relative_to(prepared.workspace)
+    assert policy_path.stat().st_mode & 0o777 == 0o600
+    assert policy["change_id"] == prepared.change_id
+    assert policy["workspace"] == str(prepared.workspace)
+    assert policy["allowed_paths"] == ["honeyos/companion/**"]
+
+
 @pytest.mark.parametrize(
     "unsafe_scope",
     (
@@ -255,6 +269,63 @@ def test_inspect_rejects_stale_policy_manifest(tmp_path):
         inspect_builder_change(prepared.change_root)
 
 
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    (
+        ("goal", "install something else"),
+        ("allowed_paths", ["**"]),
+        ("source_commit", "0" * 40),
+        ("workspace", "/tmp/not-the-candidate"),
+    ),
+)
+def test_inspect_rejects_mutable_manifest_identity_or_scope_tampering(
+    tmp_path, field, replacement
+):
+    from honeyos.companion.builder_workspace import inspect_builder_change
+
+    prepared = _prepared_change(tmp_path)
+    manifest = json.loads(prepared.manifest_path.read_text(encoding="utf-8"))
+    manifest[field] = replacement
+    prepared.manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="trusted policy"):
+        inspect_builder_change(prepared.change_root)
+
+
+@pytest.mark.parametrize("mutation", ("missing", "invalid"))
+def test_inspect_fails_closed_when_authoritative_policy_is_missing_or_tampered(
+    tmp_path, mutation
+):
+    from honeyos.companion.builder_workspace import inspect_builder_change
+
+    prepared = _prepared_change(tmp_path)
+    policy_path = prepared.change_root / "trusted-policy.json"
+    if mutation == "missing":
+        policy_path.unlink()
+    else:
+        policy = json.loads(policy_path.read_text(encoding="utf-8"))
+        policy["allowed_paths"] = ["**"]
+        policy_path.write_text(json.dumps(policy), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="trusted policy"):
+        inspect_builder_change(prepared.change_root)
+
+
+def test_review_binds_authoritative_policy_scope_and_digest(tmp_path):
+    from honeyos.companion.builder_workspace import inspect_builder_change
+
+    prepared = _prepared_change(tmp_path)
+    feature = prepared.workspace / "honeyos" / "companion" / "feature.py"
+    feature.write_text("VALUE = 'candidate'\n", encoding="utf-8")
+
+    report = inspect_builder_change(prepared.change_root)
+    report_json = json.loads(report.report_path.read_text(encoding="utf-8"))
+
+    assert report_json["allowed_paths"] == ["honeyos/companion/**"]
+    assert report_json["policy_digest"]
+    assert report_json["candidate_digest"] == report.candidate_digest
+
+
 def test_inspect_permits_ordinary_runtime_business_change(tmp_path):
     from honeyos.companion.builder_workspace import inspect_builder_change
 
@@ -277,6 +348,18 @@ def test_inspect_permits_ordinary_runtime_business_change(tmp_path):
         "honeyos/runtime/gateway.py",
         "honeyos/runtime/backup.py",
         "honeyos/runtime/service_manager.py",
+        "honeyos/gateway/platforms/api_server.py",
+        "honeyos/gateway/run.py",
+        "honeyos/tools/terminal_tool.py",
+        "honeyos/tools/code_execution_tool.py",
+        "honeyos/tools/computer_use_tool.py",
+        "honeyos/tools/computer_use/tool.py",
+        "honeyos/gateway/slash_commands.py",
+        "honeyos/agent/tool_executor.py",
+        "honeyos/runtime/approval_mode.py",
+        "honeyos/runtime/approvals_suggest.py",
+        "honeyos/runtime/subcommands/approvals.py",
+        "honeyos/runtime/write_approval_commands.py",
         "pyproject.toml",
         "uv.lock",
         "install.sh",
@@ -295,3 +378,19 @@ def test_builder_blocks_activation_and_dependency_surfaces(tmp_path, path):
 
     assert report.status == "blocked"
     assert path in report.protected_changes
+
+
+def test_builder_allows_ordinary_honeyos_code_but_blocks_execution_enforcement(tmp_path):
+    from honeyos.companion.builder_workspace import inspect_builder_change
+
+    prepared = _prepared_change(tmp_path, allowed_paths=("honeyos/**",))
+    allowed = prepared.workspace / "honeyos" / "companion" / "feature.py"
+    protected = prepared.workspace / "honeyos" / "tools" / "terminal_tool.py"
+    allowed.write_text("VALUE = 'candidate'\n", encoding="utf-8")
+    protected.write_text("def terminal(): pass\n", encoding="utf-8")
+
+    report = inspect_builder_change(prepared.change_root)
+
+    assert report.status == "blocked"
+    assert report.allowed_changes == ("honeyos/companion/feature.py",)
+    assert report.protected_changes == ("honeyos/tools/terminal_tool.py",)
