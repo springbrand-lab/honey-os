@@ -13,7 +13,8 @@
 - Self-improvement is enabled by default only for the canonical owner DM.
 - Every core activation requires a fresh, candidate-specific confirmation; “always allow” is not supported.
 - Normal Skill installation remains immediate and does not restart core HoneyOS.
-- Candidate code never modifies the trusted Builder activation, approval, auth, backup, filesystem-safety, or service-switch control plane. Ordinary Runtime business logic remains an allowed Builder surface. Before activation, the trusted control plane never imports or executes candidate code.
+- Candidate code never modifies the trusted Builder activation, approval, auth, backup, filesystem-safety, or service-switch control plane. Activation eligibility is controlled by a fixed, running-code-owned companion product allowlist; all host agent-loop, gateway, runtime, tool-dispatch, CLI, core, provider, and plugin paths are protected. Before activation, the trusted control plane never imports or executes candidate code.
+- Same-user OS state is not a sandbox. The task manifest and trusted-policy record bind/restrict a requested change for audit and UX, but cannot expand the static activation surface even if both are altered.
 - Candidate dependency/build changes (`pyproject.toml`, `uv.lock`, installers, release scripts) are blocked in this release.
 - `SOUL.md`, identity, relationship, memories, `state.db`, credentials, channel bindings, Skills, cron jobs, UI overlays, and projects remain under the existing `HONEYOS_HOME` and are never overlaid by a slot.
 - No GitHub account, push, branch merge, or PR is part of local activation.
@@ -50,7 +51,7 @@
 **Interfaces:**
 - Produces: `BuilderReviewReport.candidate_digest: str`
 - Produces: `inspect_builder_change(change_root) -> BuilderReviewReport` whose private report includes `source_commit`, `candidate_digest`, and `reviewed_at`.
-- Protects: activation modules, runtime command registration, dependency manifests, install/update scripts, service management, backup/restore, and approval delivery.
+- Protects: activation modules, runtime command registration, dependency manifests, install/update scripts, service management, backup/restore, approval delivery, and all non-static host execution/agent-loop paths. Dynamic task scope is a narrowing record, not the security boundary.
 
 - [ ] **Step 1: Write failing protected-path and digest tests**
 

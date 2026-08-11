@@ -25,6 +25,9 @@ def _source_repo(tmp_path: Path) -> Path:
     (source / "honeyos" / "companion" / "feature.py").write_text(
         "VALUE = 'live'\n", encoding="utf-8"
     )
+    (source / "honeyos" / "companion" / "persistent_memory.py").write_text(
+        "MEMORY = 'live'\n", encoding="utf-8"
+    )
     (source / "honeyos" / "tools" / "permission_policy.py").write_text(
         "PROTECTED = True\n", encoding="utf-8"
     )
@@ -138,7 +141,7 @@ def test_inspect_builder_change_blocks_protected_and_out_of_scope_edits(tmp_path
         builder_root=tmp_path / "HoneyOS Builder",
         change_id="memory-review-001",
     )
-    (prepared.workspace / "honeyos" / "companion" / "feature.py").write_text(
+    (prepared.workspace / "honeyos" / "companion" / "persistent_memory.py").write_text(
         "VALUE = 'candidate'\n", encoding="utf-8"
     )
     (prepared.workspace / "honeyos" / "tools" / "permission_policy.py").write_text(
@@ -151,7 +154,7 @@ def test_inspect_builder_change_blocks_protected_and_out_of_scope_edits(tmp_path
     report = inspect_builder_change(prepared.change_root)
 
     assert report.status == "blocked"
-    assert report.allowed_changes == ("honeyos/companion/feature.py",)
+    assert report.allowed_changes == ("honeyos/companion/persistent_memory.py",)
     assert report.protected_changes == ("honeyos/tools/permission_policy.py",)
     assert report.out_of_scope_changes == ("README.md",)
     assert report.installable is False
@@ -184,7 +187,7 @@ def test_inspect_binds_review_to_candidate_digest(tmp_path):
     from honeyos.companion.builder_workspace import inspect_builder_change
 
     prepared = _prepared_change(tmp_path)
-    feature = prepared.workspace / "honeyos" / "companion" / "feature.py"
+    feature = prepared.workspace / "honeyos" / "companion" / "persistent_memory.py"
     feature.write_text("VALUE = 'candidate'\n", encoding="utf-8")
 
     first = inspect_builder_change(prepared.change_root)
@@ -216,7 +219,7 @@ def test_inspect_rejects_workspace_commit_different_from_review_base(tmp_path):
     from honeyos.companion.builder_workspace import inspect_builder_change
 
     prepared = _prepared_change(tmp_path)
-    feature = prepared.workspace / "honeyos" / "companion" / "feature.py"
+    feature = prepared.workspace / "honeyos" / "companion" / "persistent_memory.py"
     feature.write_text("VALUE = 'committed candidate'\n", encoding="utf-8")
     _git(prepared.workspace, "add", str(feature.relative_to(prepared.workspace)))
     _git(prepared.workspace, "commit", "-m", "candidate change")
@@ -315,7 +318,7 @@ def test_review_binds_authoritative_policy_scope_and_digest(tmp_path):
     from honeyos.companion.builder_workspace import inspect_builder_change
 
     prepared = _prepared_change(tmp_path)
-    feature = prepared.workspace / "honeyos" / "companion" / "feature.py"
+    feature = prepared.workspace / "honeyos" / "companion" / "persistent_memory.py"
     feature.write_text("VALUE = 'candidate'\n", encoding="utf-8")
 
     report = inspect_builder_change(prepared.change_root)
@@ -324,19 +327,22 @@ def test_review_binds_authoritative_policy_scope_and_digest(tmp_path):
     assert report_json["allowed_paths"] == ["honeyos/companion/**"]
     assert report_json["policy_digest"]
     assert report_json["candidate_digest"] == report.candidate_digest
+    assert report_json["changed_paths"] == [
+        {"path": "honeyos/companion/persistent_memory.py", "status": " M"}
+    ]
 
 
-def test_inspect_permits_ordinary_runtime_business_change(tmp_path):
+def test_inspect_permits_explicit_companion_behavior_change(tmp_path):
     from honeyos.companion.builder_workspace import inspect_builder_change
 
-    prepared = _prepared_change(tmp_path, allowed_paths=("honeyos/runtime/**",))
-    path = prepared.workspace / "honeyos" / "runtime" / "model_routing.py"
-    path.write_text("MODEL = 'personalized'\n", encoding="utf-8")
+    prepared = _prepared_change(tmp_path, allowed_paths=("honeyos/companion/**",))
+    path = prepared.workspace / "honeyos" / "companion" / "persistent_memory.py"
+    path.write_text("MEMORY = 'personalized'\n", encoding="utf-8")
 
     report = inspect_builder_change(prepared.change_root)
 
     assert report.status == "review_ready"
-    assert report.allowed_changes == ("honeyos/runtime/model_routing.py",)
+    assert report.allowed_changes == ("honeyos/companion/persistent_memory.py",)
 
 
 @pytest.mark.parametrize(
@@ -384,7 +390,7 @@ def test_builder_allows_ordinary_honeyos_code_but_blocks_execution_enforcement(t
     from honeyos.companion.builder_workspace import inspect_builder_change
 
     prepared = _prepared_change(tmp_path, allowed_paths=("honeyos/**",))
-    allowed = prepared.workspace / "honeyos" / "companion" / "feature.py"
+    allowed = prepared.workspace / "honeyos" / "companion" / "persistent_memory.py"
     protected = prepared.workspace / "honeyos" / "tools" / "terminal_tool.py"
     allowed.write_text("VALUE = 'candidate'\n", encoding="utf-8")
     protected.write_text("def terminal(): pass\n", encoding="utf-8")
@@ -392,5 +398,52 @@ def test_builder_allows_ordinary_honeyos_code_but_blocks_execution_enforcement(t
     report = inspect_builder_change(prepared.change_root)
 
     assert report.status == "blocked"
-    assert report.allowed_changes == ("honeyos/companion/feature.py",)
+    assert report.allowed_changes == ("honeyos/companion/persistent_memory.py",)
     assert report.protected_changes == ("honeyos/tools/terminal_tool.py",)
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "honeyos/model_tools.py",
+        "honeyos/toolsets.py",
+        "honeyos/agent/agent_runtime_helpers.py",
+        "honeyos/runtime/middleware.py",
+        "honeyos/tools/registry.py",
+    ),
+)
+def test_static_activation_surface_blocks_control_plane_even_when_all_metadata_is_broadened(
+    tmp_path, path
+):
+    from honeyos.companion.builder_workspace import inspect_builder_change
+
+    prepared = _prepared_change(tmp_path, allowed_paths=("**",))
+    target = prepared.workspace / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("changed\n", encoding="utf-8")
+
+    # Same-user filesystem writes can alter both JSON records.  They must not
+    # turn a non-static product/control-plane path into an activatable change.
+    for record_path in (prepared.manifest_path, prepared.trusted_policy_path):
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        record["allowed_paths"] = ["**"]
+        record_path.write_text(json.dumps(record), encoding="utf-8")
+
+    report = inspect_builder_change(prepared.change_root)
+
+    assert report.status == "blocked"
+    assert path in report.protected_changes
+
+
+def test_static_activation_surface_keeps_safe_companion_ui_reviewable(tmp_path):
+    from honeyos.companion.builder_workspace import inspect_builder_change
+
+    prepared = _prepared_change(tmp_path, allowed_paths=("**",))
+    path = prepared.workspace / "honeyos" / "companion" / "web_assets" / "styles.css"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(".companion { color: honeydew; }\n", encoding="utf-8")
+
+    report = inspect_builder_change(prepared.change_root)
+
+    assert report.status == "review_ready"
+    assert report.allowed_changes == ("honeyos/companion/web_assets/styles.css",)

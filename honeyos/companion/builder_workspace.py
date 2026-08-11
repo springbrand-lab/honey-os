@@ -23,6 +23,24 @@ from typing import Iterable
 DEFAULT_PROTECTED_PATHS = (
     ".env",
     ".env.*",
+    # The host execution, service, gateway, agent-loop, and tool-dispatch
+    # trees are not a self-modification surface.  Listing the whole trees is
+    # intentional: new files in them must be protected by default too.
+    "honeyos/agent/**",
+    "honeyos/cli/**",
+    "honeyos/core/**",
+    "honeyos/gateway/**",
+    "honeyos/runtime/**",
+    "honeyos/tools/**",
+    "honeyos/migration/**",
+    "honeyos/plugins/**",
+    "honeyos/providers/**",
+    "honeyos/model_tools.py",
+    "honeyos/toolsets.py",
+    "honeyos/run_agent.py",
+    "honeyos/__main__.py",
+    "honeyos/__init__.py",
+    "honeyos/utils.py",
     "honeyos/agent/file_safety.py",
     "honeyos/companion/builder_workspace.py",
     "honeyos/companion/builder_activation*.py",
@@ -86,10 +104,41 @@ DEFAULT_PROTECTED_PATHS = (
 )
 
 
+# This is the release-1 security boundary for controlled self-modification.
+# It is owned by the currently running HoneyOS code, not a Builder task or its
+# JSON files.  The user can ask Builder to work on a narrower area, but neither
+# a broad task scope nor same-user edits to metadata can expand this list.
+#
+# Keep this deliberately explicit.  Companion product behavior, personality,
+# memories, ordinary companion skills, and the browser presentation are safe
+# to review/activate.  Configuration, installation, status/health, the
+# project/filesystem boundary, permission UI, and Builder wiring stay trusted.
+DEFAULT_ACTIVATABLE_PATHS = (
+    "docs/**",
+    "tests/**",
+    "README.md",
+    "honeyos/companion/activity.py",
+    "honeyos/companion/channels.py",
+    "honeyos/companion/continuity.py",
+    "honeyos/companion/distillation.py",
+    "honeyos/companion/memory_policy.py",
+    "honeyos/companion/model_intent.py",
+    "honeyos/companion/persistent_memory.py",
+    "honeyos/companion/profile.py",
+    "honeyos/companion/status_copy.py",
+    "honeyos/companion/topic_delivery.py",
+    "honeyos/companion/topic_pool.py",
+    "honeyos/companion/topic_scout.py",
+    "honeyos/companion/templates/**",
+    "honeyos/companion/web_assets/**",
+    "honeyos/companion/companion_skills/**",
+)
+
+
 # This version is intentionally owned by the running trusted control plane,
 # rather than by a candidate manifest.  Older manifests must be recreated so a
 # candidate cannot dilute a newly added safety boundary by editing JSON.
-BUILDER_POLICY_VERSION = 2
+BUILDER_POLICY_VERSION = 3
 TRUSTED_POLICY_SCHEMA_VERSION = 1
 
 
@@ -193,13 +242,13 @@ def _load_json_object(path: Path, *, description: str) -> dict[str, object]:
 
 
 def _load_trusted_policy(change_root: Path) -> tuple[dict[str, object], str]:
-    """Load state kept outside the Builder's candidate source checkout.
+    """Load Builder task metadata kept outside its candidate checkout.
 
-    Trust assumption: model-driven Builder work is restricted to the isolated
-    ``source`` workspace.  ``change_root`` lives in HoneyOS state storage and
-    is written/read only by this trusted control-plane module.  It is not a
-    user-facing secret; its separation, rather than a value copied into the
-    mutable manifest, makes the reviewed scope authoritative.
+    This record binds the candidate to its requested goal and makes a useful
+    audit trail.  It is *not* a security boundary: a same-user process may be
+    able to alter local files.  Activation eligibility is instead decided by
+    :data:`DEFAULT_ACTIVATABLE_PATHS` and :data:`DEFAULT_PROTECTED_PATHS` in
+    the currently running trusted code.
     """
 
     path = _trusted_policy_path(change_root)
@@ -347,6 +396,7 @@ def prepare_builder_change(
             "workspace_root": str(workspace_root),
             "allowed_paths": list(allowed),
             "protected_paths": list(DEFAULT_PROTECTED_PATHS),
+            "activatable_paths": list(DEFAULT_ACTIVATABLE_PATHS),
             "data_access": {
                 "real_user_memory": False,
                 "credentials": False,
@@ -497,6 +547,12 @@ def _matches_any(path: str, patterns: Iterable[str]) -> bool:
     return any(fnmatch.fnmatchcase(path, pattern) for pattern in patterns)
 
 
+def _is_static_activatable(path: str) -> bool:
+    """Return whether a path belongs to the fixed release-1 product surface."""
+
+    return _matches_any(path, DEFAULT_ACTIVATABLE_PATHS)
+
+
 def inspect_builder_change(change_root: Path | str) -> BuilderReviewReport:
     """Classify a candidate diff without installing or touching live code."""
 
@@ -510,6 +566,7 @@ def inspect_builder_change(change_root: Path | str) -> BuilderReviewReport:
         manifest.get("schema_version") != 2
         or manifest.get("policy_version") != BUILDER_POLICY_VERSION
         or manifest.get("protected_paths") != list(DEFAULT_PROTECTED_PATHS)
+        or manifest.get("activatable_paths") != list(DEFAULT_ACTIVATABLE_PATHS)
     ):
         raise ValueError("builder change policy is stale or has been modified")
     if not _manifest_matches_trusted_policy(manifest, policy):
@@ -526,9 +583,9 @@ def inspect_builder_change(change_root: Path | str) -> BuilderReviewReport:
         raise ValueError("builder workspace revision differs from the trusted review base")
 
     allowed_patterns = _validate_allowed_paths(policy["allowed_paths"])
-    # Never trust the manifest to define its own protected surface.  It merely
-    # records the policy that prepared it; the active code enforces the current
-    # immutable list above.
+    # Dynamic task scope is a useful narrowing/relevance record.  It is never
+    # the security boundary: static protected paths win first and only the
+    # running release's fixed activatable surface can be review-ready.
     protected_patterns = DEFAULT_PROTECTED_PATHS
     allowed: list[str] = []
     protected: list[str] = []
@@ -539,6 +596,8 @@ def inspect_builder_change(change_root: Path | str) -> BuilderReviewReport:
             out_of_scope.append(changed.relative)
         elif _matches_any(changed.relative, protected_patterns):
             protected.append(changed.relative)
+        elif not _is_static_activatable(changed.relative):
+            out_of_scope.append(changed.relative)
         elif _matches_any(changed.relative, allowed_patterns):
             allowed.append(changed.relative)
         else:
@@ -566,6 +625,10 @@ def inspect_builder_change(change_root: Path | str) -> BuilderReviewReport:
         "policy_digest": policy_digest,
         "candidate_digest": digest,
         "reviewed_at": datetime.now(timezone.utc).isoformat(),
+        "changed_paths": [
+            {"path": changed.relative, "status": changed.status}
+            for changed in changed_paths
+        ],
         "allowed_changes": allowed,
         "protected_changes": protected,
         "out_of_scope_changes": out_of_scope,

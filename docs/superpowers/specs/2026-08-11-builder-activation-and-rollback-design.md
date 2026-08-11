@@ -107,15 +107,22 @@ HoneyOS, not code imported from the candidate. It owns:
 
 All activation modules, CLI commands, manifests, service-switch helpers, and
 confirmation handlers are added to `DEFAULT_PROTECTED_PATHS`. A candidate may
-not modify or widen this control plane.
+not modify or widen this control plane.  Release 1 additionally uses a
+running-code-owned `DEFAULT_ACTIVATABLE_PATHS` allowlist: only explicit
+companion product behavior, persona/memory, browser presentation, ordinary
+companion skills, tests, and documentation can be eligible for activation.
+The host agent loop, gateway, runtime, tool dispatch, CLI, core, and provider
+trees are protected wholesale. Classification is protected-first, then the
+static allowlist, then the task's requested scope.
 
 The Builder model can edit only its isolated candidate `source` workspace.
-Its authoritative identity, goal, base revision, and allowed scope are stored
-as a private `trusted-policy.json` record in HoneyOS state outside that
-workspace. The candidate-visible manifest is only a mirror and is rejected if
-it differs. This is a filesystem trust boundary, not a user-facing secret: a
-user who can modify HoneyOS state/control-plane files can already replace the
-running application.
+Its identity, goal, base revision, and requested scope are recorded in
+`trusted-policy.json` outside that workspace. The candidate-visible manifest
+is a mirror and is rejected when it differs, which keeps reviews coherent and
+auditable. This metadata is not a sandbox or security boundary: a same-user
+terminal may change local state. The static activation allowlist in the
+currently running code is the security boundary; dynamic requested scope only
+narrows the task and improves review UX.
 
 ### 2. Version slots
 
@@ -341,8 +348,10 @@ active, previous, switching, or recovery-required assets are never pruned.
 Automated tests must prove:
 
 1. PR #25's existing prepare/inspect boundaries remain intact.
-2. A candidate cannot edit activation, approval, auth, Builder, dependency, or
-   filesystem-safety code.
+2. A candidate cannot activate changes outside the running release's static
+   companion product surface, including activation, approval, auth, Builder,
+   dependency, filesystem-safety, host agent-loop, gateway, runtime, and tool
+   dispatch code, even if same-user metadata is broadened.
 3. Staging never reads or copies real user data or credentials.
 4. Changed candidate bytes invalidate the confirmation.
 5. Wrong-owner, group, expired, replayed, and model-forged confirmations fail.
