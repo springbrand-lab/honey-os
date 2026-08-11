@@ -20,11 +20,16 @@
 - The public CLI exposes Builder, the service loads an active complete slot via
   `PYTHONPATH`, and activation tests prove successful switching and rollback
   without modifying memory/configuration/credentials.
+- Linux rewrites and reloads its user unit for the current slot before every
+  restart.  Health requires the local gateway `/health` response and the live
+  gateway's source-slot attestation, not merely a service-manager process
+  state.  An interrupted switch journal restores the prior pointer when the
+  Store next opens.
 
 ## Verification
 
 - Builder/activation/service/skill/config/distribution/Web combined run:
-  **169 passed**.
+  **194 passed**.
 - Ruff on all changed Python files: **passed**.
 - `uv lock --check`: **passed**.
 - staged and unstaged whitespace diff checks: **passed**.

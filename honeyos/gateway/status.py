@@ -1000,6 +1000,17 @@ def write_runtime_status(
     payload["argv"] = current_record["argv"]
     payload["start_time"] = current_record["start_time"]
     payload["updated_at"] = _utc_now_iso()
+    try:
+        import honeyos
+
+        source_root = Path(honeyos.__file__).resolve().parent.parent
+        payload["runtime_attestation"] = {
+            "pid": current_record["pid"],
+            "source_root": str(source_root),
+            "attested_at": _utc_now_iso(),
+        }
+    except (AttributeError, OSError, TypeError):
+        payload.pop("runtime_attestation", None)
 
     if gateway_state is not _UNSET:
         payload["gateway_state"] = gateway_state

@@ -4,7 +4,7 @@ description: "把用户对 HoneyOS 产品外观和陪伴行为的改进做成独
 version: 0.2.0
 author: HoneyOS
 license: MIT
-platforms: [linux, macos, windows]
+platforms: [linux, macos]
 metadata:
   honeyos:
     tags: [honeyos, builder, self-improvement]
@@ -15,6 +15,8 @@ metadata:
 # HoneyOS Builder
 
 用于用户明确希望改变 HoneyOS 产品本身的页面、陪伴表达或可扩展功能。它在单独的候选工作区完成改动，用户说可以后才替换正在使用的版本；如果新版本没能正常启动，会自动恢复旧版本。
+
+当前自动换版只支持 macOS 和 Linux；Windows 上不要尝试启用候选版本。
 
 ## 先判断是不是 Builder
 

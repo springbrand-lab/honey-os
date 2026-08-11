@@ -45,11 +45,16 @@ of changed Python.  It does not import, execute, install, test, or network the
 candidate.
 
 `activate_confirmed()` only accepts an `awaiting_confirmation` record.  It
-re-runs static checks, records the old pointer, atomically switches the current
-slot pointer, restarts the trusted service, and polls its normal health status
-for at most 30 seconds.  Failure atomically restores the old pointer and
-restarts that service.  State transitions are durable CAS updates, so a
-duplicate natural-language confirmation cannot activate the same record twice.
+re-runs static checks, writes a durable switch journal with the old pointer,
+atomically switches the current slot pointer, restarts the trusted service, and
+polls for at most 30 seconds.  Health requires the local gateway `/health`
+endpoint plus a live gateway status attestation whose imported source root is
+the selected slot; a service-manager “active” result alone is insufficient.
+Linux regenerates and daemon-reloads the user systemd unit before every switch
+and rollback.  Failure restores the old pointer and restarts that service; an
+interrupted switch is recovered to `recovery_required` the next time the Store
+opens.  State transitions are durable CAS updates, so a duplicate
+natural-language confirmation cannot activate the same record twice.
 
 ## Data continuity
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import platform
 import subprocess
 import sys
 from pathlib import Path
@@ -54,16 +55,18 @@ def build_parser(
         help="Enable a reviewed change after the user has said to switch it on",
     )
     activate.add_argument("change_id", help="Identifier returned by builder prepare")
+    sub.add_parser("status", help="Show Builder records without changing HoneyOS data")
     parser.set_defaults(_builder_parser=parser)
     return parser
 
 
-def builder_command(args: argparse.Namespace) -> int:
+def builder_command(args: argparse.Namespace, *, home: Path | None = None) -> int:
     action = getattr(args, "builder_action", None)
     if not action:
         args._builder_parser.print_help()
         return 0
     try:
+        data_home = (home or get_honeyos_home()).expanduser().resolve()
         root = project_root() / "HoneyOS Builder"
         if action == "prepare":
             prepared = prepare_builder_change(
@@ -72,7 +75,7 @@ def builder_command(args: argparse.Namespace) -> int:
                 allowed_paths=args.allowed_paths,
                 builder_root=root,
                 change_id=args.change_id,
-                state_root=get_honeyos_home() / "builder",
+                state_root=data_home / "builder",
             )
             payload = {
                 "change_id": prepared.change_id,
@@ -82,7 +85,7 @@ def builder_command(args: argparse.Namespace) -> int:
             }
         elif action == "inspect":
             report = inspect_builder_change(
-                get_honeyos_home() / "builder" / "changes" / args.change_id
+                data_home / "builder" / "changes" / args.change_id
             )
             payload = {
                 "change_id": args.change_id,
@@ -97,10 +100,15 @@ def builder_command(args: argparse.Namespace) -> int:
         elif action == "activate":
             from honeyos.companion.builder_activation import ActivationError, ActivationStore
 
-            change_root = get_honeyos_home() / "builder" / "changes" / args.change_id
+            if platform.system() not in {"Darwin", "Linux"}:
+                raise ActivationError(
+                    "Builder activation is currently supported on macOS and Linux only"
+                )
+
+            change_root = data_home / "builder" / "changes" / args.change_id
             policy, _policy_digest = _load_trusted_policy(change_root)
             source_repo = Path(str(policy["source_repo"])).expanduser().resolve()
-            store = ActivationStore(get_honeyos_home(), bundled_root=source_repo)
+            store = ActivationStore(data_home, bundled_root=source_repo)
             staged = store.stage(change_root)
             receipt = store.preflight(staged.activation_id)
             if not receipt.success:
@@ -118,10 +126,26 @@ def builder_command(args: argparse.Namespace) -> int:
                 "state": activated.state,
                 "installation": "activated" if activated.state == "healthy" else "rolled_back",
             }
+        elif action == "status":
+            records = []
+            for record_path in sorted((data_home / "runtime" / "activations").glob("*.json")):
+                try:
+                    record = json.loads(record_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                if isinstance(record, dict):
+                    records.append(
+                        {
+                            "activation_id": record.get("activation_id"),
+                            "change_id": record.get("change_id"),
+                            "state": record.get("state"),
+                        }
+                    )
+            payload = {"records": records}
         else:
             print(f"builder: unknown action: {action}", file=sys.stderr)
             return 2
-    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
         print(f"builder: {exc}", file=sys.stderr)
         return 2
 

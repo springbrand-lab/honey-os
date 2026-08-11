@@ -144,3 +144,83 @@ def test_macos_restart_reinstalls_service_after_bootout(
             str(plist_path),
         ),
     ]
+
+
+def test_linux_restart_rerenders_active_slot_unit_then_reloads_and_restarts(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import json
+
+    service = _service_module()
+    home = tmp_path / ".honeyos"
+    slot_source = home / "runtime" / "slots" / "candidate" / "source"
+    slot_source.mkdir(parents=True)
+    (home / "runtime" / "current-slot.json").write_text(
+        json.dumps({"activation_id": "candidate", "source_root": str(slot_source)}),
+        encoding="utf-8",
+    )
+    identity = service.ServiceIdentity.default(home)
+    unit_path = tmp_path / "honeyos-gateway.service"
+    calls: list[tuple[str, ...]] = []
+
+    monkeypatch.setattr(service.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(service, "systemd_unit_path", lambda _identity: unit_path)
+
+    assert service.restart_service(
+        identity, runner=lambda argv, **_kwargs: calls.append(tuple(argv)) or 0
+    ) == 0
+
+    assert f"PYTHONPATH={slot_source}" in unit_path.read_text(encoding="utf-8")
+    assert calls == [
+        ("systemctl", "--user", "daemon-reload"),
+        ("systemctl", "--user", "restart", identity.linux_unit),
+    ]
+
+
+def test_gateway_health_requires_a_live_attestation_for_the_active_slot(tmp_path: Path) -> None:
+    import json
+
+    service = _service_module()
+    home = tmp_path / ".honeyos"
+    slot_source = home / "runtime" / "slots" / "candidate" / "source"
+    slot_source.mkdir(parents=True)
+    (home / "runtime" / "current-slot.json").write_text(
+        json.dumps({"activation_id": "candidate", "source_root": str(slot_source)}),
+        encoding="utf-8",
+    )
+    identity = service.ServiceIdentity.default(home)
+    status = {
+        "pid": 8123,
+        "gateway_state": "running",
+        "runtime_attestation": {"pid": 8123, "source_root": str(slot_source)},
+    }
+
+    assert service.service_health_check(
+        identity,
+        health_probe=lambda _identity: True,
+        status_reader=lambda _path: status,
+        running_probe=lambda _path: True,
+    ) is True
+
+    status["runtime_attestation"]["source_root"] = str(tmp_path / "old-slot")
+    assert service.service_health_check(
+        identity,
+        health_probe=lambda _identity: True,
+        status_reader=lambda _path: status,
+        running_probe=lambda _path: True,
+    ) is False
+
+
+def test_gateway_runtime_status_records_the_imported_code_source(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("HONEYOS_HOME", str(tmp_path / ".honeyos"))
+    from honeyos.gateway.status import read_runtime_status, write_runtime_status
+    import honeyos
+
+    write_runtime_status(gateway_state="running")
+
+    status = read_runtime_status()
+    assert status is not None
+    assert status["runtime_attestation"]["source_root"] == str(
+        Path(honeyos.__file__).resolve().parent.parent
+    )
+    assert status["runtime_attestation"]["pid"] == status["pid"]

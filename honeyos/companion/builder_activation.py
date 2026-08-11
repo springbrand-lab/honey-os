@@ -457,11 +457,16 @@ class ActivationStore:
         return self.journals / f"{activation_id}.json"
 
     def _reconcile_unlocked(self) -> None:
-        """Complete or discard a prior staging attempt before accepting work."""
+        """Recover an interrupted stage or switch before accepting work."""
 
         for journal_path in sorted(self.journals.glob("*.json")):
             journal = _read_private_object(journal_path, description="activation staging journal")
-            if journal.get("schema_version") != _JOURNAL_SCHEMA_VERSION or journal.get("state") != "staging":
+            if journal.get("schema_version") != _JOURNAL_SCHEMA_VERSION:
+                raise ActivationError("activation staging journal is invalid")
+            if journal.get("state") == "switching":
+                self._reconcile_interrupted_switch_unlocked(journal_path, journal)
+                continue
+            if journal.get("state") != "staging":
                 raise ActivationError("activation staging journal is invalid")
             activation_id = journal.get("activation_id")
             if not isinstance(activation_id, str) or not activation_id:
@@ -487,6 +492,63 @@ class ActivationStore:
             for temporary in self.slots.glob(f".{activation_id}.*"):
                 shutil.rmtree(temporary, ignore_errors=True)
             _fsync_directory(self.slots)
+
+    def _restore_pointer_unlocked(self, previous: object) -> None:
+        if previous is None:
+            self._current_pointer_path.unlink(missing_ok=True)
+            return
+        if not isinstance(previous, dict):
+            raise ActivationError("activation switch journal is invalid")
+        activation_id = previous.get("activation_id")
+        source_root = previous.get("source_root")
+        if not isinstance(activation_id, str) or not isinstance(source_root, str):
+            raise ActivationError("activation switch journal is invalid")
+        expected = self._slot_root(activation_id) / "source"
+        if Path(source_root).expanduser().resolve() != expected.resolve():
+            raise ActivationError("activation switch journal is invalid")
+        _write_private_json(self._current_pointer_path, previous)
+
+    def _reconcile_interrupted_switch_unlocked(
+        self, journal_path: Path, journal: Mapping[str, object]
+    ) -> None:
+        """Restore the prior code pointer after a process dies mid-switch.
+
+        A new Store cannot safely restart a service while it is merely opening
+        state, so it restores the durable pointer and leaves a precise
+        ``recovery_required`` record for the trusted service lifecycle to act
+        on.  This never touches user memory or configuration.
+        """
+
+        activation_id = journal.get("activation_id")
+        if not isinstance(activation_id, str) or not activation_id:
+            raise ActivationError("activation switch journal is invalid")
+        self._restore_pointer_unlocked(journal.get("previous_pointer"))
+        record_path = self._record_path(activation_id)
+        if record_path.exists():
+            payload, record = self._load_record(activation_id)
+            if record.state in {"switching", "rolling_back"}:
+                payload["state"] = "recovery_required"
+                payload["updated_at"] = _utc_now()
+                payload["detail"] = "interrupted slot switch restored the previous pointer"
+                _write_private_json(record_path, payload)
+        journal_path.unlink(missing_ok=True)
+        _fsync_directory(self.journals)
+
+    def _write_switch_journal_unlocked(
+        self, record: ActivationRecord, previous: Mapping[str, object] | None
+    ) -> Path:
+        path = self._journal_path(record.activation_id)
+        _write_private_json(
+            path,
+            {
+                "schema_version": _JOURNAL_SCHEMA_VERSION,
+                "state": "switching",
+                "activation_id": record.activation_id,
+                "previous_pointer": dict(previous) if previous is not None else None,
+                "created_at": _utc_now(),
+            },
+        )
+        return path
 
     def reconcile(self) -> None:
         with self._locked():
@@ -1067,9 +1129,9 @@ class ActivationStore:
         return restart_service(ServiceIdentity.default(self.home)) == 0
 
     def _default_health_check(self, _record: ActivationRecord) -> bool:
-        from honeyos.cli.service import ServiceIdentity, service_status
+        from honeyos.cli.service import ServiceIdentity, service_health_check
 
-        return service_status(ServiceIdentity.default(self.home)) == 0
+        return service_health_check(ServiceIdentity.default(self.home))
 
     def activate_confirmed(
         self,
@@ -1099,17 +1161,31 @@ class ActivationStore:
                 self._previous_pointer_path.unlink(missing_ok=True)
             else:
                 _write_private_json(self._previous_pointer_path, previous)
-            self._write_current_pointer_unlocked(record)
             payload["state"] = "switching"
             payload["updated_at"] = _utc_now()
             _write_private_json(record.record_path, payload)
             switching = self._record_from_payload(payload, record.record_path)
+            switch_journal = self._write_switch_journal_unlocked(switching, previous)
+            self._crash("before_current_pointer_switch")
+            self._write_current_pointer_unlocked(switching)
+            self._crash("after_current_pointer_switch")
 
-        restarted = bool(restart_fn())
+        failure_detail = ""
+        try:
+            restarted = bool(restart_fn())
+        except Exception as exc:
+            restarted = False
+            failure_detail = f"restart failed: {exc}"
         deadline = time.monotonic() + max(0.0, health_timeout_seconds)
         healthy = False
         while restarted and time.monotonic() <= deadline:
-            if health_fn(switching):
+            try:
+                response_healthy = bool(health_fn(switching))
+            except Exception as exc:
+                failure_detail = f"health check failed: {exc}"
+                response_healthy = False
+                restarted = False
+            if response_healthy:
                 healthy = True
                 break
             if time.monotonic() >= deadline:
@@ -1124,25 +1200,36 @@ class ActivationStore:
                 payload["state"] = "healthy"
                 payload["updated_at"] = _utc_now()
                 _write_private_json(record.record_path, payload)
+                switch_journal.unlink(missing_ok=True)
+                _fsync_directory(self.journals)
                 return self._record_from_payload(payload, record.record_path)
             payload["state"] = "rolling_back"
             payload["updated_at"] = _utc_now()
             _write_private_json(record.record_path, payload)
             previous = self._read_slot_pointer_unlocked(self._previous_pointer_path)
-            if previous is None:
-                self._current_pointer_path.unlink(missing_ok=True)
-            else:
-                _write_private_json(self._current_pointer_path, previous)
+            self._restore_pointer_unlocked(previous)
 
-        restart_fn()
+        rollback_restart_failed = False
+        try:
+            rollback_restart_failed = not bool(restart_fn())
+            if rollback_restart_failed:
+                failure_detail = f"{failure_detail}; rollback restart returned failure".strip("; ")
+        except Exception as exc:
+            rollback_restart_failed = True
+            failure_detail = f"{failure_detail}; rollback restart failed: {exc}".strip("; ")
         with self._locked():
             payload, record = self._load_record(activation_id)
             if record.state != "rolling_back":
                 raise ActivationConflict("activation changed during rollback")
-            payload["state"] = "rolled_back"
+            payload["state"] = "recovery_required" if rollback_restart_failed else "rolled_back"
             payload["updated_at"] = _utc_now()
-            payload["detail"] = "new slot did not become healthy; restored previous slot"
+            payload["detail"] = (
+                failure_detail
+                or "new slot did not become healthy; restored previous slot"
+            )
             _write_private_json(record.record_path, payload)
+            switch_journal.unlink(missing_ok=True)
+            _fsync_directory(self.journals)
             return self._record_from_payload(payload, record.record_path)
 
     def resolve_candidate_module(self, activation_id: str, module: str) -> Path:

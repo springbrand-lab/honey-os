@@ -50,8 +50,9 @@ workspace.
    PR, opaque callback, or special owner token is part of the user flow.
 5. On an explicit yes, `honeyos builder activate <change-id>` revalidates the
    candidate, writes the old pointer as `previous-slot.json`, atomically writes
-   `current-slot.json`, restarts the trusted service, and waits up to 30
-   seconds for the health check.
+   `current-slot.json`, writes a durable handoff journal, restarts the trusted
+   service, and waits up to 30 seconds for a real local gateway health response
+   and matching source-slot attestation.
 6. A healthy service marks the slot `healthy`.  If restart or health fails, it
    restores the previous pointer (or removes a first-install pointer), restarts
    the old service, and marks the record `rolled_back`.
@@ -70,7 +71,8 @@ through its generated service environment while retaining that same data home.
   preserves memory/configuration/credentials byte-for-byte.
 - A failing health check restores the previous pointer and restarts it.
 - Service definitions on macOS/systemd load the complete active slot through
-  `PYTHONPATH` without changing the HoneyOS data home.
+  `PYTHONPATH` without changing the HoneyOS data home; Linux regenerates and
+  daemon-reloads its unit before every switch and rollback.
 
 Dynamic smoke checks are deliberately post-confirmation work for a later task;
 this release only performs static candidate validation before a user chooses to

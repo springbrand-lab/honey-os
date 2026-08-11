@@ -83,8 +83,8 @@ def test_default_service_handoff_targets_the_activation_data_home(tmp_path, monk
         lambda identity: observed.append(identity.data_home) or 0,
     )
     monkeypatch.setattr(
-        "honeyos.cli.service.service_status",
-        lambda identity: observed.append(identity.data_home) or 0,
+        "honeyos.cli.service.service_health_check",
+        lambda identity: observed.append(identity.data_home) or True,
     )
 
     assert store._default_restart() is True
@@ -292,6 +292,53 @@ def test_failed_confirmed_activation_restores_previous_slot_and_restarts_it(tmp_
     assert rolled_back.state == "rolled_back"
     assert restarts == ["restart", "restart"]
     assert store.current_source() is None
+
+
+def test_restart_exception_rolls_back_the_slot_and_records_the_failure(tmp_path):
+    store, staged, _prepared, _review = _staged_activation(tmp_path)
+    store.preflight(staged.activation_id)
+    store.transition(staged.activation_id, "staged", "awaiting_confirmation")
+    attempts: list[str] = []
+
+    def restart() -> bool:
+        attempts.append("restart")
+        if len(attempts) == 1:
+            raise OSError("service manager unavailable")
+        return True
+
+    rolled_back = store.activate_confirmed(
+        staged.activation_id,
+        restart=restart,
+        health_check=lambda _record: True,
+    )
+
+    assert rolled_back.state == "rolled_back"
+    assert "service manager unavailable" in rolled_back.record_path.read_text(encoding="utf-8")
+    assert attempts == ["restart", "restart"]
+    assert store.current_source() is None
+
+
+def test_reconcile_restores_previous_pointer_after_crash_during_slot_switch(tmp_path):
+    store, staged, _prepared, _review = _staged_activation(tmp_path)
+    store.preflight(staged.activation_id)
+    store.transition(staged.activation_id, "staged", "awaiting_confirmation")
+
+    def crash_after_pointer_swap(point: str) -> None:
+        if point == "after_current_pointer_switch":
+            raise SystemExit("simulated switching crash")
+
+    store._crash_hook = crash_after_pointer_swap
+    with pytest.raises(SystemExit, match="simulated switching crash"):
+        store.activate_confirmed(
+            staged.activation_id,
+            restart=lambda: True,
+            health_check=lambda _record: True,
+        )
+
+    recovered = type(store)(store.home, store.bundled_root)
+    _payload, record = recovered._load_record(staged.activation_id)
+    assert record.state == "recovery_required"
+    assert recovered.current_source() is None
 
 
 def test_stage_rejects_executable_candidate_file(tmp_path):

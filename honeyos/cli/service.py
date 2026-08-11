@@ -9,6 +9,8 @@ import plistlib
 import shlex
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -119,6 +121,14 @@ def systemd_unit_path(identity: ServiceIdentity) -> Path:
     return Path.home() / ".config" / "systemd" / "user" / f"{identity.linux_unit}.service"
 
 
+def _write_systemd_unit(identity: ServiceIdentity) -> Path:
+    path = systemd_unit_path(identity)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(render_systemd_unit(identity), encoding="utf-8")
+    path.chmod(0o600)
+    return path
+
+
 def install_service(identity: ServiceIdentity, runner: Runner = _run) -> int:
     identity.data_home.mkdir(parents=True, exist_ok=True)
     (identity.data_home / "logs").mkdir(parents=True, exist_ok=True)
@@ -132,10 +142,7 @@ def install_service(identity: ServiceIdentity, runner: Runner = _run) -> int:
         runner(["launchctl", "bootout", f"{domain}/{identity.macos_label}"])
         return _returncode(runner(["launchctl", "bootstrap", domain, str(path)]))
     if system == "Linux":
-        path = systemd_unit_path(identity)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(render_systemd_unit(identity), encoding="utf-8")
-        path.chmod(0o600)
+        _write_systemd_unit(identity)
         if _returncode(runner(["systemctl", "--user", "daemon-reload"])) != 0:
             return 1
         return _returncode(
@@ -155,7 +162,9 @@ def start_service(identity: ServiceIdentity, runner: Runner = _run) -> int:
                 ]
             )
         )
-    return _returncode(runner(["systemctl", "--user", "start", identity.linux_unit]))
+    if platform.system() == "Linux":
+        return _returncode(runner(["systemctl", "--user", "start", identity.linux_unit]))
+    raise RuntimeError("HoneyOS background service supports macOS and Linux")
 
 
 def stop_service(identity: ServiceIdentity, runner: Runner = _run) -> int:
@@ -169,7 +178,9 @@ def stop_service(identity: ServiceIdentity, runner: Runner = _run) -> int:
                 ]
             )
         )
-    return _returncode(runner(["systemctl", "--user", "stop", identity.linux_unit]))
+    if platform.system() == "Linux":
+        return _returncode(runner(["systemctl", "--user", "stop", identity.linux_unit]))
+    raise RuntimeError("HoneyOS background service supports macOS and Linux")
 
 
 def restart_service(identity: ServiceIdentity, runner: Runner = _run) -> int:
@@ -178,7 +189,14 @@ def restart_service(identity: ServiceIdentity, runner: Runner = _run) -> int:
         # kickstart cannot find it. Re-render and bootstrap the exact HoneyOS
         # service definition instead.
         return install_service(identity, runner=runner)
-    return _returncode(runner(["systemctl", "--user", "restart", identity.linux_unit]))
+    if platform.system() == "Linux":
+        # The active slot is selected through PYTHONPATH in the unit.  Render
+        # it again before every restart, including a rollback restart.
+        _write_systemd_unit(identity)
+        if _returncode(runner(["systemctl", "--user", "daemon-reload"])) != 0:
+            return 1
+        return _returncode(runner(["systemctl", "--user", "restart", identity.linux_unit]))
+    raise RuntimeError("HoneyOS background service supports macOS and Linux")
 
 
 def service_status(identity: ServiceIdentity, runner: Runner = _run) -> int:
@@ -186,4 +204,67 @@ def service_status(identity: ServiceIdentity, runner: Runner = _run) -> int:
         return _returncode(
             runner(["launchctl", "print", f"gui/{os.getuid()}/{identity.macos_label}"])
         )
-    return _returncode(runner(["systemctl", "--user", "is-active", identity.linux_unit]))
+    if platform.system() == "Linux":
+        return _returncode(runner(["systemctl", "--user", "is-active", identity.linux_unit]))
+    raise RuntimeError("HoneyOS background service supports macOS and Linux")
+
+
+def _gateway_health_probe(identity: ServiceIdentity) -> bool:
+    """Probe the local gateway endpoint, never merely a service-manager state."""
+
+    port = 8642
+    try:
+        import yaml
+
+        config = yaml.safe_load((identity.data_home / "config.yaml").read_text(encoding="utf-8"))
+        platforms = config.get("platforms", {}) if isinstance(config, dict) else {}
+        api_server = platforms.get("api_server", {}) if isinstance(platforms, dict) else {}
+        configured = api_server.get("port") if isinstance(api_server, dict) else None
+        if configured is not None:
+            port = int(configured)
+    except (OSError, TypeError, ValueError, yaml.YAMLError):
+        pass
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1.0) as response:
+            if not 200 <= int(response.status) < 300:
+                return False
+            payload = json.loads(response.read().decode("utf-8"))
+    except (OSError, ValueError, urllib.error.URLError):
+        return False
+    return isinstance(payload, dict) and payload.get("status") == "ok"
+
+
+def service_health_check(
+    identity: ServiceIdentity,
+    *,
+    health_probe: Callable[[ServiceIdentity], bool] | None = None,
+    status_reader: Callable[[Path], dict | None] | None = None,
+    running_probe: Callable[[Path], bool] | None = None,
+) -> bool:
+    """Require a live gateway health response and source-slot attestation."""
+
+    expected_source = _current_slot_source(identity)
+    if expected_source is None:
+        return False
+    if not (health_probe or _gateway_health_probe)(identity):
+        return False
+    if status_reader is None or running_probe is None:
+        from honeyos.gateway.status import is_gateway_running, read_runtime_status
+
+        status_reader = status_reader or read_runtime_status
+        running_probe = running_probe or is_gateway_running
+    status = status_reader(identity.data_home / "gateway_state.json")
+    if not isinstance(status, dict) or status.get("gateway_state") != "running":
+        return False
+    if not running_probe(identity.data_home / "gateway.pid"):
+        return False
+    attestation = status.get("runtime_attestation")
+    if not isinstance(attestation, dict):
+        return False
+    try:
+        attested_source = Path(str(attestation["source_root"])).expanduser().resolve()
+        expected_pid = int(status["pid"])
+        attested_pid = int(attestation["pid"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return attested_source == expected_source.resolve() and attested_pid == expected_pid

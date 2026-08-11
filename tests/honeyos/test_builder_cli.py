@@ -114,6 +114,60 @@ def test_public_honeyos_command_exposes_builder():
     assert "activate" in completed.stdout
 
 
+def test_public_builder_status_never_initializes_or_mutates_the_selected_home(tmp_path):
+    home = tmp_path / ".honeyos"
+    (home / "memories").mkdir(parents=True)
+    (home / "skills" / "existing").mkdir(parents=True)
+    for relative, content in {
+        "config.yaml": b"model: preserved\n",
+        ".env": b"API_KEY=preserved\n",
+        "memories/SOUL.md": b"name: preserved\n",
+        "memories/state.sqlite": b"memory-bytes",
+        "skills/existing/SKILL.md": b"# preserved\n",
+        "runtime.json": b"{\"existing\":true}\n",
+    }.items():
+        path = home / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+    before = {
+        path.relative_to(home).as_posix(): path.read_bytes()
+        for path in home.rglob("*")
+        if path.is_file()
+    }
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; from honeyos.cli.main import main; "
+            "raise SystemExit(main(['--home', sys.argv[1], 'builder', 'status']))",
+            str(home),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    after = {
+        path.relative_to(home).as_posix(): path.read_bytes()
+        for path in home.rglob("*")
+        if path.is_file()
+    }
+    assert completed.returncode == 0
+    assert after == before
+
+
+def test_builder_activation_fails_closed_on_windows(monkeypatch, capsys):
+    from honeyos.runtime.builder_cmd import build_parser, builder_command
+
+    parser = argparse.ArgumentParser()
+    build_parser(parser.add_subparsers(dest="command"))
+    monkeypatch.setattr("platform.system", lambda: "Windows")
+
+    assert builder_command(parser.parse_args(["builder", "activate", "candidate-001"])) == 2
+
+    assert "macOS and Linux" in capsys.readouterr().err
+
+
 def test_builder_activate_stages_static_checks_then_uses_plain_confirmation(
     tmp_path, monkeypatch, capsys
 ):
