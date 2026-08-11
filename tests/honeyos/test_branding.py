@@ -31,18 +31,18 @@ def test_first_start_report_uses_honey_os_brand():
 
 def test_public_readme_and_installer_use_honey_os_brand():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    installer = (ROOT / "scripts" / "install_honeyos.sh").read_text(
-        encoding="utf-8"
-    )
+    installer = (ROOT / "install.sh").read_text(encoding="utf-8")
 
     assert readme.startswith("# 🍯 HoneyOS")
     assert "H2OS" not in readme
     assert "Hermes" not in readme
-    assert "uv run honeyos" in readme
+    assert "curl -fsSL" in readme
+    assert "raw.githubusercontent.com/Nicole202504/honeyos/main/install.sh" in readme
     assert "uv run h2os" not in readme
     assert "HoneyOS" in installer
     assert 'echo "H2OS' not in installer
-    assert (ROOT / "Install-HoneyOS.command").is_file()
+    assert not (ROOT / "Install-HoneyOS.command").exists()
+    assert not (ROOT / "Open-HoneyOS.command").exists()
     assert not (ROOT / "Install-H2OS.command").exists()
 
 

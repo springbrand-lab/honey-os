@@ -9,6 +9,7 @@ import honeyos
 
 ROOT = Path(__file__).parents[2]
 INSTALLER = ROOT / "scripts" / "install_honeyos.sh"
+BOOTSTRAP = ROOT / "install.sh"
 
 
 def _run_installer(tmp_path: Path) -> tuple[subprocess.CompletedProcess[str], list[str]]:
@@ -47,7 +48,7 @@ def test_installer_runs_setup_for_a_new_user(tmp_path):
     completed, calls = _run_installer(tmp_path)
 
     assert completed.returncode == 0
-    assert calls[-1] == "run honeyos setup"
+    assert calls == ["sync --locked --quiet --extra honeyos", "run honeyos setup"]
     assert "发现已有的 HoneyOS" not in completed.stdout
 
 
@@ -68,7 +69,10 @@ def test_installer_upgrades_an_existing_user_without_repeating_setup(tmp_path):
 def test_release_version_is_0_3_1_and_consistent():
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    bootstrap = BOOTSTRAP.read_text(encoding="utf-8")
 
     assert honeyos.__version__ == "0.3.1"
     assert 'version = "0.3.1"' in pyproject
     assert "`v0.3.1`" in readme
+    assert "VERSION=0.3.1" in bootstrap
+    assert "refs/heads/main.tar.gz" in bootstrap

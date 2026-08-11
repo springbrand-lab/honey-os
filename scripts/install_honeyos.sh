@@ -33,7 +33,10 @@ fi
 
 cd "$REPO_DIR"
 echo "Preparing HoneyOS…"
-uv sync --quiet --extra honeyos
+uv sync --locked --quiet --extra honeyos
+
+mkdir -p "$HOME/.local/bin"
+ln -sfn "$REPO_DIR/.venv/bin/honeyos" "$HOME/.local/bin/honeyos"
 
 HONEYOS_DATA_HOME=${HONEYOS_HOME:-"${HOME}/.honeyos"}
 
@@ -44,4 +47,7 @@ if [ -f "$HONEYOS_DATA_HOME/config.yaml" ]; then
     exec uv run honeyos web
 fi
 
+if (exec </dev/tty) 2>/dev/null; then
+    exec uv run honeyos setup </dev/tty
+fi
 exec uv run honeyos setup
