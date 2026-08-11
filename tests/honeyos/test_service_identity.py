@@ -174,6 +174,40 @@ def test_macos_install_retries_transient_launchd_bootstrap_error(
     assert delays == [0.25]
 
 
+def test_macos_install_waits_for_old_gateway_process_to_exit(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import time
+    from honeyos.gateway import status
+
+    service = _service_module()
+    identity = service.ServiceIdentity.default(home=tmp_path / ".honeyos")
+    plist_path = tmp_path / "ai.honeyos.gateway.plist"
+    calls: list[tuple[str, ...]] = []
+    probed_pids: list[int] = []
+    delays: list[float] = []
+
+    def record(argv, **_kwargs):
+        calls.append(tuple(argv))
+        return 0
+
+    def probe(pid, _signal):
+        probed_pids.append(pid)
+        if len(probed_pids) == 3:
+            raise ProcessLookupError
+
+    monkeypatch.setattr(service.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(service, "launchd_plist_path", lambda _identity: plist_path)
+    monkeypatch.setattr(status, "get_running_pid", lambda _path: 8123)
+    monkeypatch.setattr(service.os, "kill", probe)
+    monkeypatch.setattr(time, "sleep", delays.append)
+
+    assert service.install_service(identity, runner=record) == 0
+    assert probed_pids == [8123, 8123, 8123]
+    assert delays == [0.25, 0.25]
+    assert [call[1] for call in calls] == ["bootout", "bootstrap"]
+
+
 def test_linux_restart_rerenders_active_slot_unit_then_reloads_and_restarts(
     monkeypatch, tmp_path: Path
 ) -> None:

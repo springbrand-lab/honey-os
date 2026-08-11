@@ -141,7 +141,25 @@ def install_service(identity: ServiceIdentity, runner: Runner = _run) -> int:
         path.write_text(render_launchd_plist(identity), encoding="utf-8")
         path.chmod(0o600)
         domain = f"gui/{os.getuid()}"
+        from honeyos.gateway.status import get_running_pid
+
+        old_pid = get_running_pid(identity.data_home / "gateway.pid")
         runner(["launchctl", "bootout", f"{domain}/{identity.macos_label}"])
+        if old_pid is not None:
+            for attempt in range(120):
+                try:
+                    os.kill(old_pid, 0)
+                except ProcessLookupError:
+                    break
+                except PermissionError:
+                    return 1
+                if attempt == 119:
+                    print(
+                        f"HoneyOS gateway process {old_pid} did not stop.",
+                        file=sys.stderr,
+                    )
+                    return 1
+                time.sleep(0.25)
         for attempt in range(40):
             result = _returncode(
                 runner(["launchctl", "bootstrap", domain, str(path)])
