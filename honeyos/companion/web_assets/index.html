@@ -4,8 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
-    <meta name="theme-color" content="#f2f0f2" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#171519" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#efede8" />
     <title>HoneyOS</title>
     <script src="./file-open.js"></script>
     <link rel="stylesheet" href="./styles.css" />
@@ -176,7 +175,11 @@
         <div class="page-scroll history-layout">
           <div class="history-list" id="history-list"></div>
           <aside class="history-preview" id="history-preview">
-            <div class="history-preview-empty"><svg class="app-icon" aria-hidden="true"><use href="./icons.svg#history"></use></svg><p>选择一段聊天，在这里查看。</p></div>
+            <div class="page-empty-state">
+              <span aria-hidden="true">◇</span>
+              <strong>选择一段聊天</strong>
+              <p>在这里查看完整记录。</p>
+            </div>
           </aside>
         </div>
       </section>
@@ -192,26 +195,72 @@
         </header>
         <div class="page-scroll settings-list">
           <section class="settings-group">
+            <h2>外观</h2>
+            <label class="settings-row" for="theme-select">
+              <span><strong>显示模式</strong><small>可以跟随系统，也可以固定使用浅色或深色</small></span>
+              <select id="theme-select" aria-label="显示模式">
+                <option value="system">跟随系统</option>
+                <option value="light">浅色</option>
+                <option value="dark">深色</option>
+              </select>
+            </label>
+          </section>
+          <section class="settings-group">
             <h2>隐私与记忆</h2>
             <button type="button" data-view-target="memories"><span><strong>记忆保存在本地</strong><small>当前使用本机 SQLite 和记忆文件</small></span><em>已开启 ›</em></button>
             <button type="button" data-view-target="memories"><span><strong>查看所有记忆</strong><small>可以完成、修改或让它忘记</small></span><em>›</em></button>
           </section>
           <section class="settings-group">
             <h2>模型</h2>
-            <div class="settings-row"><span><strong>对话模型</strong><small>负责与你聊天和使用工具</small></span><em id="conversation-model">当前配置</em></div>
+            <form class="model-settings-form" id="model-settings-form">
+              <label><span>Base URL</span><input name="base_url" id="model-base-url" type="url" inputmode="url" placeholder="https://api.example.com/v1" required /></label>
+              <label><span>Model ID</span><input name="model" id="model-id" type="text" placeholder="模型名称" required /></label>
+              <label><span>API Key</span><input name="api_key" id="model-api-key" type="password" autocomplete="new-password" placeholder="留空则保持现有密钥" /></label>
+              <div class="settings-form-footer">
+                <span id="model-settings-status" role="status">密钥只保存在这台设备</span>
+                <button type="submit">保存模型配置</button>
+              </div>
+            </form>
             <div class="settings-row"><span><strong>蒸馏模型</strong><small>在后台整理近期状态和约定，不影响回复速度</small></span><em id="distillation-model">跟随对话模型</em></div>
+          </section>
+          <section class="settings-group">
+            <h2>聊天渠道</h2>
+            <div class="channel-settings-grid">
+              <article class="channel-settings-card" data-channel="weixin">
+                <div><strong>微信</strong><small>扫码后，只允许扫码本人私聊</small></div>
+                <span class="channel-status" id="weixin-channel-status">未连接</span>
+                <button type="button" data-channel-link="weixin">扫码连接</button>
+              </article>
+              <article class="channel-settings-card" data-channel="feishu">
+                <div><strong>飞书</strong><small>扫码创建并连接你的私人机器人</small></div>
+                <span class="channel-status" id="feishu-channel-status">未连接</span>
+                <button type="button" data-channel-link="feishu">扫码连接</button>
+              </article>
+            </div>
           </section>
           <section class="settings-group">
             <h2>主动联系</h2>
             <div class="settings-row"><span><strong>允许它主动找我</strong><small>只在有值得聊的事情时出现</small></span><em id="proactive-setting">按当前规则</em></div>
           </section>
-          <p class="settings-note">模型密钥、工具配置和系统维护仍保留在管理后台，不打扰日常聊天。</p>
+          <p class="settings-note">模型密钥和聊天渠道凭据只保存在本机，不会显示在页面中。</p>
         </div>
       </section>
       </div>
     </main>
 
     <div class="toast" id="app-toast" role="status" aria-live="polite" hidden></div>
+
+    <dialog class="channel-link-dialog" id="channel-link-dialog" aria-labelledby="channel-link-title">
+      <div class="channel-link-panel">
+        <button class="channel-link-close" id="channel-link-close" type="button" aria-label="关闭扫码连接">×</button>
+        <span class="page-eyebrow">连接聊天渠道</span>
+        <h2 id="channel-link-title">扫码连接</h2>
+        <p id="channel-link-copy">请使用手机扫码，并在手机上确认。</p>
+        <img class="channel-link-qr" id="channel-link-qr" alt="聊天渠道连接二维码" />
+        <a id="channel-link-open" target="_blank" rel="noopener noreferrer">二维码无法识别？打开连接</a>
+        <p class="channel-link-status" id="channel-link-status" role="status" aria-live="polite">等待扫码</p>
+      </div>
+    </dialog>
 
     <div class="topic-pool-layer" id="topic-pool-layer" hidden>
       <button
