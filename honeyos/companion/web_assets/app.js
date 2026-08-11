@@ -395,7 +395,7 @@ async function loadHistoryPreview(item, button) {
   elements.historyPreview.replaceChildren(emptyPageState("正在打开", "我把这段聊天找出来。"));
   try {
     const response = await fetch(
-      "/api/sessions/" + encodeURIComponent(item.id) + "/messages",
+      "/api/sessions/" + encodeURIComponent(item.id) + "/messages?view=companion",
       { credentials: "same-origin" },
     );
     if (!response.ok) throw new Error("history_unavailable");

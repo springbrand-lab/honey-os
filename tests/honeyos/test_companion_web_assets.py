@@ -64,7 +64,7 @@ def test_companion_product_shell_uses_real_memory_profile_and_history_apis():
     assert '"/api/companion/profile"' in script
     assert '"/api/companion/new"' in script
     assert '"/api/companion/memories/"' in script
-    assert '"/messages"' in script
+    assert '"/messages?view=companion"' in script
     assert "companionData.memories" in script
     assert ".innerHTML" not in script
 

@@ -769,6 +769,16 @@ async def test_companion_bootstrap_returns_only_safe_shared_chat_messages(
             "role": "user",
             "content": "[HoneyOS selected topic; user chose this card] hidden",
         },
+        {
+            "role": "assistant",
+            "content": "[This response was interrupted by a user correction.]",
+            "display_kind": "hidden",
+        },
+        {
+            "role": "assistant",
+            "content": "internal continuation marker",
+            "display_kind": "auto_continue",
+        },
         {"role": "assistant", "content": None, "reasoning": "hidden"},
     ]
     adapter._ensure_session_db_async = AsyncMock(return_value=db)
@@ -799,6 +809,63 @@ async def test_companion_bootstrap_returns_only_safe_shared_chat_messages(
     assert "raw command output" not in response.text
     assert "proactive topic seed" not in response.text
     assert "selected topic" not in response.text
+    assert "interrupted by a user correction" not in response.text
+    assert "internal continuation marker" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_session_messages_companion_view_hides_internal_runtime_rows():
+    adapter = _api_adapter()
+    adapter._get_existing_session_or_404 = AsyncMock(
+        return_value=({"id": "shared-session"}, None)
+    )
+    db = MagicMock()
+    db.resolve_resume_session_id.return_value = "shared-session"
+    db.get_messages.return_value = [
+        {"role": "user", "content": "在吗"},
+        {"role": "assistant", "content": "在呢。"},
+        {
+            "role": "assistant",
+            "content": "[This response was interrupted by a user correction.]",
+            "display_kind": "hidden",
+        },
+        {
+            "role": "assistant",
+            "content": "model changed internally",
+            "display_kind": "model_switch",
+        },
+        {
+            "role": "assistant",
+            "content": "delegation finished internally",
+            "display_kind": "async_delegation_complete",
+        },
+        {
+            "role": "assistant",
+            "content": "automatic continuation",
+            "display_kind": "auto_continue",
+        },
+        {
+            "role": "assistant",
+            "content": "calling a tool",
+            "tool_calls": [{"id": "call-1"}],
+        },
+        {"role": "tool", "content": "raw output"},
+    ]
+    adapter._ensure_session_db_async = AsyncMock(return_value=db)
+    request = SimpleNamespace(
+        cookies={"honeyos_local": adapter._local_web_token},
+        remote="127.0.0.1",
+        headers={},
+        match_info={"session_id": "shared-session"},
+        query={"view": "companion"},
+    )
+
+    response = await adapter._handle_session_messages(request)
+
+    assert json.loads(response.text)["data"] == [
+        {"role": "user", "content": "在吗"},
+        {"role": "assistant", "content": "在呢。"},
+    ]
 
 
 @pytest.mark.asyncio
