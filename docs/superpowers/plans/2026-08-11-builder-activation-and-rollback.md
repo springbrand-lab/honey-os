@@ -342,7 +342,9 @@ Create a slot-local virtual environment using the current trusted interpreter.
 Install the complete slot source using the unchanged, locked approved dependency
 set and an explicit non-editable installation rooted at `slot/source`; fail
 closed when required approved artifacts are unavailable. Run every command with
-`cwd=slot/source`, a temporary synthetic `HONEYOS_HOME`, and `PYTHONPATH` cleared:
+`cwd=slot/source`, a temporary synthetic `HONEYOS_HOME`, `PYTHONPATH` cleared,
+and `PYTHONPYCACHEPREFIX` pointing to a disposable directory outside the
+read-only slot source:
 
 ```python
 checks = (

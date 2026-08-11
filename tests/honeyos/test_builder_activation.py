@@ -301,6 +301,32 @@ def test_staged_source_is_read_only_and_tampering_is_detected(tmp_path):
         store.verify_staged(staged.activation_id)
 
 
+def test_stage_rejects_workspace_bytes_changed_during_reviewed_overlay(
+    tmp_path, monkeypatch
+):
+    source, prepared, _review = _review_ready_change(tmp_path)
+    import honeyos.companion.builder_activation as activation
+
+    original_copy = activation._copy_reviewed_file
+    changed_once = False
+
+    def mutate_then_copy(workspace, source_root, changed):
+        nonlocal changed_once
+        if not changed_once:
+            changed_once = True
+            (workspace / changed.relative).write_text(
+                "MEMORY = 'changed-during-copy'\n", encoding="utf-8"
+            )
+        return original_copy(workspace, source_root, changed)
+
+    monkeypatch.setattr(activation, "_copy_reviewed_file", mutate_then_copy)
+
+    with pytest.raises(activation.ActivationError, match="materialized candidate"):
+        activation.ActivationStore(tmp_path / "home", source).stage(
+            prepared.change_root
+        )
+
+
 def test_reconcile_completes_a_slot_published_before_the_final_record(tmp_path):
     source, prepared, _review = _review_ready_change(tmp_path)
     from honeyos.companion.builder_activation import ActivationConflict, ActivationStore

@@ -629,6 +629,16 @@ class ActivationStore:
                     raise ActivationError("trusted archive unexpectedly contains .git")
                 for changed in changed_paths:
                     _copy_reviewed_file(workspace, source_root, changed)
+                materialized_digest = candidate_digest(
+                    source_root,
+                    source_commit,
+                    changed_paths,
+                    policy_digest=_trusted_policy_digest(policy),
+                )
+                if materialized_digest != reviewed_digest:
+                    raise ActivationError(
+                        "materialized candidate differs from the reviewed bytes"
+                    )
                 _make_source_read_only(source_root)
                 tree_digest = _slot_tree_digest(source_root)
                 trusted_root = temporary_slot / "trusted"

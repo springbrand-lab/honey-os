@@ -49,6 +49,20 @@ git diff --check
 (no output)
 ```
 
+### Final copy-binding correction
+
+The final re-review identified an in-place-copy TOCTOU gap. Staging now
+recomputes the reviewed-diff digest from the materialized slot paths after all
+overlays/deletions and requires it to equal the reviewed candidate digest
+before freezing or publishing the slot. A regression mutates workspace bytes
+inside the copy phase and confirms staging fails.
+
+The source tree remains read-only. Task 3's preflight contract now requires a
+disposable external `PYTHONPYCACHEPREFIX`, so compile/import/tests never try to
+write bytecode below `slot/source`.
+
+Final verification: `82 passed in 10.20s`; Ruff and diff check passed.
+
 ## Self-review
 
 - Complete baseline: covered by slot tests for package, lockfile, tests, and no
