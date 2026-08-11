@@ -134,10 +134,13 @@ slot, executable, source digest, and activation generation. The existing
 installation is registered as the initial legacy slot without moving or
 rewriting it.
 
-Slot creation rejects symlinks, path traversal, files outside the reviewed Git
-diff, executable additions outside known script locations, and candidate
-changes made after inspection. Source, manifest, and reviewed diff hashes must
-match before confirmation and again before switching.
+Slot creation first materializes a complete baseline from a trusted
+`git archive` of the recorded source commit, then overlays only reviewed
+changed/deleted paths using a no-symlink copier. It rejects path traversal,
+executable additions outside known script locations, changed source HEAD, and
+candidate changes made after inspection. The complete slot-tree hash, manifest,
+source commit, and reviewed-diff hash must match before confirmation and again
+before switching. The slot contains no `.git` directory.
 
 ### 3. Staging and preflight
 
@@ -146,8 +149,8 @@ match before confirmation and again before switching.
 1. require the latest inspection status to be `review_ready`;
 2. require the live source revision to equal the candidate's recorded base;
 3. recompute and bind the candidate digest;
-4. copy source into a private slot without `.git`, credentials, real data, or
-   the Builder workspace's environment;
+4. materialize the complete pinned source tree into a private slot without
+   `.git`, credentials, real data, or the Builder workspace's environment;
 5. create an isolated virtual environment from the already-approved dependency
    set;
 6. run syntax/import checks, targeted tests, core Builder safety tests, and CLI
@@ -161,7 +164,8 @@ activatable token.
 ### 4. Owner confirmation
 
 The companion receives an `activation_ready` result from staging and asks via
-the existing durable confirmation system. The stored confirmation contains:
+a dedicated gateway-owned durable activation confirmation system. It does not
+reuse the model's command-approval queue. The stored confirmation contains:
 
 - activation ID and candidate digest;
 - canonical `agent:main:companion:dm:owner` lane;
@@ -170,21 +174,24 @@ the existing durable confirmation system. The stored confirmation contains:
 - single-use state;
 - redacted goal and changed-area summary.
 
-Only an authenticated owner DM can resolve it. Group chats, background jobs,
-tool-generated messages, replayed buttons, and a model calling the activation
-CLI without the issued token are rejected. Denial or expiry leaves the staged
-slot available for later restaging but never live.
+Only an authenticated owner DM can resolve it. Web and IM surfaces receive a
+compact opaque callback ID whose secret mapping stays server-side and never
+appears in model context or assistant text. Group chats, background jobs,
+tool-generated messages, replayed buttons, and model-issued shell commands are
+rejected. Denial or expiry leaves the staged slot available for later restaging
+but never live.
 
 ### 5. Detached switch worker
 
 The trusted stable runtime launches a detached worker with a private activation
-record, not arbitrary shell arguments. The worker:
+record and a sealed inherited capability/FD, not an activation shell command or
+arbitrary model-provided arguments. The worker:
 
 1. acquires a global activation lock;
 2. rechecks confirmation, hashes, base version, available disk, and slot health;
-3. records the old service executable and current pointer;
-4. creates a quick SQLite-safe snapshot of `HONEYOS_HOME` plus configuration
-   metadata;
+3. records the exact old managed-service definition and current pointer;
+4. creates an activation-specific SQLite-safe snapshot receipt containing the
+   exact required file set, manifest digest, and database integrity results;
 5. drains and stops the gateway;
 6. updates the managed service to the new slot's interpreter and source;
 7. atomically writes the new current pointer;
@@ -194,6 +201,8 @@ record, not arbitrary shell arguments. The worker:
 
 The worker never imports candidate Python. Candidate code first executes only
 inside the isolated preflight process and then in the newly started gateway.
+Service installation has a true no-load/no-start mode on launchd, systemd,
+Windows, and s6; the worker starts the candidate only after durable checkpoints.
 
 ### 6. Health checks
 
@@ -201,7 +210,8 @@ Activation succeeds only when all required checks pass within a bounded window:
 
 - managed service is registered and running;
 - the local health endpoint responds;
-- runtime identity reports the expected candidate digest and data directory;
+- a new-process startup attestation reports the expected candidate digest,
+  resolved data directory, PID/start identifier, and stable runtime ID;
 - the canonical state database passes SQLite integrity checks;
 - the owner session can be opened without resetting history;
 - configured IM adapters complete startup or report the same explicitly
@@ -215,11 +225,12 @@ cause a healthy runtime to be rolled back.
 On failed startup or health validation, the detached worker:
 
 1. stops the candidate service;
-2. restores the old service executable and current pointer;
+2. restores the exact old service definition and current pointer;
 3. restores the pre-activation data snapshot if the candidate touched or
    migrated state;
 4. starts the old gateway;
-5. verifies the old health endpoint and state database;
+5. verifies every restored artifact, SQLite integrity, the old health endpoint,
+   and the old-process attestation;
 6. records and delivers a rollback receipt.
 
 The failed slot and redacted logs remain available for diagnosis but cannot be
@@ -242,9 +253,12 @@ deletes:
 - installed user Skills and projects;
 - cron jobs, proactive-chat settings, or pending owner pairings.
 
-The data snapshot uses the existing SQLite-safe backup implementation rather
-than copying an open database file. Secrets are never placed in the candidate
-slot or activation report.
+The data snapshot reuses the existing SQLite-safe primitives but adds a strict
+activation receipt: activation stops before service mutation unless every
+required artifact is captured and verified, and rollback is not declared until
+every artifact is restored and verified. In-flight activation snapshots have
+independent retention from ordinary quick-snapshot pruning. Secrets are never
+placed in the candidate slot or activation report.
 
 Schema-changing candidates must declare a migration contract. In the first
 activation release, a candidate that changes known schema or migration files is
@@ -259,13 +273,15 @@ The trusted CLI gains:
 ```text
 honeyos builder stage <change-id>
 honeyos builder activation-status <activation-id>
-honeyos builder rollback <activation-id>
+honeyos builder rollback <activation-id>   # operator recovery only
 ```
 
 Activation itself is not exposed as an ordinary model-callable shell command.
 It is consumed through a dedicated owner-confirmation handler using a private,
-single-use token. The Builder Skill may prepare, inspect, and stage; it may only
-request activation confirmation, never approve its own request.
+single-use server-side callback. Model-facing terminal/code execution policy
+blocks activation worker, switch, and rollback routes. The Builder Skill may
+prepare, inspect, and stage; it may only request activation confirmation, never
+approve its own request.
 
 ## State machine
 
@@ -308,9 +324,9 @@ delivery or button clicks are idempotent. At most one activation may be in
 
 Keep the active slot, previous healthy slot, and the three most recent other
 healthy slots. Failed slots are retained for seven days unless disk pressure
-requires earlier cleanup. Data snapshots follow the existing backup retention
-policy. Active, previous, switching, and recovery-required assets are never
-pruned.
+requires earlier cleanup. Completed activation snapshots may join ordinary
+backup retention only after the activation settles. In-flight snapshots and
+active, previous, switching, or recovery-required assets are never pruned.
 
 ## Verification and acceptance criteria
 
@@ -344,4 +360,3 @@ managed service. Real user data is not used to validate the installer.
 - multi-user or group approval;
 - remote/server fleet rollout;
 - silently activating without a fresh owner confirmation.
-
