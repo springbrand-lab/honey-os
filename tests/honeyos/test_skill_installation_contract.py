@@ -135,6 +135,27 @@ def test_skill_marketplace_install_uses_scanned_noninteractive_runtime(monkeypat
     ]
 
 
+def test_normal_skill_install_does_not_create_builder_activation(monkeypatch, tmp_path):
+    from honeyos.tools.skill_marketplace_tool import skill_marketplace
+
+    home = tmp_path / ".honeyos"
+    monkeypatch.setenv("HONEYOS_HOME", str(home))
+    monkeypatch.setattr(
+        "subprocess.run",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            returncode=0, stdout="Installed: relationship-check-in\n", stderr=""
+        ),
+    )
+
+    payload = json.loads(
+        skill_marketplace("install", identifier="official/relationship-check-in")
+    )
+
+    assert payload["success"] is True
+    assert not (home / "builder" / "changes").exists()
+    assert not (home / "runtime" / "current-slot.json").exists()
+
+
 def test_skills_toolset_exposes_marketplace_bridge():
     from honeyos.toolsets import resolve_toolset
 

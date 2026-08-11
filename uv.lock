@@ -1722,7 +1722,6 @@ daytona = [
 dev = [
     { name = "debugpy" },
     { name = "mcp" },
-    { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
     { name = "setuptools" },
@@ -1771,6 +1770,7 @@ honeyos = [
     { name = "aiohttp" },
     { name = "ddgs" },
     { name = "lark-oapi" },
+    { name = "pytest" },
     { name = "qrcode" },
 ]
 matrix = [

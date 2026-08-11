@@ -9,7 +9,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from honeyos import PRODUCT_NAME, RUNTIME_ID
+from honeyos import PRODUCT_NAME, RUNTIME_ID, default_home
 from honeyos.cli.bootstrap import activate_home
 from honeyos.cli.service import (
     ServiceIdentity,
@@ -69,6 +69,10 @@ def _parser() -> argparse.ArgumentParser:
     gateway = commands.add_parser("gateway", help=argparse.SUPPRESS)
     gateway_commands = gateway.add_subparsers(dest="gateway_command", required=True)
     gateway_commands.add_parser("run", help=argparse.SUPPRESS)
+
+    from honeyos.runtime.builder_cmd import build_parser as build_builder_parser
+
+    build_builder_parser(commands)
     return parser
 
 
@@ -145,6 +149,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     if unknown:
         args.runtime_args = [*unknown, *args.runtime_args]
+
+    if args.command == "builder":
+        # Builder help/status must not initialize, migrate, or upgrade the data
+        # home.  Product edits create only their explicit Builder records.
+        builder_home = (Path(args.home) if args.home else default_home()).expanduser().resolve()
+        from honeyos.runtime.builder_cmd import builder_command
+
+        return builder_command(args, home=builder_home)
 
     explicit_home = Path(args.home) if args.home else None
     home = activate_home(explicit_home)
