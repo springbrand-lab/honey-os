@@ -144,7 +144,9 @@ def test_delivery_requires_consent_idle_time_and_open_topic(tmp_path: Path):
 
 
 def test_delivery_respects_quiet_hours_and_minimum_interval(tmp_path: Path):
-    store = TopicPoolStore(tmp_path)
+    store = TopicPoolStore(
+        tmp_path, now_fn=lambda: datetime(2026, 8, 9, 10, 0, tzinfo=CN)
+    )
     enable(store)
     topics = store.add_candidates(
         [
@@ -178,7 +180,9 @@ def test_delivery_respects_quiet_hours_and_minimum_interval(tmp_path: Path):
 
 
 def test_delivery_daily_cap_is_three_and_failed_send_reopens_topic(tmp_path: Path):
-    store = TopicPoolStore(tmp_path)
+    store = TopicPoolStore(
+        tmp_path, now_fn=lambda: datetime(2026, 8, 9, 10, 0, tzinfo=CN)
+    )
     enable(store)
     store.update_preferences(minimum_interval_hours=1)
     store.add_candidates(
@@ -211,7 +215,9 @@ def test_delivery_daily_cap_is_three_and_failed_send_reopens_topic(tmp_path: Pat
 
 
 def test_abandoned_web_claim_is_released_after_fifteen_minutes(tmp_path: Path):
-    store = TopicPoolStore(tmp_path)
+    store = TopicPoolStore(
+        tmp_path, now_fn=lambda: datetime(2026, 8, 9, 10, 0, tzinfo=CN)
+    )
     enable(store)
     store.add_candidates([candidate()])
     store.record_channel_activity(

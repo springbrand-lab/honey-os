@@ -67,6 +67,7 @@ _COMPANION_SKILLS = (
     ("celebration-and-surprise", "honeyos", None),
     ("date-and-life-ideas", "honeyos", None),
     ("honeyos-self-extension", "honeyos", None),
+    ("honeyos-builder", "honeyos", None),
     ("maps", "honeyos", None),
     ("youtube-content", "honeyos", None),
     ("ocr-and-documents", "honeyos", None),
@@ -729,6 +730,7 @@ def upgrade_companion_capabilities(home: Path) -> bool:
         ).read_text(encoding="utf-8")
         for extension_marker in (
             "## Installed Skills and Marketplace",
+            "## Product-Level Changes",
             "## Source Identity and Verification",
         ):
             if extension_marker in extension_text:

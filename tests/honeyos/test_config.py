@@ -465,6 +465,8 @@ def test_upgrade_appends_extension_safety_contract_without_losing_customization(
 
     assert changed is True
     assert "## Source Identity and Verification" in upgraded
+    assert "## Product-Level Changes" in upgraded
+    assert "honeyos-builder" in upgraded
     assert "用户提供的仓库 URL 是来源身份" in upgraded
     assert "User customization must survive." in upgraded
 

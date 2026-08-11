@@ -14,7 +14,7 @@ metadata:
 
 # HoneyOS Self Extension Skill
 
-让 HoneyOS 在能力不足时先检查现状，再选择已有工具、安装普通 Skill 或创建小型 Skill。它扩展边缘能力，不改写核心 Runtime、安全边界或伴侣数据规则。
+让 HoneyOS 在能力不足时先检查现状，再选择已有工具、安装普通 Skill 或创建小型 Skill。它扩展边缘能力；用户明确要求产品级改造时转交 `honeyos-builder`，不能直接修改正在运行的 HoneyOS。
 
 ## When to Use
 
@@ -40,12 +40,20 @@ metadata:
 - 只有 `skill_marketplace` 的搜索结果才是尚未安装的候选项。
 - 安装成功后立即继续原任务，不再询问用户要不要把它接入 HoneyOS。
 
+## Product-Level Changes
+
+- 修改人格、关系和记忆内容时使用专用资料或记忆工具。
+- 独立的新能力优先安装或创建普通 Skill。
+- 记忆机制、Web 页面、IM 适配、Session 或 Runtime 等产品级改造转交 `honeyos-builder`。
+- `honeyos-builder` 只能在隔离候选副本中工作；不能直接修改正在运行的 HoneyOS，也不自动安装候选版本。
+
 ## Quick Reference
 
 - 普通 Skill 查看、安装、创建、更新：无需额外确认。
 - 外部仓库：先检查来源、文件和脚本，不直接运行未知安装脚本。
 - 系统软件、远程脚本、账号、Cookie、API Key：先获得明确确认。
-- 核心 Runtime、安全策略、公开网络服务、伴侣数据删除：禁止自行修改。
+- 核心 Runtime 的产品级改造：转交 `honeyos-builder` 生成隔离候选版本，不直接改运行版本。
+- 安全策略、公开网络服务、伴侣数据删除：禁止自行修改。
 
 ## Procedure
 
@@ -71,7 +79,7 @@ metadata:
 - 不把 GitHub 项目直接等同于可安装 Skill。
 - 不运行任意远程脚本，不保存秘密，不绕过隔离环境。
 - 不把同名注册表包当成用户指定的 GitHub 项目；来源不一致时立即报告并停止使用错误包。
-- 不为了扩展能力修改 HoneyOS 核心代码。
+- 不为了扩展能力直接修改 HoneyOS 核心代码；产品级改造使用 `honeyos-builder` 的评审流程。
 
 ## Verification
 

@@ -4835,6 +4835,13 @@ def cmd_project(args):
     return projects_command(args)
 
 
+def cmd_builder(args):
+    """Prepare and inspect review-only HoneyOS product changes."""
+    from honeyos.runtime.builder_cmd import builder_command
+
+    return builder_command(args)
+
+
 def cmd_hooks(args):
     """Shell-hook inspection and management."""
     from honeyos.runtime.hooks import hooks_command
@@ -10603,7 +10610,7 @@ def _build_provider_choices() -> list[str]:
 # to parse.
 _BUILTIN_SUBCOMMANDS = frozenset(
     {
-        "acp", "approvals", "auth", "backup", "bundles", "checkpoints", "claw", "completion",
+        "acp", "approvals", "auth", "backup", "builder", "bundles", "checkpoints", "claw", "completion",
         "computer-use",
         "config", "console", "cron", "curator", "dashboard", "serve", "debug", "doctor",
         "dump", "egress", "fallback", "gateway", "hooks", "import", "import-agent", "insights",
@@ -11512,6 +11519,14 @@ def main():
 
     project_parser = _build_project_parser(subparsers)
     project_parser.set_defaults(func=cmd_project)
+
+    # =========================================================================
+    # builder command — review-only HoneyOS self-improvement drafts
+    # =========================================================================
+    from honeyos.runtime.builder_cmd import build_parser as _build_builder_parser
+
+    builder_parser = _build_builder_parser(subparsers)
+    builder_parser.set_defaults(func=cmd_builder)
 
     # =========================================================================
     # hooks command — shell-hook inspection and management
