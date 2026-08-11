@@ -125,8 +125,15 @@ def test_settings_page_edits_model_and_connects_both_im_channels_by_qr():
     assert 'value="custom"' in page
     assert 'name="base_url"' in page
     assert 'name="model"' in page
-    assert 'list="model-options"' in page
-    assert 'id="model-options"' in page
+    assert 'class="model-credential-row"' in page
+    assert 'id="model-catalog-row"' in page
+    assert 'id="model-catalog"' in page
+    assert 'id="model-manual-details"' in page
+    assert 'id="model-manual-id"' in page
+    assert "连接并读取模型" in page
+    assert "列表里没有？手动填写模型 ID" in page
+    assert 'list="model-options"' not in page
+    assert '<datalist' not in page
     assert 'id="model-discover"' in page
     assert 'name="api_key"' in page
     assert 'type="password"' in page
@@ -147,6 +154,9 @@ def test_settings_script_saves_model_without_refilling_key_and_polls_qr_link():
     assert '"/api/companion/settings/model"' in script
     assert "provider: elements.modelProvider.value" in script
     assert "renderModelOptions" in script
+    assert "elements.modelCatalog.value" in script
+    assert 'elements.modelId.value = elements.modelCatalog.value' in script
+    assert 'elements.modelId.value = elements.modelManualId.value.trim()' in script
     assert '"/api/companion/channels/" + encodeURIComponent(platform) + "/link"' in script
     assert '"/api/companion/channels/link/" + encodeURIComponent(linkId)' in script
     assert 'elements.modelApiKey.value = ""' in script

@@ -44,8 +44,11 @@ const elements = {
   modelProvider: document.querySelector("#model-provider"),
   modelBaseUrl: document.querySelector("#model-base-url"),
   modelBaseUrlRow: document.querySelector("#model-base-url-row"),
+  modelCatalog: document.querySelector("#model-catalog"),
+  modelCatalogRow: document.querySelector("#model-catalog-row"),
   modelId: document.querySelector("#model-id"),
-  modelOptions: document.querySelector("#model-options"),
+  modelManualDetails: document.querySelector("#model-manual-details"),
+  modelManualId: document.querySelector("#model-manual-id"),
   modelApiKey: document.querySelector("#model-api-key"),
   modelDiscover: document.querySelector("#model-discover"),
   modelSettingsStatus: document.querySelector("#model-settings-status"),
@@ -480,6 +483,7 @@ function fillEditableSettings(settings) {
   if (elements.modelProvider) elements.modelProvider.value = model.provider || "custom";
   if (elements.modelBaseUrl) elements.modelBaseUrl.value = model.base_url || "";
   if (elements.modelId) elements.modelId.value = model.model || "";
+  if (elements.modelManualId) elements.modelManualId.value = model.model || "";
   if (elements.modelApiKey) elements.modelApiKey.value = "";
   if (elements.modelSettingsStatus) {
     elements.modelSettingsStatus.textContent = model.api_key_configured
@@ -507,13 +511,21 @@ function syncModelProviderFields() {
 }
 
 function renderModelOptions(models) {
-  if (!elements.modelOptions) return;
-  elements.modelOptions.replaceChildren();
-  (Array.isArray(models) ? models : []).forEach((model) => {
+  if (!elements.modelCatalog) return;
+  const choices = Array.isArray(models) ? models.map(String) : [];
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = choices.length ? `请选择模型（${choices.length} 个）` : "请选择模型";
+  elements.modelCatalog.replaceChildren(placeholder);
+  choices.forEach((model) => {
     const option = document.createElement("option");
-    option.value = String(model);
-    elements.modelOptions.append(option);
+    option.value = model;
+    option.textContent = model;
+    elements.modelCatalog.append(option);
   });
+  const currentModel = elements.modelId?.value.trim() || "";
+  elements.modelCatalog.value = choices.includes(currentModel) ? currentModel : "";
+  if (elements.modelCatalogRow) elements.modelCatalogRow.hidden = choices.length === 0;
 }
 
 async function discoverModels({ silent = false } = {}) {
@@ -537,14 +549,17 @@ async function discoverModels({ silent = false } = {}) {
     if (!response.ok) throw new Error(payload.error || "暂时没有读到模型列表");
     renderModelOptions(payload.models);
     const models = Array.isArray(payload.models) ? payload.models : [];
-    if (models.length && !models.includes(elements.modelId.value.trim())) {
-      elements.modelId.value = models[0];
+    if (elements.modelSettingsStatus) {
+      elements.modelSettingsStatus.textContent = models.length
+        ? `连接成功，找到 ${models.length} 个模型。`
+        : "连接成功，但接口没有返回模型列表，可以手动填写模型 ID。";
     }
-    if (elements.modelSettingsStatus) elements.modelSettingsStatus.textContent = `已读取 ${models.length} 个模型，可以输入关键词选择`;
+    if (!models.length && elements.modelManualDetails) elements.modelManualDetails.open = true;
   } catch (error) {
     if (!silent && elements.modelSettingsStatus) {
-      elements.modelSettingsStatus.textContent = error instanceof Error ? `${error.message}；也可以手动填写模型 ID` : "暂时没有读到模型列表";
+      elements.modelSettingsStatus.textContent = error instanceof Error ? error.message : "暂时没有连接成功，请检查后重试";
     }
+    if (!silent && elements.modelManualDetails) elements.modelManualDetails.open = true;
   } finally {
     if (elements.modelDiscover) elements.modelDiscover.disabled = false;
   }
@@ -565,6 +580,10 @@ async function loadEditableSettings() {
 
 async function saveModelSettings(event) {
   event.preventDefault();
+  if (!elements.modelId?.value.trim()) {
+    if (elements.modelSettingsStatus) elements.modelSettingsStatus.textContent = "请先连接并选择一个模型";
+    return;
+  }
   const submit = elements.modelSettingsForm?.querySelector('button[type="submit"]');
   if (submit) submit.disabled = true;
   if (elements.modelSettingsStatus) elements.modelSettingsStatus.textContent = "正在保存…";
@@ -1469,6 +1488,21 @@ elements.modelProvider?.addEventListener("change", () => {
   syncModelProviderFields();
   renderModelOptions([]);
   if (elements.modelId) elements.modelId.value = "";
+  if (elements.modelManualId) elements.modelManualId.value = "";
+  if (elements.modelManualDetails) elements.modelManualDetails.open = false;
+  if (elements.modelSettingsStatus) elements.modelSettingsStatus.textContent = "填入密钥后连接，就能选择模型。";
+});
+elements.modelCatalog?.addEventListener("change", () => {
+  if (elements.modelCatalog.value && elements.modelId) {
+    elements.modelId.value = elements.modelCatalog.value;
+    if (elements.modelManualId) elements.modelManualId.value = elements.modelCatalog.value;
+  }
+});
+elements.modelManualId?.addEventListener("input", () => {
+  if (elements.modelId) elements.modelId.value = elements.modelManualId.value.trim();
+  if (elements.modelCatalog && elements.modelCatalog.value !== elements.modelId?.value) {
+    elements.modelCatalog.value = "";
+  }
 });
 elements.modelDiscover?.addEventListener("click", () => void discoverModels());
 if (elements.themeSelect && window.HoneyOSTheme) {
