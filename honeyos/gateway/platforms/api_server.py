@@ -1497,6 +1497,7 @@ class APIServerAdapter(BasePlatformAdapter):
         # It is delivered as an HttpOnly SameSite cookie and never rendered
         # into page JavaScript or persisted to disk.
         self._local_web_token: str = secrets.token_urlsafe(32)
+        self._companion_link_manager = None
         self._cors_origins: tuple[str, ...] = self._parse_cors_origins(
             extra.get("cors_origins", os.getenv("API_SERVER_CORS_ORIGINS", "")),
         )
@@ -2157,6 +2158,22 @@ class APIServerAdapter(BasePlatformAdapter):
             ("GET", "/honeyos/styles.css", self._handle_companion_styles),
             ("GET", "/honeyos/icons.svg", self._handle_companion_icons),
             ("GET", "/api/companion/bootstrap", self._handle_companion_bootstrap),
+            ("GET", "/api/companion/settings", self._handle_companion_settings),
+            (
+                "POST",
+                "/api/companion/settings/model",
+                self._handle_companion_model_settings,
+            ),
+            (
+                "POST",
+                "/api/companion/channels/{platform}/link",
+                self._handle_companion_channel_link,
+            ),
+            (
+                "GET",
+                "/api/companion/channels/link/{link_id}",
+                self._handle_companion_channel_link_status,
+            ),
             ("POST", "/api/companion/new", self._handle_companion_new),
             ("POST", "/api/companion/profile", self._handle_companion_profile_update),
             (
@@ -2501,6 +2518,96 @@ class APIServerAdapter(BasePlatformAdapter):
                 },
             }
         )
+
+    async def _handle_companion_settings(
+        self, request: "web.Request"
+    ) -> "web.Response":
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+        from honeyos.companion.settings import companion_settings
+        from honeyos.core.constants import get_honeyos_home
+
+        settings = await asyncio.to_thread(companion_settings, get_honeyos_home())
+        return web.json_response({"settings": settings})
+
+    async def _handle_companion_model_settings(
+        self, request: "web.Request"
+    ) -> "web.Response":
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+        body, err = await self._read_json_body(request)
+        if err:
+            return err
+        allowed = {"base_url", "model", "api_key"}
+        if set(body) - allowed:
+            return web.json_response({"error": "配置中包含不支持的字段"}, status=400)
+        from honeyos.companion.settings import update_companion_model
+        from honeyos.core.constants import get_honeyos_home
+
+        try:
+            settings = await asyncio.to_thread(
+                update_companion_model,
+                get_honeyos_home(),
+                base_url=body.get("base_url", ""),
+                model=body.get("model", ""),
+                api_key=body.get("api_key"),
+            )
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        self._model_name = settings["model"]["model"]
+        return web.json_response({"success": True, "settings": settings})
+
+    def _get_companion_link_manager(self):
+        manager = self._companion_link_manager
+        if manager is None:
+            from honeyos.companion.channel_link import ChannelLinkManager
+            from honeyos.core.constants import get_honeyos_home
+
+            manager = ChannelLinkManager(get_honeyos_home())
+            self._companion_link_manager = manager
+        return manager
+
+    async def _handle_companion_channel_link(
+        self, request: "web.Request"
+    ) -> "web.Response":
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+        platform = str(request.match_info.get("platform") or "").strip().lower()
+        try:
+            payload = await self._get_companion_link_manager().start(platform)
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        except RuntimeError as exc:
+            return web.json_response({"error": str(exc)}, status=502)
+        except Exception as exc:
+            logger.warning("Companion channel link failed: %s", type(exc).__name__)
+            return web.json_response(
+                {"error": "暂时无法开始扫码，请稍后重试"}, status=502
+            )
+        return web.json_response(payload)
+
+    async def _handle_companion_channel_link_status(
+        self, request: "web.Request"
+    ) -> "web.Response":
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+        link_id = str(request.match_info.get("link_id") or "").strip()
+        try:
+            payload = await self._get_companion_link_manager().poll(link_id)
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=404)
+        except RuntimeError as exc:
+            return web.json_response({"error": str(exc)}, status=502)
+        except Exception as exc:
+            logger.warning("Companion channel poll failed: %s", type(exc).__name__)
+            return web.json_response(
+                {"error": "暂时无法获取扫码状态，请稍后重试"}, status=502
+            )
+        return web.json_response(payload)
 
     async def _handle_companion_memory_action(
         self, request: "web.Request"

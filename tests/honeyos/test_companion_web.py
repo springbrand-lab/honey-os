@@ -498,6 +498,10 @@ def test_api_server_registers_companion_web_routes():
     assert ("GET", "/honeyos/styles.css") in routes
     assert ("GET", "/honeyos/icons.svg") in routes
     assert ("GET", "/api/companion/bootstrap") in routes
+    assert ("GET", "/api/companion/settings") in routes
+    assert ("POST", "/api/companion/settings/model") in routes
+    assert ("POST", "/api/companion/channels/{platform}/link") in routes
+    assert ("GET", "/api/companion/channels/link/{link_id}") in routes
     assert ("POST", "/api/companion/new") in routes
     assert ("POST", "/api/companion/profile") in routes
     assert ("POST", "/api/companion/memories/{memory_id}") in routes
@@ -510,6 +514,98 @@ def test_api_server_registers_companion_web_routes():
         "POST",
         "/api/companion/proactive/{delivery_id}/complete",
     ) in routes
+
+
+@pytest.mark.asyncio
+async def test_companion_model_settings_endpoint_never_echoes_api_key(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr("honeyos.core.constants.get_honeyos_home", lambda: tmp_path)
+    (tmp_path / "config.yaml").write_text("{}\n", encoding="utf-8")
+    adapter = _api_adapter()
+    adapter._read_json_body = AsyncMock(
+        return_value=(
+            {
+                "base_url": "https://models.example/v1",
+                "model": "companion-model",
+                "api_key": "sk-private-value",
+            },
+            None,
+        )
+    )
+    request = SimpleNamespace(
+        cookies={"honeyos_local": adapter._local_web_token},
+        remote="127.0.0.1",
+        headers={},
+    )
+
+    response = await adapter._handle_companion_model_settings(request)
+    payload = json.loads(response.text)
+
+    assert response.status == 200
+    assert payload["settings"]["model"]["model"] == "companion-model"
+    assert payload["settings"]["model"]["api_key_configured"] is True
+    assert "sk-private-value" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_companion_channel_link_endpoints_return_only_safe_qr_state(tmp_path):
+    adapter = _api_adapter()
+    manager = SimpleNamespace(
+        start=AsyncMock(
+            return_value={
+                "link_id": "safe-link",
+                "platform": "feishu",
+                "status": "waiting",
+                "qr_url": "https://scan.example",
+                "qr_image": "data:image/png;base64,image",
+                "expires_in": 300,
+            }
+        ),
+        poll=AsyncMock(
+            return_value={
+                "link_id": "safe-link",
+                "platform": "feishu",
+                "status": "connected",
+                "restart_required": True,
+            }
+        ),
+    )
+    adapter._companion_link_manager = manager
+    request = SimpleNamespace(
+        cookies={"honeyos_local": adapter._local_web_token},
+        remote="127.0.0.1",
+        headers={},
+        match_info={"platform": "feishu"},
+    )
+
+    started = await adapter._handle_companion_channel_link(request)
+    request.match_info = {"link_id": "safe-link"}
+    completed = await adapter._handle_companion_channel_link_status(request)
+
+    assert json.loads(started.text)["qr_image"].startswith("data:image/png")
+    assert json.loads(completed.text)["status"] == "connected"
+    assert "secret" not in started.text.lower()
+    assert "secret" not in completed.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_companion_channel_link_hides_transport_failure_details():
+    adapter = _api_adapter()
+    adapter._companion_link_manager = SimpleNamespace(
+        start=AsyncMock(side_effect=OSError("private transport detail"))
+    )
+    request = SimpleNamespace(
+        cookies={"honeyos_local": adapter._local_web_token},
+        remote="127.0.0.1",
+        headers={},
+        match_info={"platform": "feishu"},
+    )
+
+    response = await adapter._handle_companion_channel_link(request)
+
+    assert response.status == 502
+    assert "private transport detail" not in response.text
 
 
 def test_companion_web_message_records_real_recent_channel():

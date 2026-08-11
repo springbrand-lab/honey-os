@@ -112,3 +112,43 @@ def test_companion_component_styles_cover_tokens_accessibility_and_responsivenes
     assert ":focus-visible" in styles
     assert "@media (prefers-reduced-motion: reduce)" in styles
     assert "@media (max-width: 720px)" in styles
+
+
+def test_settings_page_edits_model_and_connects_both_im_channels_by_qr():
+    page = (ASSETS / "index.html").read_text(encoding="utf-8")
+
+    assert 'id="model-settings-form"' in page
+    assert 'name="base_url"' in page
+    assert 'name="model"' in page
+    assert 'name="api_key"' in page
+    assert 'type="password"' in page
+    assert 'data-channel-link="weixin"' in page
+    assert 'data-channel-link="feishu"' in page
+    assert page.count("扫码连接") >= 2
+    assert 'id="channel-link-dialog"' in page
+    assert 'id="channel-link-qr"' in page
+    assert "App Secret" not in page
+    assert "仍保留在管理后台" not in page
+
+
+def test_settings_script_saves_model_without_refilling_key_and_polls_qr_link():
+    script = (ASSETS / "app.js").read_text(encoding="utf-8")
+
+    assert 'fetch("/api/companion/settings"' in script
+    assert '"/api/companion/settings/model"' in script
+    assert '"/api/companion/channels/" + encodeURIComponent(platform) + "/link"' in script
+    assert '"/api/companion/channels/link/" + encodeURIComponent(linkId)' in script
+    assert 'elements.modelApiKey.value = ""' in script
+    assert "qr_image" in script
+    assert "restart_required" in script
+    assert ".innerHTML" not in script
+
+
+def test_settings_styles_cover_editable_cards_qr_dialog_and_mobile_layout():
+    styles = (ASSETS / "styles.css").read_text(encoding="utf-8")
+
+    assert ".model-settings-form" in styles
+    assert ".channel-settings-grid" in styles
+    assert ".channel-link-dialog" in styles
+    assert ".channel-link-qr" in styles
+    assert "@media (max-width: 720px)" in styles

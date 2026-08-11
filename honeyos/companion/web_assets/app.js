@@ -39,6 +39,21 @@ const elements = {
   conversationModel: document.querySelector("#conversation-model"),
   distillationModel: document.querySelector("#distillation-model"),
   proactiveSetting: document.querySelector("#proactive-setting"),
+  modelSettingsForm: document.querySelector("#model-settings-form"),
+  modelBaseUrl: document.querySelector("#model-base-url"),
+  modelId: document.querySelector("#model-id"),
+  modelApiKey: document.querySelector("#model-api-key"),
+  modelSettingsStatus: document.querySelector("#model-settings-status"),
+  channelLinkButtons: Array.from(document.querySelectorAll("[data-channel-link]")),
+  channelLinkDialog: document.querySelector("#channel-link-dialog"),
+  channelLinkClose: document.querySelector("#channel-link-close"),
+  channelLinkTitle: document.querySelector("#channel-link-title"),
+  channelLinkCopy: document.querySelector("#channel-link-copy"),
+  channelLinkQr: document.querySelector("#channel-link-qr"),
+  channelLinkOpen: document.querySelector("#channel-link-open"),
+  channelLinkStatus: document.querySelector("#channel-link-status"),
+  weixinChannelStatus: document.querySelector("#weixin-channel-status"),
+  feishuChannelStatus: document.querySelector("#feishu-channel-status"),
   toast: document.querySelector("#app-toast"),
 };
 
@@ -63,6 +78,7 @@ let companionData = {
   settings: {},
 };
 let toastTimer = null;
+let channelLinkPollTimer = null;
 
 function avatarLabel(name, fallback = "H") {
   const value = Array.from(String(name || "").trim()).find((character) => character.trim());
@@ -438,6 +454,134 @@ function hydrateCompanionPages(data) {
       elements.proactiveSetting.textContent = payload.preferences.enabled === false ? "已关闭" : "按当前规则";
     })
     .catch(() => {});
+  void loadEditableSettings();
+}
+
+function channelLabel(platform) {
+  return platform === "feishu" ? "飞书" : "微信";
+}
+
+function fillEditableSettings(settings) {
+  const model = settings?.model || {};
+  if (elements.modelBaseUrl) elements.modelBaseUrl.value = model.base_url || "";
+  if (elements.modelId) elements.modelId.value = model.model || "";
+  if (elements.modelApiKey) elements.modelApiKey.value = "";
+  if (elements.modelSettingsStatus) {
+    elements.modelSettingsStatus.textContent = model.api_key_configured
+      ? "密钥已保存在这台设备，页面不会显示它"
+      : "还没有配置密钥";
+  }
+  if (elements.conversationModel) elements.conversationModel.textContent = model.model || "当前配置";
+  const channels = settings?.channels || {};
+  if (elements.weixinChannelStatus) {
+    elements.weixinChannelStatus.textContent = channels.weixin?.configured ? "已连接" : "未连接";
+  }
+  if (elements.feishuChannelStatus) {
+    elements.feishuChannelStatus.textContent = channels.feishu?.configured ? "已连接" : "未连接";
+  }
+}
+
+async function loadEditableSettings() {
+  try {
+    const response = await fetch("/api/companion/settings", { credentials: "same-origin" });
+    if (!response.ok) return;
+    const payload = await response.json();
+    companionData.settings = { ...companionData.settings, ...(payload.settings || {}) };
+    fillEditableSettings(payload.settings || {});
+  } catch {
+    // The rest of the companion remains usable when settings are unavailable.
+  }
+}
+
+async function saveModelSettings(event) {
+  event.preventDefault();
+  const submit = elements.modelSettingsForm?.querySelector('button[type="submit"]');
+  if (submit) submit.disabled = true;
+  if (elements.modelSettingsStatus) elements.modelSettingsStatus.textContent = "正在保存…";
+  const apiKey = elements.modelApiKey.value.trim();
+  const body = {
+    base_url: elements.modelBaseUrl.value.trim(),
+    model: elements.modelId.value.trim(),
+  };
+  if (apiKey) body.api_key = apiKey;
+  try {
+    const response = await fetch("/api/companion/settings/model", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "model_settings_unavailable");
+    fillEditableSettings(payload.settings || {});
+    elements.modelApiKey.value = "";
+    showToast("模型配置已保存，重启后会用于新的对话");
+  } catch (error) {
+    if (elements.modelSettingsStatus) {
+      elements.modelSettingsStatus.textContent = error instanceof Error ? error.message : "刚才没有保存成功";
+    }
+  } finally {
+    if (submit) submit.disabled = false;
+  }
+}
+
+function closeChannelLink() {
+  window.clearTimeout(channelLinkPollTimer);
+  channelLinkPollTimer = null;
+  if (elements.channelLinkDialog?.open) elements.channelLinkDialog.close();
+}
+
+async function pollChannelLink(linkId, platform) {
+  try {
+    const response = await fetch(
+      "/api/companion/channels/link/" + encodeURIComponent(linkId),
+      { credentials: "same-origin" },
+    );
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "link_unavailable");
+    if (payload.status === "connected") {
+      elements.channelLinkStatus.textContent = payload.restart_required
+        ? "连接成功，重启 HoneyOS 后生效"
+        : "连接成功";
+      await loadEditableSettings();
+      showToast(channelLabel(platform) + "已连接，重启 HoneyOS 后生效");
+      return;
+    }
+    if (payload.status === "scanned") {
+      elements.channelLinkStatus.textContent = "已经扫码，请在手机上确认";
+    } else if (["expired", "denied", "error"].includes(payload.status)) {
+      elements.channelLinkStatus.textContent = payload.status === "expired" ? "二维码已过期，请关闭后重试" : "连接没有完成，请关闭后重试";
+      return;
+    } else {
+      elements.channelLinkStatus.textContent = "等待扫码";
+    }
+    channelLinkPollTimer = window.setTimeout(() => void pollChannelLink(linkId, platform), 1600);
+  } catch {
+    elements.channelLinkStatus.textContent = "暂时无法获取连接状态，请稍后重试";
+  }
+}
+
+async function startChannelLink(platform, button) {
+  button.disabled = true;
+  try {
+    const response = await fetch(
+      "/api/companion/channels/" + encodeURIComponent(platform) + "/link",
+      { method: "POST", credentials: "same-origin" },
+    );
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "link_unavailable");
+    elements.channelLinkTitle.textContent = "连接" + channelLabel(platform);
+    elements.channelLinkCopy.textContent = "请使用" + channelLabel(platform) + "扫码，并在手机上确认。";
+    elements.channelLinkQr.src = payload.qr_image || "";
+    elements.channelLinkOpen.href = payload.qr_url;
+    elements.channelLinkStatus.textContent = "等待扫码";
+    elements.channelLinkDialog.showModal();
+    void pollChannelLink(payload.link_id, platform);
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "暂时无法开始扫码");
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function isNearLatest() {
@@ -1249,6 +1393,15 @@ for (const tab of elements.memoryTabs) {
   });
 }
 elements.profileForm?.addEventListener("submit", saveProfile);
+elements.modelSettingsForm?.addEventListener("submit", saveModelSettings);
+for (const button of elements.channelLinkButtons) {
+  button.addEventListener("click", () => void startChannelLink(button.dataset.channelLink, button));
+}
+elements.channelLinkClose?.addEventListener("click", closeChannelLink);
+elements.channelLinkDialog?.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  closeChannelLink();
+});
 elements.historySearch?.addEventListener("input", () => {
   renderHistoryList(elements.historySearch.value);
 });
