@@ -499,6 +499,7 @@ def test_api_server_registers_companion_web_routes():
     assert ("GET", "/honeyos/icons.svg") in routes
     assert ("GET", "/api/companion/bootstrap") in routes
     assert ("GET", "/api/companion/settings") in routes
+    assert ("POST", "/api/companion/settings/models") in routes
     assert ("POST", "/api/companion/settings/model") in routes
     assert ("POST", "/api/companion/channels/{platform}/link") in routes
     assert ("GET", "/api/companion/channels/link/{link_id}") in routes
@@ -521,6 +522,10 @@ async def test_companion_model_settings_endpoint_never_echoes_api_key(
     monkeypatch, tmp_path
 ):
     monkeypatch.setattr("honeyos.core.constants.get_honeyos_home", lambda: tmp_path)
+    monkeypatch.setattr(
+        "honeyos.companion.setup.validate_model_key",
+        lambda _choice, _key: None,
+    )
     (tmp_path / "config.yaml").write_text("{}\n", encoding="utf-8")
     adapter = _api_adapter()
     adapter._read_json_body = AsyncMock(
@@ -545,6 +550,40 @@ async def test_companion_model_settings_endpoint_never_echoes_api_key(
     assert response.status == 200
     assert payload["settings"]["model"]["model"] == "companion-model"
     assert payload["settings"]["model"]["api_key_configured"] is True
+    assert "sk-private-value" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_companion_model_discovery_endpoint_returns_ids_without_echoing_key(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr("honeyos.core.constants.get_honeyos_home", lambda: tmp_path)
+    monkeypatch.setattr(
+        "honeyos.companion.settings.discover_companion_models",
+        lambda home, **kwargs: ["model-a", "model-b"],
+    )
+    adapter = _api_adapter()
+    adapter._read_json_body = AsyncMock(
+        return_value=(
+            {
+                "provider": "custom",
+                "base_url": "https://models.example/v1",
+                "api_key": "sk-private-value",
+            },
+            None,
+        )
+    )
+    request = SimpleNamespace(
+        cookies={"honeyos_local": adapter._local_web_token},
+        remote="127.0.0.1",
+        headers={},
+    )
+
+    response = await adapter._handle_companion_model_discovery(request)
+    payload = json.loads(response.text)
+
+    assert response.status == 200
+    assert payload == {"models": ["model-a", "model-b"]}
     assert "sk-private-value" not in response.text
 
 

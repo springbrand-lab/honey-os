@@ -2763,8 +2763,11 @@ input:focus-visible, textarea:focus-visible {
 .model-settings-form { padding: 15px; display: grid; grid-template-columns: 1.3fr 1fr; gap: 12px; border-top: 1px solid var(--line); }
 .model-settings-form label { min-width: 0; display: grid; gap: 6px; color: var(--text-soft); font-size: 12px; }
 .model-settings-form label:first-child { grid-column: 1 / -1; }
-.model-settings-form input { width: 100%; min-height: 40px; padding: 0 11px; border: 1px solid var(--line-strong); border-radius: 9px; color: var(--text); background: var(--surface); }
+.model-settings-form input,.model-settings-form select { width: 100%; min-height: 40px; padding: 0 11px; border: 1px solid var(--line-strong); border-radius: 9px; color: var(--text); background: var(--surface); }
 .model-settings-form input:focus { outline: 2px solid color-mix(in srgb,var(--accent) 35%,transparent); outline-offset: 1px; }
+.model-discovery-row { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; }
+.settings-group .model-discovery-row button { min-height: 36px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 9px; color: var(--text); background: var(--surface-raised); }
+.model-discovery-row small { color: var(--text-faint); }
 .settings-form-footer { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .settings-form-footer > span { color: var(--text-faint); font-size: 11px; }
 .settings-group .settings-form-footer button { min-height: 38px; padding: 0 14px; border: 0; border-radius: 9px; color: #fff; background: #34312d; }
@@ -2894,6 +2897,7 @@ input:focus-visible, textarea:focus-visible {
 :root[data-theme="dark"] .profile-form input,
 :root[data-theme="dark"] .profile-form textarea,
 :root[data-theme="dark"] .model-settings-form input,
+:root[data-theme="dark"] .model-settings-form select,
 :root[data-theme="dark"] .settings-row select { background: #24231f; }
 :root[data-theme="dark"] .composer { border-color: #4a4740; }
 :root[data-theme="dark"] .composer textarea::placeholder { color: var(--text-faint); }

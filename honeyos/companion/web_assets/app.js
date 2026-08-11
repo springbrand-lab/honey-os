@@ -41,9 +41,13 @@ const elements = {
   proactiveSetting: document.querySelector("#proactive-setting"),
   themeSelect: document.querySelector("#theme-select"),
   modelSettingsForm: document.querySelector("#model-settings-form"),
+  modelProvider: document.querySelector("#model-provider"),
   modelBaseUrl: document.querySelector("#model-base-url"),
+  modelBaseUrlRow: document.querySelector("#model-base-url-row"),
   modelId: document.querySelector("#model-id"),
+  modelOptions: document.querySelector("#model-options"),
   modelApiKey: document.querySelector("#model-api-key"),
+  modelDiscover: document.querySelector("#model-discover"),
   modelSettingsStatus: document.querySelector("#model-settings-status"),
   channelLinkButtons: Array.from(document.querySelectorAll("[data-channel-link]")),
   channelLinkDialog: document.querySelector("#channel-link-dialog"),
@@ -80,6 +84,12 @@ let companionData = {
 };
 let toastTimer = null;
 let channelLinkPollTimer = null;
+
+const providerBaseUrls = {
+  "openai-api": "https://api.openai.com/v1",
+  openrouter: "https://openrouter.ai/api/v1",
+  deepseek: "https://api.deepseek.com/v1",
+};
 
 function avatarLabel(name, fallback = "H") {
   const value = Array.from(String(name || "").trim()).find((character) => character.trim());
@@ -467,6 +477,7 @@ function channelLabel(platform) {
 
 function fillEditableSettings(settings) {
   const model = settings?.model || {};
+  if (elements.modelProvider) elements.modelProvider.value = model.provider || "custom";
   if (elements.modelBaseUrl) elements.modelBaseUrl.value = model.base_url || "";
   if (elements.modelId) elements.modelId.value = model.model || "";
   if (elements.modelApiKey) elements.modelApiKey.value = "";
@@ -476,12 +487,66 @@ function fillEditableSettings(settings) {
       : "还没有配置密钥";
   }
   if (elements.conversationModel) elements.conversationModel.textContent = model.model || "当前配置";
+  syncModelProviderFields();
   const channels = settings?.channels || {};
   if (elements.weixinChannelStatus) {
     elements.weixinChannelStatus.textContent = channels.weixin?.configured ? "已连接" : "未连接";
   }
   if (elements.feishuChannelStatus) {
     elements.feishuChannelStatus.textContent = channels.feishu?.configured ? "已连接" : "未连接";
+  }
+}
+
+function syncModelProviderFields() {
+  const provider = elements.modelProvider?.value || "custom";
+  const isCustom = provider === "custom";
+  if (elements.modelBaseUrlRow) elements.modelBaseUrlRow.hidden = !isCustom;
+  if (elements.modelBaseUrl && !isCustom) {
+    elements.modelBaseUrl.value = providerBaseUrls[provider] || "";
+  }
+}
+
+function renderModelOptions(models) {
+  if (!elements.modelOptions) return;
+  elements.modelOptions.replaceChildren();
+  (Array.isArray(models) ? models : []).forEach((model) => {
+    const option = document.createElement("option");
+    option.value = String(model);
+    elements.modelOptions.append(option);
+  });
+}
+
+async function discoverModels({ silent = false } = {}) {
+  if (!elements.modelProvider || !elements.modelBaseUrl || !elements.modelApiKey) return;
+  if (elements.modelDiscover) elements.modelDiscover.disabled = true;
+  if (!silent && elements.modelSettingsStatus) elements.modelSettingsStatus.textContent = "正在读取可用模型…";
+  const apiKey = elements.modelApiKey.value.trim();
+  const body = {
+    provider: elements.modelProvider.value,
+    base_url: elements.modelBaseUrl.value.trim(),
+  };
+  if (apiKey) body.api_key = apiKey;
+  try {
+    const response = await fetch("/api/companion/settings/models", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "暂时没有读到模型列表");
+    renderModelOptions(payload.models);
+    const models = Array.isArray(payload.models) ? payload.models : [];
+    if (models.length && !models.includes(elements.modelId.value.trim())) {
+      elements.modelId.value = models[0];
+    }
+    if (elements.modelSettingsStatus) elements.modelSettingsStatus.textContent = `已读取 ${models.length} 个模型，可以输入关键词选择`;
+  } catch (error) {
+    if (!silent && elements.modelSettingsStatus) {
+      elements.modelSettingsStatus.textContent = error instanceof Error ? `${error.message}；也可以手动填写模型 ID` : "暂时没有读到模型列表";
+    }
+  } finally {
+    if (elements.modelDiscover) elements.modelDiscover.disabled = false;
   }
 }
 
@@ -492,6 +557,7 @@ async function loadEditableSettings() {
     const payload = await response.json();
     companionData.settings = { ...companionData.settings, ...(payload.settings || {}) };
     fillEditableSettings(payload.settings || {});
+    if (payload.settings?.model?.api_key_configured) void discoverModels({ silent: true });
   } catch {
     // The rest of the companion remains usable when settings are unavailable.
   }
@@ -504,6 +570,7 @@ async function saveModelSettings(event) {
   if (elements.modelSettingsStatus) elements.modelSettingsStatus.textContent = "正在保存…";
   const apiKey = elements.modelApiKey.value.trim();
   const body = {
+    provider: elements.modelProvider.value,
     base_url: elements.modelBaseUrl.value.trim(),
     model: elements.modelId.value.trim(),
   };
@@ -1398,6 +1465,12 @@ for (const tab of elements.memoryTabs) {
 }
 elements.profileForm?.addEventListener("submit", saveProfile);
 elements.modelSettingsForm?.addEventListener("submit", saveModelSettings);
+elements.modelProvider?.addEventListener("change", () => {
+  syncModelProviderFields();
+  renderModelOptions([]);
+  if (elements.modelId) elements.modelId.value = "";
+});
+elements.modelDiscover?.addEventListener("click", () => void discoverModels());
 if (elements.themeSelect && window.HoneyOSTheme) {
   elements.themeSelect.value = window.HoneyOSTheme.get();
   elements.themeSelect.addEventListener("change", () => {

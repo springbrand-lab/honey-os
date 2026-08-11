@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlparse
 
 import yaml
@@ -66,6 +66,11 @@ def companion_settings(home: Path | str) -> dict[str, Any]:
     key_env = str(
         model_cfg.get("key_env") or provider_cfg.get("key_env") or MODEL_KEY_ENV
     ).strip()
+    from honeyos.companion.setup import PROVIDER_OPTIONS
+
+    if provider in PROVIDER_OPTIONS:
+        key_env = PROVIDER_OPTIONS[provider].key_env
+    display_provider = "custom" if provider == "honeyos-model" else provider
     model_key_configured = bool(
         env.get(key_env)
         or model_cfg.get("api_key")
@@ -79,7 +84,7 @@ def companion_settings(home: Path | str) -> dict[str, Any]:
 
     return {
         "model": {
-            "provider": provider,
+            "provider": display_provider,
             "model": model,
             "base_url": base_url,
             "api_key_configured": model_key_configured,
@@ -105,51 +110,54 @@ def companion_settings(home: Path | str) -> dict[str, Any]:
 def update_companion_model(
     home: Path | str,
     *,
+    provider: str = "custom",
     base_url: str,
     model: str,
     api_key: str | None = None,
+    validate_fn: Callable[[Any, str], None] | None = None,
 ) -> dict[str, Any]:
-    """Persist an OpenAI-compatible model while keeping its key in ``.env``."""
+    """Validate then persist a model while keeping its key in ``.env``."""
 
     resolved = Path(home).expanduser().resolve()
-    normalized_url = str(base_url or "").strip().rstrip("/")
-    parsed = urlparse(normalized_url)
+    from honeyos.companion.setup import (
+        configure_model,
+        model_choice,
+        validate_model_key,
+    )
+
+    choice = model_choice(provider, model, base_url=base_url)
+    parsed = urlparse(choice.base_url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError("Base URL 必须是有效的 HTTP 或 HTTPS 地址")
-    model_id = str(model or "").strip()
-    if not model_id or len(model_id) > 240:
-        raise ValueError("Model ID 不能为空且不能超过 240 个字符")
-    if len(normalized_url) > 2048:
+    if len(choice.base_url) > 2048:
         raise ValueError("Base URL 过长")
     submitted_key = str(api_key).strip() if api_key is not None else ""
-    if not submitted_key and not _read_env(resolved).get(MODEL_KEY_ENV):
+    saved_key = _read_env(resolved).get(choice.key_env, "").strip()
+    resolved_key = submitted_key or saved_key
+    if not resolved_key:
         raise ValueError("API Key 不能为空")
-
-    config = _read_config(resolved)
-    providers = config.get("providers")
-    if not isinstance(providers, dict):
-        providers = {}
-        config["providers"] = providers
-    providers["honeyos-model"] = {
-        "name": "honeyos-model",
-        "base_url": normalized_url,
-        "key_env": MODEL_KEY_ENV,
-        "api_mode": "chat_completions",
-        "default_model": model_id,
-    }
-    config["model"] = {
-        "default": model_id,
-        "provider": "honeyos-model",
-        "base_url": normalized_url,
-        "api_mode": "chat_completions",
-    }
-
-    from honeyos.companion.setup import _atomic_write, _set_env_value
-
-    _atomic_write(
-        resolved / "config.yaml",
-        yaml.safe_dump(config, allow_unicode=True, sort_keys=False),
-    )
-    if submitted_key:
-        _set_env_value(resolved / ".env", MODEL_KEY_ENV, submitted_key)
+    (validate_fn or validate_model_key)(choice, resolved_key)
+    configure_model(resolved, choice, resolved_key)
     return companion_settings(resolved)
+
+
+def discover_companion_models(
+    home: Path | str,
+    *,
+    provider: str,
+    base_url: str = "",
+    api_key: str | None = None,
+    discover_fn: Callable[[str, str], list[str]] | None = None,
+) -> list[str]:
+    """Discover models using a submitted key or the provider's saved key."""
+
+    resolved = Path(home).expanduser().resolve()
+    from honeyos.companion.setup import discover_model_ids, model_choice
+
+    # The model value is only needed to resolve the provider's trusted endpoint.
+    choice = model_choice(provider, "discovery-probe", base_url=base_url)
+    submitted_key = str(api_key).strip() if api_key is not None else ""
+    resolved_key = submitted_key or _read_env(resolved).get(choice.key_env, "").strip()
+    if not resolved_key:
+        raise ValueError("请先填写 API Key")
+    return (discover_fn or discover_model_ids)(choice.base_url, resolved_key)

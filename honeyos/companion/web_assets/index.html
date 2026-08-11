@@ -213,9 +213,19 @@
           <section class="settings-group">
             <h2>模型</h2>
             <form class="model-settings-form" id="model-settings-form">
-              <label><span>Base URL</span><input name="base_url" id="model-base-url" type="url" inputmode="url" placeholder="https://api.example.com/v1" required /></label>
-              <label><span>Model ID</span><input name="model" id="model-id" type="text" placeholder="模型名称" required /></label>
+              <label><span>模型服务</span><select name="provider" id="model-provider">
+                <option value="openai-api">OpenAI</option>
+                <option value="openrouter">OpenRouter</option>
+                <option value="deepseek">DeepSeek</option>
+                <option value="custom">自定义兼容接口</option>
+              </select></label>
+              <label id="model-base-url-row" hidden><span>Base URL</span><input name="base_url" id="model-base-url" type="url" inputmode="url" placeholder="https://api.example.com/v1" /></label>
+              <label><span>模型</span><input name="model" id="model-id" type="text" list="model-options" placeholder="先读取可用模型" required /><datalist id="model-options"></datalist></label>
               <label><span>API Key</span><input name="api_key" id="model-api-key" type="password" autocomplete="new-password" placeholder="留空则保持现有密钥" /></label>
+              <div class="model-discovery-row">
+                <button type="button" id="model-discover">读取可用模型</button>
+                <small>读取失败时仍可手动填写，保存前会立即验证。</small>
+              </div>
               <div class="settings-form-footer">
                 <span id="model-settings-status" role="status">密钥只保存在这台设备</span>
                 <button type="submit">保存模型配置</button>

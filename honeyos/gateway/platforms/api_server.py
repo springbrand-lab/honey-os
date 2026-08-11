@@ -2161,6 +2161,11 @@ class APIServerAdapter(BasePlatformAdapter):
             ("GET", "/api/companion/settings", self._handle_companion_settings),
             (
                 "POST",
+                "/api/companion/settings/models",
+                self._handle_companion_model_discovery,
+            ),
+            (
+                "POST",
                 "/api/companion/settings/model",
                 self._handle_companion_model_settings,
             ),
@@ -2540,7 +2545,7 @@ class APIServerAdapter(BasePlatformAdapter):
         body, err = await self._read_json_body(request)
         if err:
             return err
-        allowed = {"base_url", "model", "api_key"}
+        allowed = {"provider", "base_url", "model", "api_key"}
         if set(body) - allowed:
             return web.json_response({"error": "配置中包含不支持的字段"}, status=400)
         from honeyos.companion.settings import update_companion_model
@@ -2550,6 +2555,7 @@ class APIServerAdapter(BasePlatformAdapter):
             settings = await asyncio.to_thread(
                 update_companion_model,
                 get_honeyos_home(),
+                provider=body.get("provider", "custom"),
                 base_url=body.get("base_url", ""),
                 model=body.get("model", ""),
                 api_key=body.get("api_key"),
@@ -2558,6 +2564,33 @@ class APIServerAdapter(BasePlatformAdapter):
             return web.json_response({"error": str(exc)}, status=400)
         self._model_name = settings["model"]["model"]
         return web.json_response({"success": True, "settings": settings})
+
+    async def _handle_companion_model_discovery(
+        self, request: "web.Request"
+    ) -> "web.Response":
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+        body, err = await self._read_json_body(request)
+        if err:
+            return err
+        allowed = {"provider", "base_url", "api_key"}
+        if set(body) - allowed:
+            return web.json_response({"error": "配置中包含不支持的字段"}, status=400)
+        from honeyos.companion.settings import discover_companion_models
+        from honeyos.core.constants import get_honeyos_home
+
+        try:
+            models = await asyncio.to_thread(
+                discover_companion_models,
+                get_honeyos_home(),
+                provider=body.get("provider", "custom"),
+                base_url=body.get("base_url", ""),
+                api_key=body.get("api_key"),
+            )
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        return web.json_response({"models": models})
 
     def _get_companion_link_manager(self):
         manager = self._companion_link_manager
