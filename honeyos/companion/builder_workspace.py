@@ -30,8 +30,13 @@ DEFAULT_PROTECTED_PATHS = (
     "honeyos/companion/companion_skills/honeyos-self-extension/**",
     "honeyos/companion/projects.py",
     "honeyos/runtime/auth.py",
-    "honeyos/runtime/**",
+    "honeyos/runtime/backup.py",
     "honeyos/runtime/builder_cmd.py",
+    "honeyos/runtime/builder_activation_worker.py",
+    "honeyos/runtime/gateway.py",
+    "honeyos/runtime/gateway_windows.py",
+    "honeyos/runtime/main.py",
+    "honeyos/runtime/service_manager.py",
     "honeyos/cli/service.py",
     "honeyos/tools/approval.py",
     "honeyos/tools/write_approval.py",
@@ -44,9 +49,22 @@ DEFAULT_PROTECTED_PATHS = (
     "requirements/**/*.txt",
     "install.sh",
     "Install-HoneyOS.command",
-    "scripts/install*.sh",
-    "scripts/update*.sh",
+    "install*",
+    "update*",
+    "release*",
+    "scripts/*install*",
+    "scripts/*update*",
+    "scripts/*release*",
+    "scripts/**/install*",
+    "scripts/**/update*",
+    "scripts/**/release*",
 )
+
+
+# This version is intentionally owned by the running trusted control plane,
+# rather than by a candidate manifest.  Older manifests must be recreated so a
+# candidate cannot dilute a newly added safety boundary by editing JSON.
+BUILDER_POLICY_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -164,7 +182,8 @@ def prepare_builder_change(
         _git(workspace, "switch", "-c", branch)
         source_commit = _git(source, "rev-parse", "HEAD")
         manifest = {
-            "schema_version": 1,
+            "schema_version": 2,
+            "policy_version": BUILDER_POLICY_VERSION,
             "change_id": normalized_id,
             "goal": goal_text,
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -208,6 +227,20 @@ def prepare_builder_change(
     )
 
 
+def _is_ephemeral_ignored(path: str) -> bool:
+    """Return true only for local test/tool cache bytes never copied to a slot."""
+
+    parts = Path(path).parts
+    return (
+        ".pytest_cache" in parts
+        or "__pycache__" in parts
+        or path.endswith(".pyc")
+        or path == ".coverage"
+        or path.startswith(".ruff_cache/")
+        or path.startswith(".mypy_cache/")
+    )
+
+
 def _changed_paths(workspace: Path) -> tuple[_ChangedPath, ...]:
     completed = subprocess.run(
         [
@@ -217,6 +250,7 @@ def _changed_paths(workspace: Path) -> tuple[_ChangedPath, ...]:
             "status",
             "--porcelain=v1",
             "--untracked-files=all",
+            "--ignored=matching",
             "-z",
         ],
         check=True,
@@ -233,6 +267,10 @@ def _changed_paths(workspace: Path) -> tuple[_ChangedPath, ...]:
             continue
         status = record[:2]
         path = record[3:]
+        if status == "!!":
+            if path and not _is_ephemeral_ignored(path):
+                paths.append(_ChangedPath(path, status))
+            continue
         if "R" in status or "C" in status:
             # Porcelain -z emits the destination first and the source next.
             source = records[index] if index < len(records) else ""
@@ -308,6 +346,12 @@ def inspect_builder_change(change_root: Path | str) -> BuilderReviewReport:
     if not manifest_path.is_file():
         raise ValueError("builder change manifest is missing")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if (
+        manifest.get("schema_version") != 2
+        or manifest.get("policy_version") != BUILDER_POLICY_VERSION
+        or manifest.get("protected_paths") != list(DEFAULT_PROTECTED_PATHS)
+    ):
+        raise ValueError("builder change policy is stale or has been modified")
     change_id = str(manifest.get("change_id", ""))
     workspace_root = Path(str(manifest.get("workspace_root", ""))).expanduser().resolve()
     expected_workspace = workspace_root / "changes" / change_id / "source"
@@ -315,14 +359,23 @@ def inspect_builder_change(change_root: Path | str) -> BuilderReviewReport:
     if workspace != expected_workspace or not (workspace / ".git").exists():
         raise ValueError("builder workspace does not match its protected manifest")
 
+    source_commit = str(manifest.get("source_commit", ""))
+    if not source_commit or _git(workspace, "rev-parse", "HEAD") != source_commit:
+        raise ValueError("builder workspace revision differs from the trusted review base")
+
     allowed_patterns = tuple(manifest.get("allowed_paths") or ())
-    protected_patterns = tuple(manifest.get("protected_paths") or ())
+    # Never trust the manifest to define its own protected surface.  It merely
+    # records the policy that prepared it; the active code enforces the current
+    # immutable list above.
+    protected_patterns = DEFAULT_PROTECTED_PATHS
     allowed: list[str] = []
     protected: list[str] = []
     out_of_scope: list[str] = []
     changed_paths = _changed_paths(workspace)
     for changed in changed_paths:
-        if _matches_any(changed.relative, protected_patterns):
+        if changed.status == "!!":
+            out_of_scope.append(changed.relative)
+        elif _matches_any(changed.relative, protected_patterns):
             protected.append(changed.relative)
         elif _matches_any(changed.relative, allowed_patterns):
             allowed.append(changed.relative)
@@ -335,7 +388,6 @@ def inspect_builder_change(change_root: Path | str) -> BuilderReviewReport:
         status = "review_ready"
     else:
         status = "no_changes"
-    source_commit = str(manifest.get("source_commit", ""))
     digest = candidate_digest(workspace, source_commit, changed_paths)
     report_path = root / "review.json"
     report_payload = {

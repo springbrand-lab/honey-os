@@ -21,11 +21,15 @@ def _source_repo(tmp_path: Path) -> Path:
     source = tmp_path / "live-honeyos"
     (source / "honeyos" / "companion").mkdir(parents=True)
     (source / "honeyos" / "tools").mkdir(parents=True)
+    (source / "honeyos" / "runtime").mkdir(parents=True)
     (source / "honeyos" / "companion" / "feature.py").write_text(
         "VALUE = 'live'\n", encoding="utf-8"
     )
     (source / "honeyos" / "tools" / "permission_policy.py").write_text(
         "PROTECTED = True\n", encoding="utf-8"
+    )
+    (source / "honeyos" / "runtime" / "model_routing.py").write_text(
+        "MODEL = 'default'\n", encoding="utf-8"
     )
     (source / "README.md").write_text("# HoneyOS\n", encoding="utf-8")
     _git(source, "init", "-b", "main")
@@ -194,6 +198,76 @@ def test_candidate_digest_rejects_symlink(tmp_path):
         candidate_digest(workspace, "source-commit", ("candidate.py",))
 
 
+def test_inspect_rejects_workspace_commit_different_from_review_base(tmp_path):
+    from honeyos.companion.builder_workspace import inspect_builder_change
+
+    prepared = _prepared_change(tmp_path)
+    feature = prepared.workspace / "honeyos" / "companion" / "feature.py"
+    feature.write_text("VALUE = 'committed candidate'\n", encoding="utf-8")
+    _git(prepared.workspace, "add", str(feature.relative_to(prepared.workspace)))
+    _git(prepared.workspace, "commit", "-m", "candidate change")
+
+    with pytest.raises(ValueError, match="revision"):
+        inspect_builder_change(prepared.change_root)
+
+
+def test_inspect_blocks_ignored_non_ephemeral_candidate_content(tmp_path):
+    from honeyos.companion.builder_workspace import inspect_builder_change
+
+    prepared = _prepared_change(tmp_path, allowed_paths=("**",))
+    (prepared.workspace / ".gitignore").write_text("hidden_module.py\n", encoding="utf-8")
+    (prepared.workspace / "hidden_module.py").write_text(
+        "VALUE = 'must not hide'\n", encoding="utf-8"
+    )
+
+    report = inspect_builder_change(prepared.change_root)
+
+    assert report.status == "blocked"
+    assert "hidden_module.py" in report.out_of_scope_changes
+
+
+def test_inspect_ignores_narrow_ephemeral_cache_content(tmp_path):
+    from honeyos.companion.builder_workspace import inspect_builder_change
+
+    prepared = _prepared_change(tmp_path)
+    (prepared.workspace / ".git" / "info" / "exclude").write_text(
+        ".pytest_cache/\n", encoding="utf-8"
+    )
+    cache = prepared.workspace / ".pytest_cache" / "v" / "cache"
+    cache.mkdir(parents=True)
+    (cache / "nodeids").write_text("[]\n", encoding="utf-8")
+
+    report = inspect_builder_change(prepared.change_root)
+
+    assert report.status == "no_changes"
+
+
+def test_inspect_rejects_stale_policy_manifest(tmp_path):
+    from honeyos.companion.builder_workspace import inspect_builder_change
+
+    prepared = _prepared_change(tmp_path)
+    manifest = json.loads(prepared.manifest_path.read_text(encoding="utf-8"))
+    manifest["policy_version"] = 1
+    manifest["protected_paths"] = []
+    prepared.manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="policy is stale"):
+        inspect_builder_change(prepared.change_root)
+
+
+def test_inspect_permits_ordinary_runtime_business_change(tmp_path):
+    from honeyos.companion.builder_workspace import inspect_builder_change
+
+    prepared = _prepared_change(tmp_path, allowed_paths=("honeyos/runtime/**",))
+    path = prepared.workspace / "honeyos" / "runtime" / "model_routing.py"
+    path.write_text("MODEL = 'personalized'\n", encoding="utf-8")
+
+    report = inspect_builder_change(prepared.change_root)
+
+    assert report.status == "review_ready"
+    assert report.allowed_changes == ("honeyos/runtime/model_routing.py",)
+
+
 @pytest.mark.parametrize(
     "path",
     (
@@ -202,9 +276,11 @@ def test_candidate_digest_rejects_symlink(tmp_path):
         "honeyos/tools/companion_builder_tool.py",
         "honeyos/runtime/gateway.py",
         "honeyos/runtime/backup.py",
+        "honeyos/runtime/service_manager.py",
         "pyproject.toml",
         "uv.lock",
         "install.sh",
+        "scripts/build_release_zip.sh",
     ),
 )
 def test_builder_blocks_activation_and_dependency_surfaces(tmp_path, path):
