@@ -25,16 +25,17 @@ def test_service_identity_has_only_honeyos_names(tmp_path: Path) -> None:
     assert identity.data_home == (tmp_path / ".honeyos").resolve()
 
 
-def test_service_command_uses_current_python_and_honeyos_module(tmp_path: Path) -> None:
+def test_service_command_runs_gateway_as_the_launchd_process(tmp_path: Path) -> None:
     service = _service_module()
     identity = service.ServiceIdentity.default(home=tmp_path / ".honeyos")
 
     assert identity.command_argv() == (
         str(Path(sys.executable)),
         "-m",
-        "honeyos",
+        "honeyos.runtime.main",
         "gateway",
         "run",
+        "--replace",
     )
 
 
@@ -144,6 +145,33 @@ def test_macos_restart_reinstalls_service_after_bootout(
             str(plist_path),
         ),
     ]
+
+
+def test_macos_install_retries_transient_launchd_bootstrap_error(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import time
+
+    service = _service_module()
+    identity = service.ServiceIdentity.default(home=tmp_path / ".honeyos")
+    plist_path = tmp_path / "ai.honeyos.gateway.plist"
+    bootstrap_results = iter((5, 0))
+    calls: list[tuple[str, ...]] = []
+    delays: list[float] = []
+
+    def record(argv, **_kwargs):
+        calls.append(tuple(argv))
+        if argv[1] == "bootstrap":
+            return next(bootstrap_results)
+        return 0
+
+    monkeypatch.setattr(service.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(service, "launchd_plist_path", lambda _identity: plist_path)
+    monkeypatch.setattr(time, "sleep", delays.append)
+
+    assert service.install_service(identity, runner=record) == 0
+    assert [call[1] for call in calls] == ["bootout", "bootstrap", "bootstrap"]
+    assert delays == [0.25]
 
 
 def test_linux_restart_rerenders_active_slot_unit_then_reloads_and_restarts(

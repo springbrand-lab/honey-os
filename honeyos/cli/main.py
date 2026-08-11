@@ -186,8 +186,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
         url = companion_web_url()
+        print(f"正在启动 {PRODUCT_NAME} 本地聊天…")
+        if not wait_for_companion_web():
+            print(
+                f"{PRODUCT_NAME} 启动超时，请查看 "
+                f"{identity.data_home / 'logs' / 'gateway.error.log'}",
+                file=sys.stderr,
+            )
+            return 1
         print(f"{PRODUCT_NAME} 本地聊天：{url}")
-        wait_for_companion_web()
         open_companion_web()
         return 0
     if args.command == "stop":

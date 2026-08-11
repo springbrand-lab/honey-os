@@ -257,3 +257,23 @@ def test_start_does_not_continue_when_service_install_fails(monkeypatch, tmp_pat
 
     assert main(["--home", str(tmp_path), "start"]) == 7
     assert [command for command, _home in observed] == ["install"]
+
+
+def test_web_fails_without_opening_browser_when_service_is_not_ready(
+    monkeypatch, tmp_path, capsys
+):
+    opened = []
+    monkeypatch.setattr("honeyos.cli.main._initialize_embedded", lambda _home: None)
+    monkeypatch.setattr("honeyos.cli.main.install_service", lambda _identity: 0)
+    monkeypatch.setattr("honeyos.cli.main.start_service", lambda _identity: 0)
+    monkeypatch.setattr(
+        "honeyos.companion.web.wait_for_companion_web", lambda: False
+    )
+    monkeypatch.setattr(
+        "honeyos.companion.web.open_companion_web",
+        lambda: opened.append(True) or True,
+    )
+
+    assert main(["--home", str(tmp_path), "web"]) == 1
+    assert opened == []
+    assert "gateway.error.log" in capsys.readouterr().err

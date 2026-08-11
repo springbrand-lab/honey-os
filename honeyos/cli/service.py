@@ -9,6 +9,7 @@ import plistlib
 import shlex
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Sequence
@@ -35,9 +36,10 @@ class ServiceIdentity:
         return (
             str(Path(sys.executable)),
             "-m",
-            "honeyos",
+            "honeyos.runtime.main",
             "gateway",
             "run",
+            "--replace",
         )
 
 
@@ -140,7 +142,13 @@ def install_service(identity: ServiceIdentity, runner: Runner = _run) -> int:
         path.chmod(0o600)
         domain = f"gui/{os.getuid()}"
         runner(["launchctl", "bootout", f"{domain}/{identity.macos_label}"])
-        return _returncode(runner(["launchctl", "bootstrap", domain, str(path)]))
+        for attempt in range(40):
+            result = _returncode(
+                runner(["launchctl", "bootstrap", domain, str(path)])
+            )
+            if result != 5 or attempt == 39:
+                return result
+            time.sleep(0.25)
     if system == "Linux":
         _write_systemd_unit(identity)
         if _returncode(runner(["systemctl", "--user", "daemon-reload"])) != 0:
