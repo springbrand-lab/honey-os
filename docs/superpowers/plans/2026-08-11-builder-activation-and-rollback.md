@@ -13,7 +13,7 @@
 - Self-improvement is enabled by default only for the canonical owner DM.
 - Every core activation requires a fresh, candidate-specific confirmation; “always allow” is not supported.
 - Normal Skill installation remains immediate and does not restart core HoneyOS.
-- Candidate code never modifies or imports the trusted Builder activation, approval, auth, filesystem-safety, or service-switch control plane.
+- Candidate code never modifies the trusted Builder activation, approval, auth, backup, filesystem-safety, or service-switch control plane. Ordinary Runtime business logic remains an allowed Builder surface. Before activation, the trusted control plane never imports or executes candidate code.
 - Candidate dependency/build changes (`pyproject.toml`, `uv.lock`, installers, release scripts) are blocked in this release.
 - `SOUL.md`, identity, relationship, memories, `state.db`, credentials, channel bindings, Skills, cron jobs, UI overlays, and projects remain under the existing `HONEYOS_HOME` and are never overlaid by a slot.
 - No GitHub account, push, branch merge, or PR is part of local activation.
@@ -29,7 +29,7 @@
 - Create `honeyos/runtime/builder_activation_worker.py`: detached switch, health, rollback, and recovery logic.
 - Create `honeyos/tools/companion_builder_tool.py`: owner-DM model interface for inspect/stage/request/confirm/status; no raw install command.
 - Modify `honeyos/companion/builder_workspace.py`: protect activation and dependency surfaces; bind reviews to candidate digests.
-- Modify `honeyos/runtime/builder_cmd.py`: trusted operator status/recovery commands and internal worker entrypoint only.
+- Modify `honeyos/runtime/builder_cmd.py`: trusted operator status/recovery commands only; no model-callable activation entrypoint.
 - Modify `honeyos/runtime/main.py`: register internal Builder activation commands.
 - Modify `honeyos/companion/config.py`: include the dedicated toolset and managed Skill contract.
 - Modify `honeyos/companion/companion_skills/honeyos-builder/SKILL.md`: route candidate completion through staging and owner confirmation.
@@ -159,13 +159,19 @@ git commit -m "fix(companion): bind builder reviews to trusted candidate bytes"
 - Produces: `consume_confirmation(activation_id: str, token: str, lane_key: str, now: datetime | None = None) -> ActivationRecord`
 - Produces: `transition(activation_id: str, expected: str, target: str, detail: str = "") -> ActivationRecord`
 
+- Materialization contract: require the trusted `source_repo` HEAD to equal the
+  recorded `source_commit`; create a complete no-`.git` baseline from a trusted
+  `git archive source_commit`; overlay only reviewed changed/deleted paths with
+  a no-symlink copier; store both the reviewed-diff digest and a full slot-tree
+  digest.
+
 - [ ] **Step 1: Write failing slot/state tests**
 
 ```python
 OWNER = "agent:main:companion:dm:owner"
 
 
-def test_stage_copies_only_reviewed_source_into_private_slot(tmp_path):
+def test_stage_materializes_complete_reviewed_source_into_private_slot(tmp_path):
     prepared, review = _review_ready_change(tmp_path)
     store = ActivationStore(tmp_path / "home", bundled_root=tmp_path / "live")
 
@@ -175,6 +181,8 @@ def test_stage_copies_only_reviewed_source_into_private_slot(tmp_path):
     assert staged.candidate_digest == review.candidate_digest
     assert staged.slot_root.is_relative_to(tmp_path / "home" / "runtime" / "slots")
     assert not (staged.slot_root / "source" / ".git").exists()
+    assert (staged.slot_root / "source" / "pyproject.toml").is_file()
+    assert staged.slot_tree_digest
     assert staged.manifest_path.stat().st_mode & 0o777 == 0o600
 
 
@@ -187,6 +195,21 @@ def test_changed_candidate_cannot_be_staged_from_old_review(tmp_path):
         ActivationStore(tmp_path / "home", tmp_path / "live").stage(
             prepared.change_root
         )
+
+
+def test_stage_rejects_changed_live_source_head(tmp_path):
+    prepared, _review = _review_ready_change(tmp_path)
+    _commit_unexpected_change(prepared.source_repo)
+    with pytest.raises(ActivationError, match="source revision"):
+        ActivationStore(tmp_path / "home", tmp_path / "live").stage(
+            prepared.change_root
+        )
+
+
+def test_candidate_import_resolves_from_slot_source(tmp_path):
+    store, staged = _staged_activation(tmp_path)
+    resolved = store.resolve_candidate_module(staged.activation_id, "honeyos.runtime.main")
+    assert resolved.is_relative_to(staged.slot_root / "source")
 
 
 def test_activation_transitions_are_compare_and_swap_and_private(tmp_path):
@@ -206,8 +229,12 @@ Expected: FAIL with `ModuleNotFoundError: honeyos.companion.builder_activation`.
 
 - [ ] **Step 3: Implement the store, safe copier, and state machine**
 
-Use `Path.resolve()`, `os.lstat()`, `shutil.copy2`, temporary sibling
-directories, `os.replace`, and the existing `MemoryStore()._file_lock` pattern.
+Use trusted `git archive`, `Path.resolve()`, `os.lstat()`, `shutil.copy2`,
+temporary sibling directories, `os.replace`, and the existing
+`MemoryStore()._file_lock` pattern. Never use an editable install or copy `.git`.
+The baseline includes unchanged trusted packaging/test artifacts; only reviewed
+paths may differ from the pinned base. Recompute the reviewed-diff digest before
+overlay and the full slot-tree digest after materialization.
 The only legal transitions are:
 
 ```python
@@ -300,8 +327,10 @@ Expected: FAIL because `preflight` does not exist.
 - [ ] **Step 3: Implement an injectable process runner and trusted checks**
 
 Create a slot-local virtual environment using the current trusted interpreter.
-Install the unchanged approved project dependency set, then run all commands
-with a temporary synthetic `HONEYOS_HOME`:
+Install the complete slot source using the unchanged, locked approved dependency
+set and an explicit non-editable installation rooted at `slot/source`; fail
+closed when required approved artifacts are unavailable. Run every command with
+`cwd=slot/source`, a temporary synthetic `HONEYOS_HOME`, and `PYTHONPATH` cleared:
 
 ```python
 checks = (
@@ -315,6 +344,9 @@ checks = (
 Record bounded duration, return code, and redacted last output for every check.
 Do not inherit credential environment variables; allow only PATH, locale,
 temporary HOME, synthetic HONEYOS_HOME, and the slot's virtual environment.
+Explicitly clear `PYTHONPATH`, `VIRTUAL_ENV`, `PIP_*`, `UV_*`, proxy variables,
+credential variables, and existing HoneyOS product variables. Assert the
+imported `honeyos.__file__` is below `slot/source`.
 
 - [ ] **Step 4: Run tests and Ruff**
 
@@ -341,37 +373,30 @@ git commit -m "feat(companion): preflight builder slots with synthetic data"
 - Test: `tests/honeyos/test_config.py`
 
 **Interfaces:**
-- Produces model tool actions: `stage`, `request_activation`, `confirm_activation`, `status`.
-- `request_activation` returns structured `confirmation` data but cannot switch.
-- `confirm_activation` requires `activation_id`, private token, exact current-user quote, owner DM, unexpired state, and unchanged digest.
-- On success, it launches only the trusted detached worker and returns `switching`.
+- Produces model tool actions: `stage`, `request_activation`, and `status`; the
+  model may prepare and explain a candidate but cannot authorize switching.
+- Produces a gateway-owned durable confirmation resolver bound to activation ID,
+  digest, expiry, canonical owner lane, and authenticated inbound event.
+- Web and IM cards carry only a compact opaque callback ID mapped server-side;
+  no confirmation token appears in model/tool text or rendered event payloads.
+- The exact current-user quote remains defense-in-depth UX evidence, not the
+  authorization boundary.
+- Successful confirmation launches only the trusted gateway-owned detached
+  worker using a sealed inherited capability/FD and returns `switching`.
 
 - [ ] **Step 1: Write failing authorization and replay tests**
 
 ```python
-def test_activation_confirmation_requires_current_owner_quote(tmp_path, monkeypatch):
-    activation_id, token = _ready_confirmation(tmp_path, monkeypatch)
-    result = json.loads(
-        _handler(
-            {
-                "action": "confirm_activation",
-                "activation_id": activation_id,
-                "confirmation_token": token,
-                "evidence_quote": "现在启用",
-            },
-            user_task="先不要启用",
-        )
-    )
-    assert result["success"] is False
+def test_activation_confirmation_requires_authenticated_owner_callback(tmp_path):
+    callback = _ready_confirmation(tmp_path)
+    denied = _resolve_callback(callback.id, session="other", quote="现在启用")
+    assert denied.success is False
 
 
-def test_confirmation_is_owner_dm_only_single_use_and_digest_bound(tmp_path, monkeypatch):
-    activation_id, token = _ready_confirmation(tmp_path, monkeypatch)
-    with _session("agent:main:feishu:group:example"):
-        assert _confirm(activation_id, token)["success"] is False
-    with _session(OWNER):
-        first = _confirm(activation_id, token)
-        second = _confirm(activation_id, token)
+def test_confirmation_is_owner_dm_only_single_use_and_digest_bound(tmp_path):
+    callback = _ready_confirmation(tmp_path)
+    first = _resolve_owner_callback(callback)
+    second = _resolve_owner_callback(callback)
     assert first["state"] == "switching"
     assert second["success"] is False
 ```
@@ -384,10 +409,12 @@ Expected: FAIL because the tool is not registered.
 
 - [ ] **Step 3: Implement token hashing, TTL, and tool boundary**
 
-Store only `sha256(token)` in the private record. Generate 32 random bytes,
-expire after 10 minutes, pop/transition before launching, and use
-`hmac.compare_digest`. Treat an `always` UI choice as a one-time confirmation;
-never persist a bypass.
+Store only the hash of the server-side callback secret in the private record.
+Generate 32 random bytes, expire after 10 minutes, pop/transition before
+launching, and use `hmac.compare_digest`. Treat an `always` UI choice as a
+one-time confirmation; never persist a bypass. Persist replay protection across
+gateway restarts and authenticate Web owner-session mapping rather than trusting
+an arbitrary session header.
 
 ```python
 def _tool_scope() -> tuple[Path, str] | None:
@@ -400,7 +427,8 @@ def _tool_scope() -> tuple[Path, str] | None:
 ```
 
 Register `companion_builder` in `COMPANION_TOOLSETS`; do not add terminal-level
-activation to the model schema.
+activation to the model schema. Reject activation worker, switch, and rollback
+commands from model-facing terminal/code execution policy.
 
 - [ ] **Step 4: Run focused tests and Ruff**
 
@@ -430,8 +458,16 @@ git commit -m "feat(companion): require owner confirmation for builder activatio
 **Interfaces:**
 - Produces: `ActivationWorker(record_path: Path, service: ServiceController, health: HealthProbe, backup: BackupController)`.
 - Produces: `run() -> int`, returning `0` only for `healthy` or a verified `rolled_back` state.
-- Produces internal CLI: `honeyos builder _activation-worker <activation-id>`; it validates the private record and is not model-callable.
+- Produces a gateway-owned detached launcher that hands the worker a sealed inherited capability/FD; activation is not exposed as a shell subcommand.
 - Consumes: `run_gateway_command`, runtime identity, existing quick snapshot/SQLite integrity helpers, and platform service managers.
+- Produces a testable `ManagedGatewayDefinition` abstraction that reads,
+  installs, and restores the exact service definition with explicit
+  `python`, `source_root`, `home`, `activation_digest`, and `start` arguments.
+- Produces a startup attestation containing activation digest, resolved
+  `HONEYOS_HOME`, PID/start identifier, and stable runtime ID.
+- Produces an activation-specific backup receipt with exact captured files,
+  manifest digest, DB integrity results, strict restore verification, and
+  retention independent of ordinary quick snapshots.
 
 - [ ] **Step 1: Write failing success, rollback, and crash-recovery tests**
 
@@ -472,32 +508,28 @@ Expected: FAIL because the worker module does not exist.
 
 - [ ] **Step 3: Implement injected controllers and durable checkpoints**
 
-The worker records a checkpoint before and after every side effect. Use the
-existing SQLite-safe quick snapshot APIs. Service switching runs the selected
-slot's interpreter with `gateway install --force --no-start-now`, then starts
-through the platform service manager. Never shell-interpolate paths.
-
-```python
-def _install_command(python: Path) -> list[str]:
-    return [
-        str(python),
-        "-m",
-        "honeyos.runtime.main",
-        "gateway",
-        "install",
-        "--force",
-        "--no-start-now",
-    ]
-```
+The worker records a checkpoint before and after every side effect. Before the
+first service mutation, create and verify an activation-specific snapshot; fail
+closed if any required state/DB is missing or fails integrity checks. Preserve
+the exact old service definition as the rollback artifact. Never
+shell-interpolate paths.
 
 Health requires service liveness, local `/health`, expected runtime identity,
-SQLite integrity, and owner session open. Provider calls are explicitly absent.
-On failure, stop new, restore pointer/service/data snapshot, start old, and
-verify old health.
+SQLite integrity, and owner session open. The new service supplies trusted
+`HONEYOS_ACTIVATION_DIGEST`; startup atomically attests digest, home, PID/start
+identity, and runtime ID. Reject an old listener, stale attestation, wrong
+digest/home/PID. Provider calls are explicitly absent. On failure, stop new,
+restore pointer/exact service definition/data snapshot, start old, and verify
+every restored artifact plus old health before declaring `rolled_back`.
+
+The service-definition implementation must honor a true no-load/no-start install
+on launchd, systemd, Windows, and s6. In particular, macOS must not bootstrap the
+new plist during install, and systemd must disable start-on-login until the
+worker deliberately starts the candidate.
 
 - [ ] **Step 4: Run worker, CLI, gateway, and backup tests**
 
-Run: `.venv/bin/python -m pytest -q tests/honeyos/test_builder_activation_worker.py tests/honeyos/test_builder_cli.py tests/honeyos/test_lifecycle.py tests/honeyos/test_runtime.py`
+Run: `.venv/bin/python -m pytest -q tests/honeyos/test_builder_activation_worker.py tests/honeyos/test_builder_cli.py tests/honeyos/test_lifecycle.py tests/honeyos/test_runtime.py tests/honeyos/test_gateway_service_switch.py`
 
 Expected: PASS.
 
