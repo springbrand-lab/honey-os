@@ -298,36 +298,30 @@ git commit -m "feat(companion): add private builder version slots"
 
 **Files:**
 - Modify: `honeyos/companion/builder_activation.py`
-- Modify: `pyproject.toml`
-- Modify: `uv.lock`
 - Modify: `tests/honeyos/test_builder_activation.py`
 - Create: `tests/honeyos/test_builder_preflight.py`
 
 **Interfaces:**
-- Produces: `preflight(activation_id: str, runner: ProcessRunner | None = None) -> PreflightReceipt`
-- `PreflightReceipt` includes `success`, `checks`, `candidate_digest`, `python_executable`, `source_root`, and redacted `error`.
-- Consumes: existing approved dependency files from `bundled_root`; candidate changes to dependency files are already blocked. The normal `honeyos` runtime extra includes pinned pytest so every distribution install can execute the fixed Builder boundary tests.
+- Produces: `preflight(activation_id: str) -> PreflightReceipt`
+- `PreflightReceipt` includes `success`, fixed static `checks`, both digests,
+  `source_root`, and a bounded error.
+- Confirmation-time preflight must never import or execute candidate code.
 
 - [ ] **Step 1: Write failing isolation and preflight tests**
 
 ```python
-def test_preflight_uses_synthetic_home_and_never_copies_real_data(tmp_path):
-    store, staged = _staged_activation(tmp_path)
-    real_secret = store.home / "config.yaml"
-    real_secret.write_text("api_key: sk-private\n", encoding="utf-8")
-    runner = RecordingRunner(success=True)
-
-    receipt = store.preflight(staged.activation_id, runner=runner)
-
-    assert receipt.success is True
-    assert all(str(store.home) not in command.env.get("HONEYOS_HOME", "") for command in runner.commands)
-    assert all("sk-private" not in repr(command) for command in runner.commands)
-    assert (staged.slot_root / "preflight.json").stat().st_mode & 0o777 == 0o600
+def test_preflight_does_not_execute_candidate(tmp_path):
+    marker = tmp_path / "executed"
+    store, staged = _staged_activation(
+        tmp_path, candidate=f"Path({str(marker)!r}).write_text('ran')\n"
+    )
+    assert store.preflight(staged.activation_id).success is True
+    assert not marker.exists()
 
 
 def test_preflight_failure_never_issues_confirmation(tmp_path):
     store, staged = _staged_activation(tmp_path)
-    receipt = store.preflight(staged.activation_id, runner=RecordingRunner(success=False))
+    receipt = store.preflight(staged.activation_id)
     assert receipt.success is False
     with pytest.raises(ActivationConflict, match="preflight"):
         store.issue_confirmation(staged.activation_id, OWNER, "feishu")
@@ -339,34 +333,16 @@ Run: `.venv/bin/python -m pytest -q tests/honeyos/test_builder_preflight.py`
 
 Expected: FAIL because `preflight` does not exist.
 
-- [ ] **Step 3: Implement an injectable process runner and trusted checks**
+- [ ] **Step 3: Implement trusted static checks**
 
-Create a slot-local virtual environment using the current trusted interpreter.
-Install the complete slot source using the unchanged, locked approved dependency
-set and an explicit non-editable installation rooted at `slot/source`; fail
-closed when required approved artifacts are unavailable. Build from a disposable
-archive outside the read-only source; make only the current trusted runtime's
-installed dependency set visible to the slot venv (not an editable running
-checkout). Run every command with
-`cwd=slot/source`, a temporary synthetic `HONEYOS_HOME`, `PYTHONPATH` cleared,
-and `PYTHONPYCACHEPREFIX` pointing to a disposable directory outside the
-read-only slot source:
-
-```python
-checks = (
-    (slot_python, "-m", "compileall", "-q", str(source_root / "honeyos")),
-    (slot_python, "-c", "import honeyos; import honeyos.runtime.main"),
-    (slot_python, "-m", "honeyos.runtime.main", "--help"),
-    (slot_python, "-m", "pytest", "-q", "tests/honeyos/test_builder_workspace.py"),
-)
-```
-
-Record bounded duration, return code, and redacted last output for every check.
-Do not inherit credential environment variables; allow only PATH, locale,
-temporary HOME, synthetic HONEYOS_HOME, and the slot's virtual environment.
-Explicitly clear `PYTHONPATH`, `VIRTUAL_ENV`, `PIP_*`, `UV_*`, proxy variables,
-credential variables, and existing HoneyOS product variables. Assert the
-imported `honeyos.__file__` is below `slot/source`.
+Revalidate staged metadata and full slot bytes, verify required release
+artifacts, reject symlinks/special files/writable or oversized slot content,
+and parse changed Python with `ast.parse`. Store a private receipt containing a
+fixed, ordered set of checks. Before entering `awaiting_confirmation`, validate
+the receipt structure and rerun every static check instead of trusting the JSON.
+Do not create a candidate interpreter, import candidate modules, run its CLI or
+tests, start a subprocess, or access a provider/network/channel. Dynamic smoke
+and health checks move after owner confirmation of the exact candidate digest.
 
 - [ ] **Step 4: Run tests and Ruff**
 
