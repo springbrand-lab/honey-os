@@ -497,7 +497,7 @@ verify old health.
 
 - [ ] **Step 4: Run worker, CLI, gateway, and backup tests**
 
-Run: `.venv/bin/python -m pytest -q tests/honeyos/test_builder_activation_worker.py tests/honeyos/test_builder_cli.py tests/honeyos/test_gateway.py tests/honeyos/test_backup.py`
+Run: `.venv/bin/python -m pytest -q tests/honeyos/test_builder_activation_worker.py tests/honeyos/test_builder_cli.py tests/honeyos/test_lifecycle.py tests/honeyos/test_runtime.py`
 
 Expected: PASS.
 
@@ -755,4 +755,3 @@ git commit -m "docs(companion): ship safe local builder activation"
 - [ ] Confirm provider availability is absent from health decisions.
 - [ ] Confirm confirmation replay, group lane, stale digest, stale base, power loss, failed new health, and failed rollback all have deterministic outcomes.
 - [ ] Run the complete test suite once more after the final commit and record the exact pass count.
-
