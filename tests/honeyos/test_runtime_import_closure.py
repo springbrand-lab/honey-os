@@ -32,4 +32,10 @@ def test_gateway_process_command_is_honeyos() -> None:
     from honeyos.cli.service import ServiceIdentity
 
     argv = ServiceIdentity.default().command_argv()
-    assert argv[1:] == ("-m", "honeyos", "gateway", "run")
+    assert argv[1:] == (
+        "-m",
+        "honeyos.runtime.main",
+        "gateway",
+        "run",
+        "--replace",
+    )

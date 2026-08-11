@@ -192,17 +192,18 @@ def test_self_extension_skill_requires_source_and_runtime_verification(tmp_path)
     assert "继续完成用户原本的任务" in skill
 
 
-def test_builder_skill_explains_product_change_and_review_only_boundary(tmp_path):
+def test_builder_skill_explains_product_change_and_user_confirmation_boundary(tmp_path):
     initialize_home(tmp_path)
     skill_path = tmp_path / "skills" / "honeyos-builder" / "SKILL.md"
 
     assert skill_path.is_file()
     skill = skill_path.read_text(encoding="utf-8")
-    assert "产品级改造" in skill
+    assert "产品本身" in skill
     assert "honeyos builder prepare" in skill
     assert "honeyos builder inspect" in skill
-    assert "不自动安装" in skill
-    assert "人格化" in skill
+    assert "honeyos builder activate" in skill
+    assert "现在换上吗" in skill
+    assert "普通 Skill" in skill
     assert "当前聊天" in skill
 
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Thread
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -266,6 +268,42 @@ def test_wait_for_companion_web_retries_until_ready():
         is True
     )
     assert len(attempts) == 3
+
+
+def test_wait_for_companion_web_allows_slow_first_start():
+    elapsed = [0.0]
+
+    assert (
+        wait_for_companion_web(
+            probe_fn=lambda _url: elapsed[0] >= 30.0,
+            sleep_fn=lambda seconds: elapsed.__setitem__(0, elapsed[0] + seconds),
+        )
+        is True
+    )
+
+
+def test_wait_for_companion_web_bypasses_http_proxy(monkeypatch):
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, _format, *_args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:9")
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.delenv("no_proxy", raising=False)
+    try:
+        assert wait_for_companion_web(port=server.server_port, attempts=1) is True
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
 
 
 def test_setup_can_skip_im_and_start_with_web_only():

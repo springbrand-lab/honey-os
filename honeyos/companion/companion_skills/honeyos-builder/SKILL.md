@@ -1,70 +1,75 @@
 ---
 name: honeyos-builder
-description: "把用户对 HoneyOS 产品本身的改进需求做成隔离、可检查、仅供评审的候选版本。"
-version: 0.1.0
+description: "把用户对 HoneyOS 产品外观和陪伴行为的改进做成独立候选版本；用户确认后安全换上，失败会自动换回。"
+version: 0.2.0
 author: HoneyOS
 license: MIT
-platforms: [linux, macos, windows]
+platforms: [linux, macos]
 metadata:
   honeyos:
-    tags: [honeyos, builder, self-improvement, review]
+    tags: [honeyos, builder, self-improvement]
     category: companion
     requires_toolsets: [terminal, file]
 ---
 
 # HoneyOS Builder
 
-用于用户明确要求修改 HoneyOS 产品本身的场景。它把需求转交给隔离的候选源码副本，不直接编辑当前运行版本，不自动安装、重启或合并。
+用于用户明确希望改变 HoneyOS 产品本身的页面、陪伴表达或可扩展功能。它在单独的候选工作区完成改动，用户说可以后才替换正在使用的版本；如果新版本没能正常启动，会自动恢复旧版本。
 
-## When to Use
+当前自动换版只支持 macOS 和 Linux；Windows 上不要尝试启用候选版本。
 
-- 用户要求调整记忆提取、召回、Session 或 `/new` 逻辑。
-- 用户要求修改 Web 对话页、飞书或微信适配、工具状态展示。
-- 用户要求增加 Agent Runtime 模块、MCP 接入、模型路由或数据结构。
-- 这是产品级改造；普通人格、关系、记忆内容调整仍走专用资料与记忆工具，独立能力优先做普通 Skill。
+## 先判断是不是 Builder
 
-## User Experience
+以下情况**不要**用 Builder：
 
-- 先用人格化语言回应需求，不播报 terminal、patch、pytest 等内部动作。
-- 明确告诉用户：会在不会影响当前聊天的安全副本中准备新版本。
-- 当前聊天继续可用；只汇报“梳理逻辑、准备候选版本、检查影响、等待确认”等用户可理解的状态。
-- 技术细节按需提供，不能谎称候选版本已经启用。
+- 普通 Skill：直接安装，装好立即可用，不需要重启 HoneyOS。
+- 用户项目：在 HoneyOS Projects 里直接写代码、创建文件和运行项目。
+- 人格、昵称、关系、记忆内容、模型或语音：使用各自已有的资料或配置链路，不改产品源码。
 
-## Hard Boundaries
+只有用户明确要改 HoneyOS 产品的界面、陪伴活动文案、普通伴侣 Skill 或已提供的扩展点时，才使用 Builder。
 
-- 不能直接修改正在运行的 HoneyOS，也不能把 live checkout 当作工作区。
-- 不读取真实用户记忆、聊天数据库、Token、Cookie、账号凭证或内部消息密钥。
-- 不修改 Builder、审批、安全策略、目录边界、认证和威胁检测文件。
-- 不扩大自己的文件、网络或账号权限。
-- 第一版只生成候选改动、测试结果和评审报告；不自动安装、不自动重启、不自动推送或合并。
+## 可修改范围
 
-## Procedure
+候选工作区只会含有下面的文件；工作区中没有的文件一律不要尝试创建或修改：
 
-1. 先判断需求属于人格塑造、普通 Skill，还是产品级改造。只有第三类进入 Builder。
-2. 把需求整理成用户结果、允许改动范围、明确不变项和验证标准。
-3. 找到真实的本地 HoneyOS Git checkout，并用 `git rev-parse --show-toplevel` 验证；没有本地源码时如实说明需要先取得源码副本。
-4. 为本次改造生成稳定的短 ID，然后准备独立候选版本：
+- `honeyos/companion/web_assets/**`
+- `honeyos/companion/activity.py`
+- `honeyos/companion/status_copy.py`
+- `honeyos/companion/topic_scout.py`
+- `honeyos/companion/extensions/**`
+- `honeyos/companion/companion_skills/**`（Builder 和 self-extension 自身除外）
 
-   `honeyos builder prepare --source <真实源码目录> --goal <用户目标> --allow '<仓库相对路径或 glob>' --change-id <id>`
+不要碰记忆数据库/迁移/删除、人格模板、模型与密钥配置、渠道与配对、服务启动、更新安装、审批、安全策略或 Builder 自身。
 
-   每个额外允许范围都重复一个 `--allow`。只授予完成需求必要的最小路径，不使用 `/`、`..` 或电脑目录。
-5. 只在命令返回的 `workspace` 中修改代码。保持当前运行 checkout 原样。
-6. 使用合成测试数据完成针对性测试和相关回归，不复制真实伴侣记忆进入候选目录。
-7. 检查最终范围：
+## 用户体验
 
-   `honeyos builder inspect <id>`
+- 用伴侣当前的人设和对用户的称呼解释，不播报 terminal、patch、pytest 等内部动作。
+- 开始时说会先在不影响当前聊天的副本里试着准备。
+- 检查完成后，清楚说明改了什么、哪些不会动，然后自然地问：
+  “我改好了，现在换上吗？”
+- **在用户明确回答“可以”“换上”“启用”等肯定答复前，绝不运行 activate。**
+- 成功后用关系化语言告诉用户已经换好；失败时如实说已经自动换回原来的版本，聊天和记忆不受影响。
 
-8. `blocked` 表示触碰了受保护文件或超出允许范围：撤销这些候选改动后重新检查，不能要求用户绕过。
-9. `review_ready` 只表示可以交给人工开发评审，不表示可安装。向用户展示目标、改动范围、测试结果、风险和当前版本未受影响。
+## 操作步骤
 
-## Completion Contract
+1. 找到真实的本地 HoneyOS Git checkout，并准备最小修改范围：
 
-完成时用产品语言说明：
+   `honeyos builder prepare --source <本地源码目录> --goal <用户目标> --allow '<允许的路径或 glob>' --change-id <短ID>`
 
-- 改善了什么；
-- 哪些内容保持不变；
-- 测试是否通过；
-- 是否存在阻塞项；
-- 候选版本仍未启用，下一步是人工评审和 PR。
+2. 只编辑命令返回的 `workspace`，绝不编辑当前运行 checkout。
+3. 用合成数据做必要验证；不把用户记忆、凭据或聊天记录复制进候选目录。
+4. 检查范围：
 
-不要把代码 diff 当作唯一结果，也不要在没有实际命令和测试证据时声称已经完成。
+   `honeyos builder inspect <短ID>`
+
+5. 如果结果不是 `review_ready`，先修正超范围或受保护改动，不能要求用户绕过边界。
+6. 结果可用时，向用户说明并问“我改好了，现在换上吗？”。
+7. 收到本次请求的明确肯定答复后才执行：
+
+   `honeyos builder activate <短ID>`
+
+   这会重新做静态检查，保留当前版本指针，切换并重启；最长等待 30 秒检查新版本。检查失败会自动换回旧版本。
+
+## 完成时
+
+说明改善了什么、哪些资料仍保持原样，以及是否已成功换上。不要在没有实际命令证据时说已经启用，也不要把 `review_ready` 说成已启用。

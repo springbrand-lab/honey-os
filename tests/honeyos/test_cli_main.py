@@ -41,19 +41,16 @@ def test_help_exposes_only_honeyos_commands(capsys) -> None:
 
 
 def test_installers_invoke_only_honeyos() -> None:
-    command = ROOT / "Install-HoneyOS.command"
-    opener = ROOT / "Open-HoneyOS.command"
+    bootstrap = ROOT / "install.sh"
     installer = ROOT / "scripts" / "install_honeyos.sh"
 
-    assert command.is_file()
-    assert opener.is_file()
+    assert bootstrap.is_file()
     assert installer.is_file()
-    for path in (command, opener, installer):
+    for path in (bootstrap, installer):
         content = path.read_text(encoding="utf-8").lower()
         assert "honeyos" in content
         assert "honey-os" not in content
         assert "h2os" not in content
         assert "hermes" not in content
-    opener_text = opener.read_text(encoding="utf-8")
-    assert ".venv/bin/honeyos" in opener_text
-    assert opener_text.rstrip().endswith('honeyos" web')
+    assert not (ROOT / "Install-HoneyOS.command").exists()
+    assert not (ROOT / "Open-HoneyOS.command").exists()

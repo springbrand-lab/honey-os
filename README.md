@@ -18,21 +18,15 @@ HoneyOS 是一套本地运行、通过电脑网页、微信或飞书陪伴你的
 
 OpenAI、OpenRouter 和 DeepSeek 的官方 Base URL 已内置，普通用户不需要填写。只有选择“自定义兼容接口”时才会询问 Base URL。
 
-## 最简单的安装方式（macOS）
+## 最简单的安装方式（macOS 与 Linux）
 
-1. 登录已获邀请的 GitHub 账号，打开本仓库。
-2. 点击绿色的 **Code**，选择 **Download ZIP**。
-3. 解压下载的文件。
-4. 双击根目录中的 **Install-HoneyOS.command**。
-5. 如果 macOS 阻止打开：右键该文件，选择 **打开**，再次确认。
-
-安装器会自动准备 HoneyOS 所需的 Python 运行环境和依赖，不需要用户预先安装 Python 或 `uv`。
-
-如果双击仍无法运行，打开“终端”，把解压后的文件夹拖进终端，然后执行：
+打开“终端”，粘贴并执行：
 
 ```bash
-/bin/sh scripts/install_honeyos.sh
+curl -fsSL https://raw.githubusercontent.com/Nicole202504/honeyos/main/install.sh | bash
 ```
+
+安装器会从 GitHub 下载当前 HoneyOS 版本，安装到 `~/.local/share/honeyos/app`，并自动准备 Python、`uv` 和依赖。安装和升级都使用同一条命令，不需要下载 ZIP 或双击 `.command` 文件。
 
 熟悉 Git 的用户也可以使用：
 
@@ -64,10 +58,10 @@ HoneyOS 会先从服务商读取当前 Key 可用的模型并打开终端选择�
 
 #### 电脑网页
 
-安装完成后会自动打开本地聊天页。之后可以随时双击根目录的 **Open-HoneyOS.command**，或在项目目录执行：
+安装完成后会自动打开本地聊天页。之后可以随时执行：
 
 ```bash
-uv run honeyos web
+~/.local/bin/honeyos web
 ```
 
 网页只监听本机 `127.0.0.1`，不会直接暴露给局域网或互联网。页面只显示对话和适合陪伴场景的过程卡片，不显示思考过程、命令、文件路径或原始工具参数。
@@ -88,7 +82,7 @@ uv run honeyos web
 可以扫码自动创建机器人，也可以输入已有的 App ID 和 App Secret。HoneyOS 使用 WebSocket 连接，不要求公网回调地址。首次私聊会得到配对码，由主人在本机执行：
 
 ```bash
-uv run honeyos pairing approve feishu 配对码
+~/.local/bin/honeyos pairing approve feishu 配对码
 ```
 
 飞书会在同一条消息中更新工具执行进度，长任务不再一直没有反馈。群聊默认关闭，避免私人伴侣记忆进入工作群。
@@ -202,41 +196,40 @@ HoneyOS 在用户电脑上使用真实的本机终端，默认把游戏、网页
 
 恢复过程不会覆盖同名文件，也不会删除原来的容器数据。伴侣人设、关系记忆、聊天历史和配置仍在 `~/.honeyos`，与项目恢复互不影响。Docker 支持仍保留给需要强隔离的高级用户，但不是 HoneyOS 默认安装和 Coding 的前提。
 
+## 让 HoneyOS 修改自己的产品层
+
+HoneyOS 内置 `honeyos-builder` Skill。只有用户明确要求修改 HoneyOS 自身的页面、伴侣活动文案、普通内置伴侣 Skill 或稳定扩展点时才会触发。普通 Skill 安装、用户项目 Coding、人格与记忆修改、模型和语音设置都不走这条换版流程。
+
+Builder 只把明确允许的产品文件复制到候选工作区。用户确认后，HoneyOS 会保留上一版本、切换候选版本并自动重启；新版本未能通过健康检查时会自动恢复旧版本。用户的模型配置、IM 凭据、关系记忆和聊天历史始终留在原来的 `~/.honeyos`，不会复制进候选代码目录。
+
+完整的目录边界、状态机、CLI 与测试入口见 [HoneyOS Builder 研发说明](docs/HONEYOS_BUILDER.md)。
+
 ## 常用管理命令
 
-在解压后的 HoneyOS 文件夹中运行：
-
 ```bash
-uv run honeyos status
-uv run honeyos doctor
-uv run honeyos logs
-uv run honeyos restart
-uv run honeyos stop
-uv run honeyos start
+~/.local/bin/honeyos status
+~/.local/bin/honeyos doctor
+~/.local/bin/honeyos logs
+~/.local/bin/honeyos restart
+~/.local/bin/honeyos stop
+~/.local/bin/honeyos start
 ```
 
 重新填写模型或重新连接 IM：
 
 ```bash
-uv run honeyos setup
+~/.local/bin/honeyos setup
 ```
 
-从压缩包升级：
-
-1. 从 GitHub Releases 下载新版本压缩包并解压到新文件夹。
-2. 双击新文件夹里的 **Install-HoneyOS.command**。
-3. 安装器发现已有 HoneyOS 后会自动升级、重启服务并打开网页，不会再次要求填写模型或连接 IM。
-
-升级会保留伴侣人设、关系记忆、聊天历史、Skill、待办、定时任务、模型配置和微信/飞书连接。确认新版本可以正常聊天后，旧的程序文件夹可以删除；用户数据仍安全保存在 `~/.honeyos`。
-
-升级到 `main` 最新版本（仅限 Git 安装）：
+升级时重新执行安装命令：
 
 ```bash
-git pull origin main
-/bin/sh scripts/install_honeyos.sh
+curl -fsSL https://raw.githubusercontent.com/Nicole202504/honeyos/main/install.sh | bash
 ```
 
-升级不会覆盖已有的人设、关系记忆、聊天历史、Skill 或 IM 凭据。
+安装器发现已有 HoneyOS 后会自动升级、重启服务并打开网页，不会再次要求填写模型或连接 IM。
+
+升级会保留伴侣人设、关系记忆、聊天历史、Skill、待办、定时任务、模型配置和微信/飞书连接；用户数据仍安全保存在 `~/.honeyos`。
 
 ## 数据与隐私
 
@@ -260,4 +253,4 @@ git pull origin main
 - 网页搜索、文件、Skill、待办和定时任务是否能完成。
 - 失败时的提示是否让普通用户知道下一步怎么做。
 
-反馈问题时请附上问题发生时间和 `uv run honeyos doctor` 的结果，不要发送 API Key、微信 Token、飞书 App Secret 或整个 `~/.honeyos` 目录。
+反馈问题时请附上问题发生时间和 `~/.local/bin/honeyos doctor` 的结果，不要发送 API Key、微信 Token、飞书 App Secret 或整个 `~/.honeyos` 目录。

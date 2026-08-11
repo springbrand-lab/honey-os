@@ -36,16 +36,17 @@ def wait_for_companion_web(
     port: int = DEFAULT_WEB_PORT,
     probe_fn=None,
     sleep_fn=time.sleep,
-    attempts: int = 40,
-    delay: float = 0.125,
+    attempts: int = 120,
+    delay: float = 0.5,
 ) -> bool:
     """Wait briefly for the background listener before opening a browser."""
 
     url = companion_web_url(port=port)
+    direct_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
     def default_probe(target: str) -> bool:
         try:
-            with urllib.request.urlopen(target, timeout=0.5) as response:
+            with direct_opener.open(target, timeout=0.5) as response:
                 return 200 <= int(response.status) < 400
         except (OSError, urllib.error.URLError):
             return False

@@ -4836,7 +4836,7 @@ def cmd_project(args):
 
 
 def cmd_builder(args):
-    """Prepare and inspect review-only HoneyOS product changes."""
+    """Prepare, review, and activate a scoped HoneyOS product change."""
     from honeyos.runtime.builder_cmd import builder_command
 
     return builder_command(args)
@@ -11521,7 +11521,7 @@ def main():
     project_parser.set_defaults(func=cmd_project)
 
     # =========================================================================
-    # builder command — review-only HoneyOS self-improvement drafts
+    # builder command — scoped HoneyOS self-improvement changes
     # =========================================================================
     from honeyos.runtime.builder_cmd import build_parser as _build_builder_parser
 
