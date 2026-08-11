@@ -2161,6 +2161,11 @@ class APIServerAdapter(BasePlatformAdapter):
             ("GET", "/api/companion/settings", self._handle_companion_settings),
             (
                 "POST",
+                "/api/companion/settings/models",
+                self._handle_companion_model_discovery,
+            ),
+            (
+                "POST",
                 "/api/companion/settings/model",
                 self._handle_companion_model_settings,
             ),
@@ -2396,28 +2401,11 @@ class APIServerAdapter(BasePlatformAdapter):
 
         messages = []
         for item in raw_messages:
-            role = item.get("role") if isinstance(item, dict) else None
-            content = item.get("content") if isinstance(item, dict) else None
-            if role not in {"user", "assistant"} or not isinstance(content, str):
+            if not self._is_companion_visible_message(item):
                 continue
-            if role == "assistant" and item.get("tool_calls"):
-                # Tool-call narration belongs to the activity card, not the
-                # companion's durable chat history.
-                continue
-            text = content.strip()
-            if text.startswith(
-                (
-                    "[HoneyOS proactive topic seed;",
-                    "[HoneyOS selected topic;",
-                )
-            ):
-                # These are trusted internal/user-card control turns. Their
-                # assistant response belongs in shared history, but exposing
-                # the control payload as a blue user bubble breaks the chat
-                # illusion and leaks implementation detail.
-                continue
-            if text:
-                messages.append({"role": role, "content": text})
+            messages.append(
+                {"role": item["role"], "content": item["content"].strip()}
+            )
 
         from honeyos.companion.continuity import StructuredMemoryStore
         from honeyos.companion.persistent_memory import list_persistent_memories
@@ -2540,7 +2528,7 @@ class APIServerAdapter(BasePlatformAdapter):
         body, err = await self._read_json_body(request)
         if err:
             return err
-        allowed = {"base_url", "model", "api_key"}
+        allowed = {"provider", "base_url", "model", "api_key"}
         if set(body) - allowed:
             return web.json_response({"error": "配置中包含不支持的字段"}, status=400)
         from honeyos.companion.settings import update_companion_model
@@ -2550,6 +2538,7 @@ class APIServerAdapter(BasePlatformAdapter):
             settings = await asyncio.to_thread(
                 update_companion_model,
                 get_honeyos_home(),
+                provider=body.get("provider", "custom"),
                 base_url=body.get("base_url", ""),
                 model=body.get("model", ""),
                 api_key=body.get("api_key"),
@@ -2558,6 +2547,33 @@ class APIServerAdapter(BasePlatformAdapter):
             return web.json_response({"error": str(exc)}, status=400)
         self._model_name = settings["model"]["model"]
         return web.json_response({"success": True, "settings": settings})
+
+    async def _handle_companion_model_discovery(
+        self, request: "web.Request"
+    ) -> "web.Response":
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+        body, err = await self._read_json_body(request)
+        if err:
+            return err
+        allowed = {"provider", "base_url", "api_key"}
+        if set(body) - allowed:
+            return web.json_response({"error": "配置中包含不支持的字段"}, status=400)
+        from honeyos.companion.settings import discover_companion_models
+        from honeyos.core.constants import get_honeyos_home
+
+        try:
+            models = await asyncio.to_thread(
+                discover_companion_models,
+                get_honeyos_home(),
+                provider=body.get("provider", "custom"),
+                base_url=body.get("base_url", ""),
+                api_key=body.get("api_key"),
+            )
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        return web.json_response({"models": models})
 
     def _get_companion_link_manager(self):
         manager = self._companion_link_manager
@@ -4248,6 +4264,34 @@ class APIServerAdapter(BasePlatformAdapter):
         )
         return {key: message.get(key) for key in safe_keys if key in message}
 
+    @staticmethod
+    def _is_companion_visible_message(message: object) -> bool:
+        """Keep runtime bookkeeping out of the companion-facing transcript."""
+        if not isinstance(message, dict):
+            return False
+        role = message.get("role")
+        content = message.get("content")
+        if role not in {"user", "assistant"} or not isinstance(content, str):
+            return False
+        if message.get("display_kind") in {
+            "hidden",
+            "model_switch",
+            "async_delegation_complete",
+            "auto_continue",
+        }:
+            return False
+        if role == "assistant" and message.get("tool_calls"):
+            return False
+        text = content.strip()
+        if text.startswith(
+            (
+                "[HoneyOS proactive topic seed;",
+                "[HoneyOS selected topic;",
+            )
+        ):
+            return False
+        return bool(text)
+
     async def _read_json_body(self, request: "web.Request") -> tuple[Dict[str, Any], Optional["web.Response"]]:
         try:
             body = await request.json()
@@ -4518,6 +4562,13 @@ class APIServerAdapter(BasePlatformAdapter):
         db = await self._ensure_session_db_async()
         resolved_id = await asyncio.to_thread(db.resolve_resume_session_id, session_id)
         messages = await asyncio.to_thread(db.get_messages, resolved_id)
+        query = getattr(request, "query", {})
+        if query.get("view") == "companion":
+            messages = [
+                message
+                for message in messages
+                if self._is_companion_visible_message(message)
+            ]
         return web.json_response({
             "object": "list",
             "session_id": resolved_id,

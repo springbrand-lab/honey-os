@@ -537,6 +537,7 @@ def test_api_server_registers_companion_web_routes():
     assert ("GET", "/honeyos/icons.svg") in routes
     assert ("GET", "/api/companion/bootstrap") in routes
     assert ("GET", "/api/companion/settings") in routes
+    assert ("POST", "/api/companion/settings/models") in routes
     assert ("POST", "/api/companion/settings/model") in routes
     assert ("POST", "/api/companion/channels/{platform}/link") in routes
     assert ("GET", "/api/companion/channels/link/{link_id}") in routes
@@ -559,6 +560,10 @@ async def test_companion_model_settings_endpoint_never_echoes_api_key(
     monkeypatch, tmp_path
 ):
     monkeypatch.setattr("honeyos.core.constants.get_honeyos_home", lambda: tmp_path)
+    monkeypatch.setattr(
+        "honeyos.companion.setup.validate_model_key",
+        lambda _choice, _key: None,
+    )
     (tmp_path / "config.yaml").write_text("{}\n", encoding="utf-8")
     adapter = _api_adapter()
     adapter._read_json_body = AsyncMock(
@@ -583,6 +588,40 @@ async def test_companion_model_settings_endpoint_never_echoes_api_key(
     assert response.status == 200
     assert payload["settings"]["model"]["model"] == "companion-model"
     assert payload["settings"]["model"]["api_key_configured"] is True
+    assert "sk-private-value" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_companion_model_discovery_endpoint_returns_ids_without_echoing_key(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr("honeyos.core.constants.get_honeyos_home", lambda: tmp_path)
+    monkeypatch.setattr(
+        "honeyos.companion.settings.discover_companion_models",
+        lambda home, **kwargs: ["model-a", "model-b"],
+    )
+    adapter = _api_adapter()
+    adapter._read_json_body = AsyncMock(
+        return_value=(
+            {
+                "provider": "custom",
+                "base_url": "https://models.example/v1",
+                "api_key": "sk-private-value",
+            },
+            None,
+        )
+    )
+    request = SimpleNamespace(
+        cookies={"honeyos_local": adapter._local_web_token},
+        remote="127.0.0.1",
+        headers={},
+    )
+
+    response = await adapter._handle_companion_model_discovery(request)
+    payload = json.loads(response.text)
+
+    assert response.status == 200
+    assert payload == {"models": ["model-a", "model-b"]}
     assert "sk-private-value" not in response.text
 
 
@@ -768,6 +807,16 @@ async def test_companion_bootstrap_returns_only_safe_shared_chat_messages(
             "role": "user",
             "content": "[HoneyOS selected topic; user chose this card] hidden",
         },
+        {
+            "role": "assistant",
+            "content": "[This response was interrupted by a user correction.]",
+            "display_kind": "hidden",
+        },
+        {
+            "role": "assistant",
+            "content": "internal continuation marker",
+            "display_kind": "auto_continue",
+        },
         {"role": "assistant", "content": None, "reasoning": "hidden"},
     ]
     adapter._ensure_session_db_async = AsyncMock(return_value=db)
@@ -798,6 +847,63 @@ async def test_companion_bootstrap_returns_only_safe_shared_chat_messages(
     assert "raw command output" not in response.text
     assert "proactive topic seed" not in response.text
     assert "selected topic" not in response.text
+    assert "interrupted by a user correction" not in response.text
+    assert "internal continuation marker" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_session_messages_companion_view_hides_internal_runtime_rows():
+    adapter = _api_adapter()
+    adapter._get_existing_session_or_404 = AsyncMock(
+        return_value=({"id": "shared-session"}, None)
+    )
+    db = MagicMock()
+    db.resolve_resume_session_id.return_value = "shared-session"
+    db.get_messages.return_value = [
+        {"role": "user", "content": "在吗"},
+        {"role": "assistant", "content": "在呢。"},
+        {
+            "role": "assistant",
+            "content": "[This response was interrupted by a user correction.]",
+            "display_kind": "hidden",
+        },
+        {
+            "role": "assistant",
+            "content": "model changed internally",
+            "display_kind": "model_switch",
+        },
+        {
+            "role": "assistant",
+            "content": "delegation finished internally",
+            "display_kind": "async_delegation_complete",
+        },
+        {
+            "role": "assistant",
+            "content": "automatic continuation",
+            "display_kind": "auto_continue",
+        },
+        {
+            "role": "assistant",
+            "content": "calling a tool",
+            "tool_calls": [{"id": "call-1"}],
+        },
+        {"role": "tool", "content": "raw output"},
+    ]
+    adapter._ensure_session_db_async = AsyncMock(return_value=db)
+    request = SimpleNamespace(
+        cookies={"honeyos_local": adapter._local_web_token},
+        remote="127.0.0.1",
+        headers={},
+        match_info={"session_id": "shared-session"},
+        query={"view": "companion"},
+    )
+
+    response = await adapter._handle_session_messages(request)
+
+    assert json.loads(response.text)["data"] == [
+        {"role": "user", "content": "在吗"},
+        {"role": "assistant", "content": "在呢。"},
+    ]
 
 
 @pytest.mark.asyncio

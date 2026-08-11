@@ -11,12 +11,12 @@ HoneyOS 是一套本地运行、通过电脑网页、微信或飞书陪伴你的
 ## 开始前准备
 
 - 一台 macOS 电脑（推荐 macOS 13 或更新版本）或 Linux 电脑。
-- 一个 OpenAI Chat Completions 兼容的模型服务。
-- 该服务的 Base URL、Model ID 和 API Key。
+- 一个 OpenAI、OpenRouter、DeepSeek API Key，或其他 OpenAI Chat Completions 兼容模型服务。
+- 使用自定义兼容服务时，还需要该服务的 Base URL。
 - 网页聊天不需要额外账号；微信、飞书按需连接。
 - 安装过程需要联网，建议预留至少 3 GB 磁盘空间。
 
-不需要 OpenRouter。安装时默认就是填写自己的 OpenAI 兼容 Base URL。
+OpenAI、OpenRouter 和 DeepSeek 的官方 Base URL 已内置，普通用户不需要填写。只有选择“自定义兼容接口”时才会询问 Base URL。
 
 ## 最简单的安装方式（macOS 与 Linux）
 
@@ -28,6 +28,14 @@ curl -fsSL https://raw.githubusercontent.com/Nicole202504/honeyos/main/install.s
 
 安装器会从 GitHub 下载当前 HoneyOS 版本，安装到 `~/.local/share/honeyos/app`，并自动准备 Python、`uv` 和依赖。安装和升级都使用同一条命令，不需要下载 ZIP 或双击 `.command` 文件。
 
+熟悉 Git 的用户也可以使用：
+
+```bash
+git clone https://github.com/Nicole202504/honeyos.git
+cd honeyos
+/bin/sh scripts/install_honeyos.sh
+```
+
 ## 首次设置会经历什么
 
 ### 1. 连接模型
@@ -35,13 +43,14 @@ curl -fsSL https://raw.githubusercontent.com/Nicole202504/honeyos/main/install.s
 安装器会依次询问：
 
 ```text
-模型服务：直接按回车选择 OpenAI 兼容服务
-Base URL：例如 https://api.example.com/v1
-Model ID：服务商提供的模型 ID
+模型服务：OpenAI / OpenRouter / DeepSeek / 自定义兼容接口
 API Key：输入时终端不会显示字符，这是正常现象
+模型：自动读取后，用方向键选择或输入关键词搜索
 ```
 
-HoneyOS 会真的向所选模型发送一条极小的测试消息。只有 API Key、模型和 OpenAI Chat Completions 返回格式都可用，才会继续连接 IM。这可以提前拦截“能访问 `/models`，实际却无法聊天”的假兼容接口。
+HoneyOS 会先从服务商读取当前 Key 可用的模型并打开终端选择器。若自定义接口没有实现 `/models`，可以手动填写 Model ID；HoneyOS 仍会立即发送一条极小的工具调用测试。只有 API Key、模型和 OpenAI Chat Completions 工具调用都可用，才会保存设置并继续连接 IM。
+
+网页的“设置 → 模型”使用同一套逻辑：选择服务商、读取可用模型、搜索选择，然后验证并保存。API Key 不会回显到页面。
 
 ### 2. 选择聊天入口
 

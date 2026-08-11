@@ -19,6 +19,42 @@ from honeyos.companion import PRODUCT_NAME
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 RECOMMENDED_OPENROUTER_MODEL = "z-ai/glm-5.2"
+OPENAI_BASE_URL = "https://api.openai.com/v1"
+DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
+
+
+@dataclass(frozen=True)
+class ProviderOption:
+    provider: str
+    label: str
+    base_url: str
+    key_env: str
+    fallback_models: tuple[str, ...]
+
+
+PROVIDER_OPTIONS: dict[str, ProviderOption] = {
+    "openai-api": ProviderOption(
+        provider="openai-api",
+        label="OpenAI",
+        base_url=OPENAI_BASE_URL,
+        key_env="OPENAI_API_KEY",
+        fallback_models=("gpt-5.6-terra", "gpt-5.4-mini", "gpt-4.1"),
+    ),
+    "openrouter": ProviderOption(
+        provider="openrouter",
+        label="OpenRouter",
+        base_url=OPENROUTER_BASE_URL,
+        key_env="OPENROUTER_API_KEY",
+        fallback_models=(RECOMMENDED_OPENROUTER_MODEL,),
+    ),
+    "deepseek": ProviderOption(
+        provider="deepseek",
+        label="DeepSeek",
+        base_url=DEEPSEEK_BASE_URL,
+        key_env="DEEPSEEK_API_KEY",
+        fallback_models=("deepseek-v4-flash", "deepseek-v4-pro"),
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -27,6 +63,79 @@ class ModelChoice:
     model: str
     base_url: str
     key_env: str
+
+
+def model_choice(
+    provider: str,
+    model: str,
+    *,
+    base_url: str = "",
+) -> ModelChoice:
+    """Build a model choice without letting first-party endpoints drift."""
+
+    provider_id = str(provider or "").strip().lower()
+    model_id = str(model or "").strip()
+    if not model_id or len(model_id) > 240:
+        raise ValueError("Model ID 不能为空且不能超过 240 个字符")
+    option = PROVIDER_OPTIONS.get(provider_id)
+    if option is not None:
+        return ModelChoice(
+            provider=option.provider,
+            model=model_id,
+            base_url=option.base_url,
+            key_env=option.key_env,
+        )
+    if provider_id != "custom":
+        raise ValueError("不支持的模型服务")
+    normalized_url = str(base_url or "").strip().rstrip("/")
+    if not normalized_url.startswith(("https://", "http://")):
+        raise ValueError("Base URL 必须是有效的 HTTP 或 HTTPS 地址")
+    return ModelChoice(
+        provider="custom",
+        model=model_id,
+        base_url=normalized_url,
+        key_env="HONEYOS_MODEL_API_KEY",
+    )
+
+
+def discover_model_ids(base_url: str, api_key: str) -> list[str]:
+    """Read an OpenAI-compatible ``/models`` catalog without persisting secrets."""
+
+    url = f"{str(base_url or '').strip().rstrip('/')}/models"
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "application/json",
+        },
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            if not 200 <= int(response.status) < 300:
+                raise ValueError(f"模型服务返回 HTTP {response.status}")
+            try:
+                payload = json.loads(response.read().decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise ValueError("模型服务没有返回有效的模型列表") from exc
+    except urllib.error.HTTPError as exc:
+        if exc.code in {401, 403}:
+            raise ValueError("API Key 无效或没有读取模型列表的权限") from exc
+        raise ValueError(f"读取模型列表时服务返回 HTTP {exc.code}") from exc
+    except urllib.error.URLError as exc:
+        raise ValueError(f"无法读取模型列表：{exc.reason}") from exc
+
+    rows = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        raise ValueError("该服务没有提供 OpenAI 兼容的模型列表")
+    result: list[str] = []
+    for row in rows:
+        model_id = str(row.get("id") or "").strip() if isinstance(row, dict) else ""
+        if model_id and model_id not in result:
+            result.append(model_id)
+    if not result:
+        raise ValueError("该服务没有返回可用模型")
+    return result
 
 
 def _atomic_write(path: Path, content: str, mode: int = 0o600) -> None:
@@ -191,22 +300,42 @@ def validate_model_key(choice: ModelChoice, api_key: str) -> None:
         raise ValueError(f"无法连接模型服务：{exc.reason}") from exc
 
 
-def _choose_model(input_fn: Callable[[str], str]) -> ModelChoice:
+def _choose_provider(input_fn: Callable[[str], str]) -> tuple[str, str]:
     provider = input_fn(
-        "模型服务：1) OpenAI 兼容服务（默认）  2) OpenRouter [1]: "
+        "模型服务：1) OpenAI（默认）  2) OpenRouter  3) DeepSeek  "
+        "4) 自定义兼容接口 [1]: "
     ).strip()
-    if provider in {"", "1"}:
+    provider_ids = {
+        "": "openai-api",
+        "1": "openai-api",
+        "2": "openrouter",
+        "3": "deepseek",
+        "4": "custom",
+    }
+    provider_id = provider_ids.get(provider)
+    if provider_id is None:
+        raise ValueError("请选择 1、2、3 或 4")
+    if provider_id == "custom":
         base_url = input_fn("Base URL（例如 https://api.example.com/v1）: ").strip()
-        model = input_fn("Model ID: ").strip()
-        if not base_url.startswith(("https://", "http://")) or not model:
-            raise ValueError("需要有效的 Base URL 和 Model ID")
-        return ModelChoice("custom", model, base_url.rstrip("/"), "HONEYOS_MODEL_API_KEY")
-    if provider == "2":
-        model = input_fn(
-            f"模型 [{RECOMMENDED_OPENROUTER_MODEL}]: "
-        ).strip() or RECOMMENDED_OPENROUTER_MODEL
-        return ModelChoice("openrouter", model, OPENROUTER_BASE_URL, "OPENROUTER_API_KEY")
-    raise ValueError("请选择 1 或 2")
+        if not base_url.startswith(("https://", "http://")):
+            raise ValueError("需要有效的 Base URL")
+        return provider_id, base_url.rstrip("/")
+    return provider_id, PROVIDER_OPTIONS[provider_id].base_url
+
+
+def _select_model_from_catalog(models: list[str], recommended: str = "") -> str:
+    """Open the existing searchable terminal model picker."""
+
+    ordered = list(dict.fromkeys(models))
+    if recommended in ordered:
+        ordered.remove(recommended)
+        ordered.insert(0, recommended)
+    from honeyos.runtime.auth import _prompt_model_selection
+
+    selected = _prompt_model_selection(ordered, current_model=recommended)
+    if not selected:
+        raise ValueError("没有选择模型")
+    return selected
 
 
 def _has_weixin_credentials(home: Path) -> bool:
@@ -254,6 +383,8 @@ def run_setup(
     input_fn: Callable[[str], str] = input,
     secret_fn: Callable[[str], str] = getpass.getpass,
     validate_fn: Callable[[ModelChoice, str], None] = validate_model_key,
+    discover_fn: Callable[[str, str], list[str]] = discover_model_ids,
+    select_model_fn: Callable[[list[str], str], str] | None = None,
     weixin_setup_fn=None,
     feishu_setup_fn=None,
     gateway_run_fn=None,
@@ -279,12 +410,34 @@ def run_setup(
 
         ready_check_fn = print_first_start_report
 
-    print(f"{PRODUCT_NAME} 设置：Base URL / 模型 / API Key → IM → 启动")
+    print(f"{PRODUCT_NAME} 设置：模型服务 / API Key / 模型 → IM → 启动")
     try:
-        choice = _choose_model(input_fn)
+        provider_id, base_url = _choose_provider(input_fn)
         api_key = secret_fn("API Key（输入不会显示）: ").strip()
         if not api_key:
             raise ValueError("API Key 不能为空")
+        option = PROVIDER_OPTIONS.get(provider_id)
+        fallback_models = list(option.fallback_models) if option else []
+        recommended = fallback_models[0] if fallback_models else ""
+        try:
+            models = discover_fn(base_url, api_key)
+        except ValueError as exc:
+            if provider_id == "custom":
+                print(f"暂时无法读取模型列表：{exc}")
+                model = input_fn("Model ID（将立即验证）: ").strip()
+                if not model:
+                    raise ValueError("Model ID 不能为空") from exc
+            else:
+                print(f"暂时无法读取在线模型列表，将使用内置列表：{exc}")
+                models = fallback_models
+                if not models:
+                    raise
+                picker = select_model_fn or _select_model_from_catalog
+                model = picker(models, recommended)
+        else:
+            picker = select_model_fn or _select_model_from_catalog
+            model = picker(models, recommended)
+        choice = model_choice(provider_id, model, base_url=base_url)
         print("正在验证模型服务…")
         validate_fn(choice, api_key)
         configure_model(resolved, choice, api_key)

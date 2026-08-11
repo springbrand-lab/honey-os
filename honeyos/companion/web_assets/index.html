@@ -213,11 +213,26 @@
           <section class="settings-group">
             <h2>模型</h2>
             <form class="model-settings-form" id="model-settings-form">
-              <label><span>Base URL</span><input name="base_url" id="model-base-url" type="url" inputmode="url" placeholder="https://api.example.com/v1" required /></label>
-              <label><span>Model ID</span><input name="model" id="model-id" type="text" placeholder="模型名称" required /></label>
-              <label><span>API Key</span><input name="api_key" id="model-api-key" type="password" autocomplete="new-password" placeholder="留空则保持现有密钥" /></label>
+              <div class="model-setup-intro"><strong>选择它思考和说话时使用的模型</strong><small>密钥只保存在这台电脑，保存后下一句话就会使用新模型。</small></div>
+              <label class="model-provider-row"><span>模型服务</span><select name="provider" id="model-provider">
+                  <option value="openai-api">OpenAI</option>
+                  <option value="openrouter">OpenRouter</option>
+                  <option value="deepseek">DeepSeek</option>
+                  <option value="custom">其他兼容接口</option>
+                </select></label>
+              <label id="model-base-url-row" hidden><span>接口地址</span><input name="base_url" id="model-base-url" type="url" inputmode="url" placeholder="https://api.example.com/v1" /></label>
+              <div class="model-credential-row">
+                <label><span>API Key</span><input name="api_key" id="model-api-key" type="password" autocomplete="new-password" placeholder="粘贴 API Key" /></label>
+                <button type="button" id="model-discover">连接并读取模型</button>
+              </div>
+              <p class="model-connection-status" id="model-settings-status" role="status">选择服务并连接后，就能直接选模型。</p>
+              <label class="model-catalog-row" id="model-catalog-row" hidden><span>选择模型</span><select id="model-catalog"><option value="">请选择模型</option></select></label>
+              <details class="model-manual-details" id="model-manual-details">
+                <summary>列表里没有？手动填写模型 ID</summary>
+                <label><span>模型 ID</span><input id="model-manual-id" type="text" placeholder="例如 provider/model-name" /></label>
+              </details>
+              <input name="model" id="model-id" type="hidden" />
               <div class="settings-form-footer">
-                <span id="model-settings-status" role="status">密钥只保存在这台设备</span>
                 <button type="submit">保存模型配置</button>
               </div>
             </form>

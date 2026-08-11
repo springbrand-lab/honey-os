@@ -7,7 +7,14 @@ import yaml
 
 from honeyos.cli.bootstrap import activate_home
 from honeyos.companion.config import initialize_home
-from honeyos.companion.setup import ModelChoice, configure_model, run_setup, validate_model_key
+from honeyos.companion.setup import (
+    ModelChoice,
+    configure_model,
+    discover_model_ids,
+    model_choice,
+    run_setup,
+    validate_model_key,
+)
 
 
 class _Response:
@@ -48,6 +55,67 @@ def test_configure_model_keeps_key_out_of_yaml(tmp_path):
     assert "OPENROUTER_API_KEY=secret-value" in (
         tmp_path / ".env"
     ).read_text(encoding="utf-8")
+
+
+def test_first_party_model_choices_own_their_base_urls_and_key_names():
+    assert model_choice("openai-api", "gpt-test") == ModelChoice(
+        provider="openai-api",
+        model="gpt-test",
+        base_url="https://api.openai.com/v1",
+        key_env="OPENAI_API_KEY",
+    )
+    assert model_choice("openrouter", "vendor/model") == ModelChoice(
+        provider="openrouter",
+        model="vendor/model",
+        base_url="https://openrouter.ai/api/v1",
+        key_env="OPENROUTER_API_KEY",
+    )
+    assert model_choice("deepseek", "deepseek-v4-flash") == ModelChoice(
+        provider="deepseek",
+        model="deepseek-v4-flash",
+        base_url="https://api.deepseek.com/v1",
+        key_env="DEEPSEEK_API_KEY",
+    )
+
+
+def test_custom_model_choice_requires_its_own_base_url():
+    assert model_choice(
+        "custom",
+        "deployment-name",
+        base_url="https://models.example/v1/",
+    ) == ModelChoice(
+        provider="custom",
+        model="deployment-name",
+        base_url="https://models.example/v1",
+        key_env="HONEYOS_MODEL_API_KEY",
+    )
+
+
+def test_model_discovery_reads_openai_models_and_deduplicates(monkeypatch):
+    observed = {}
+
+    def open_request(request, timeout):
+        observed["request"] = request
+        observed["timeout"] = timeout
+        return _Response(
+            {
+                "data": [
+                    {"id": "model-b"},
+                    {"id": "model-a"},
+                    {"id": "model-b"},
+                    {"missing": "id"},
+                ]
+            }
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", open_request)
+
+    models = discover_model_ids("https://models.example/v1", "valid-key")
+
+    assert models == ["model-b", "model-a"]
+    assert observed["request"].full_url == "https://models.example/v1/models"
+    assert observed["request"].headers["Authorization"] == "Bearer valid-key"
+    assert observed["timeout"] == 20
 
 
 def test_custom_model_uses_named_provider_key_env_at_runtime(monkeypatch, tmp_path):
@@ -193,7 +261,7 @@ def test_model_validation_rejects_string_instead_of_openai_response(monkeypatch)
 def test_setup_defaults_to_weixin_and_feishu_before_start(tmp_path):
     initialize_home(tmp_path)
     events = []
-    answers = iter(["", "https://api.example.com/v1", "test-model", ""])
+    answers = iter(["", ""])
 
     result = run_setup(
         tmp_path,
@@ -202,6 +270,8 @@ def test_setup_defaults_to_weixin_and_feishu_before_start(tmp_path):
         validate_fn=lambda choice, key: events.append(
             ("validate", choice.provider, key)
         ),
+        discover_fn=lambda base_url, key: ["gpt-test"],
+        select_model_fn=lambda models, recommended: models[0],
         weixin_setup_fn=lambda home: events.append(("weixin", home)) or 0,
         feishu_setup_fn=lambda home: events.append(("feishu", home)) or 0,
         gateway_run_fn=lambda command, *, home, arguments=(): events.append(
@@ -213,7 +283,7 @@ def test_setup_defaults_to_weixin_and_feishu_before_start(tmp_path):
 
     assert result == 0
     assert events == [
-        ("validate", "custom", "valid-key"),
+        ("validate", "openai-api", "valid-key"),
         ("weixin", tmp_path.resolve()),
         ("feishu", tmp_path.resolve()),
         ("gateway", "install", ("--no-start-now",), tmp_path.resolve()),
@@ -225,7 +295,7 @@ def test_setup_defaults_to_weixin_and_feishu_before_start(tmp_path):
 def test_setup_stops_before_weixin_when_key_validation_fails(tmp_path, capsys):
     initialize_home(tmp_path)
     events = []
-    answers = iter(["", "https://api.example.com/v1", "test-model"])
+    answers = iter([""])
 
     result = run_setup(
         tmp_path,
@@ -234,6 +304,8 @@ def test_setup_stops_before_weixin_when_key_validation_fails(tmp_path, capsys):
         validate_fn=lambda _choice, _key: (_ for _ in ()).throw(
             ValueError("API Key 无效")
         ),
+        discover_fn=lambda base_url, key: ["gpt-test"],
+        select_model_fn=lambda models, recommended: models[0],
         weixin_setup_fn=lambda home: events.append(home) or 0,
         feishu_setup_fn=lambda home: events.append(home) or 0,
         gateway_run_fn=lambda command, *, home, arguments=(): 0,
@@ -248,13 +320,15 @@ def test_setup_stops_before_weixin_when_key_validation_fails(tmp_path, capsys):
 def test_setup_can_select_feishu_only(tmp_path):
     initialize_home(tmp_path)
     events = []
-    answers = iter(["", "https://api.example.com/v1", "test-model", "2"])
+    answers = iter(["3", "2"])
 
     result = run_setup(
         tmp_path,
         input_fn=lambda _prompt: next(answers),
         secret_fn=lambda _prompt: "valid-key",
         validate_fn=lambda _choice, _key: None,
+        discover_fn=lambda base_url, key: ["deepseek-v4-flash"],
+        select_model_fn=lambda models, recommended: models[0],
         weixin_setup_fn=lambda home: events.append(("weixin", home)) or 0,
         feishu_setup_fn=lambda home: events.append(("feishu", home)) or 0,
         gateway_run_fn=lambda _command, *, home, arguments=(): 0,
@@ -268,13 +342,15 @@ def test_setup_can_select_feishu_only(tmp_path):
 def test_setup_can_start_with_local_web_only(tmp_path):
     initialize_home(tmp_path)
     events = []
-    answers = iter(["", "https://api.example.com/v1", "test-model", "4"])
+    answers = iter(["2", "4"])
 
     result = run_setup(
         tmp_path,
         input_fn=lambda _prompt: next(answers),
         secret_fn=lambda _prompt: "valid-key",
         validate_fn=lambda _choice, _key: None,
+        discover_fn=lambda base_url, key: ["vendor/model"],
+        select_model_fn=lambda models, recommended: models[0],
         weixin_setup_fn=lambda home: events.append(("weixin", home)) or 0,
         feishu_setup_fn=lambda home: events.append(("feishu", home)) or 0,
         gateway_run_fn=lambda command, *, home, arguments=(): events.append(
@@ -289,4 +365,39 @@ def test_setup_can_start_with_local_web_only(tmp_path):
         ("gateway", "install", ("--no-start-now",), tmp_path.resolve()),
         ("gateway", "start", (), tmp_path.resolve()),
         ("ready", tmp_path.resolve()),
+    ]
+
+
+def test_custom_setup_falls_back_to_manual_model_when_catalog_is_unavailable(
+    tmp_path,
+):
+    initialize_home(tmp_path)
+    answers = iter(["4", "https://models.example/v1", "deployment-name", "4"])
+    observed = []
+
+    result = run_setup(
+        tmp_path,
+        input_fn=lambda _prompt: next(answers),
+        secret_fn=lambda _prompt: "valid-key",
+        discover_fn=lambda _base_url, _key: (_ for _ in ()).throw(
+            ValueError("没有 /models")
+        ),
+        validate_fn=lambda choice, key: observed.append((choice, key)),
+        weixin_setup_fn=lambda _home: 0,
+        feishu_setup_fn=lambda _home: 0,
+        gateway_run_fn=lambda _command, *, home, arguments=(): 0,
+        ready_check_fn=lambda _home: True,
+    )
+
+    assert result == 0
+    assert observed == [
+        (
+            ModelChoice(
+                provider="custom",
+                model="deployment-name",
+                base_url="https://models.example/v1",
+                key_env="HONEYOS_MODEL_API_KEY",
+            ),
+            "valid-key",
+        )
     ]

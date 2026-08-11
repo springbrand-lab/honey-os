@@ -41,9 +41,16 @@ const elements = {
   proactiveSetting: document.querySelector("#proactive-setting"),
   themeSelect: document.querySelector("#theme-select"),
   modelSettingsForm: document.querySelector("#model-settings-form"),
+  modelProvider: document.querySelector("#model-provider"),
   modelBaseUrl: document.querySelector("#model-base-url"),
+  modelBaseUrlRow: document.querySelector("#model-base-url-row"),
+  modelCatalog: document.querySelector("#model-catalog"),
+  modelCatalogRow: document.querySelector("#model-catalog-row"),
   modelId: document.querySelector("#model-id"),
+  modelManualDetails: document.querySelector("#model-manual-details"),
+  modelManualId: document.querySelector("#model-manual-id"),
   modelApiKey: document.querySelector("#model-api-key"),
+  modelDiscover: document.querySelector("#model-discover"),
   modelSettingsStatus: document.querySelector("#model-settings-status"),
   channelLinkButtons: Array.from(document.querySelectorAll("[data-channel-link]")),
   channelLinkDialog: document.querySelector("#channel-link-dialog"),
@@ -80,6 +87,12 @@ let companionData = {
 };
 let toastTimer = null;
 let channelLinkPollTimer = null;
+
+const providerBaseUrls = {
+  "openai-api": "https://api.openai.com/v1",
+  openrouter: "https://openrouter.ai/api/v1",
+  deepseek: "https://api.deepseek.com/v1",
+};
 
 function avatarLabel(name, fallback = "H") {
   const value = Array.from(String(name || "").trim()).find((character) => character.trim());
@@ -382,7 +395,7 @@ async function loadHistoryPreview(item, button) {
   elements.historyPreview.replaceChildren(emptyPageState("正在打开", "我把这段聊天找出来。"));
   try {
     const response = await fetch(
-      "/api/sessions/" + encodeURIComponent(item.id) + "/messages",
+      "/api/sessions/" + encodeURIComponent(item.id) + "/messages?view=companion",
       { credentials: "same-origin" },
     );
     if (!response.ok) throw new Error("history_unavailable");
@@ -467,8 +480,10 @@ function channelLabel(platform) {
 
 function fillEditableSettings(settings) {
   const model = settings?.model || {};
+  if (elements.modelProvider) elements.modelProvider.value = model.provider || "custom";
   if (elements.modelBaseUrl) elements.modelBaseUrl.value = model.base_url || "";
   if (elements.modelId) elements.modelId.value = model.model || "";
+  if (elements.modelManualId) elements.modelManualId.value = model.model || "";
   if (elements.modelApiKey) elements.modelApiKey.value = "";
   if (elements.modelSettingsStatus) {
     elements.modelSettingsStatus.textContent = model.api_key_configured
@@ -476,12 +491,77 @@ function fillEditableSettings(settings) {
       : "还没有配置密钥";
   }
   if (elements.conversationModel) elements.conversationModel.textContent = model.model || "当前配置";
+  syncModelProviderFields();
   const channels = settings?.channels || {};
   if (elements.weixinChannelStatus) {
     elements.weixinChannelStatus.textContent = channels.weixin?.configured ? "已连接" : "未连接";
   }
   if (elements.feishuChannelStatus) {
     elements.feishuChannelStatus.textContent = channels.feishu?.configured ? "已连接" : "未连接";
+  }
+}
+
+function syncModelProviderFields() {
+  const provider = elements.modelProvider?.value || "custom";
+  const isCustom = provider === "custom";
+  if (elements.modelBaseUrlRow) elements.modelBaseUrlRow.hidden = !isCustom;
+  if (elements.modelBaseUrl && !isCustom) {
+    elements.modelBaseUrl.value = providerBaseUrls[provider] || "";
+  }
+}
+
+function renderModelOptions(models) {
+  if (!elements.modelCatalog) return;
+  const choices = Array.isArray(models) ? models.map(String) : [];
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = choices.length ? `请选择模型（${choices.length} 个）` : "请选择模型";
+  elements.modelCatalog.replaceChildren(placeholder);
+  choices.forEach((model) => {
+    const option = document.createElement("option");
+    option.value = model;
+    option.textContent = model;
+    elements.modelCatalog.append(option);
+  });
+  const currentModel = elements.modelId?.value.trim() || "";
+  elements.modelCatalog.value = choices.includes(currentModel) ? currentModel : "";
+  if (elements.modelCatalogRow) elements.modelCatalogRow.hidden = choices.length === 0;
+}
+
+async function discoverModels({ silent = false } = {}) {
+  if (!elements.modelProvider || !elements.modelBaseUrl || !elements.modelApiKey) return;
+  if (elements.modelDiscover) elements.modelDiscover.disabled = true;
+  if (!silent && elements.modelSettingsStatus) elements.modelSettingsStatus.textContent = "正在读取可用模型…";
+  const apiKey = elements.modelApiKey.value.trim();
+  const body = {
+    provider: elements.modelProvider.value,
+    base_url: elements.modelBaseUrl.value.trim(),
+  };
+  if (apiKey) body.api_key = apiKey;
+  try {
+    const response = await fetch("/api/companion/settings/models", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "暂时没有读到模型列表");
+    renderModelOptions(payload.models);
+    const models = Array.isArray(payload.models) ? payload.models : [];
+    if (elements.modelSettingsStatus) {
+      elements.modelSettingsStatus.textContent = models.length
+        ? `连接成功，找到 ${models.length} 个模型。`
+        : "连接成功，但接口没有返回模型列表，可以手动填写模型 ID。";
+    }
+    if (!models.length && elements.modelManualDetails) elements.modelManualDetails.open = true;
+  } catch (error) {
+    if (!silent && elements.modelSettingsStatus) {
+      elements.modelSettingsStatus.textContent = error instanceof Error ? error.message : "暂时没有连接成功，请检查后重试";
+    }
+    if (!silent && elements.modelManualDetails) elements.modelManualDetails.open = true;
+  } finally {
+    if (elements.modelDiscover) elements.modelDiscover.disabled = false;
   }
 }
 
@@ -492,6 +572,7 @@ async function loadEditableSettings() {
     const payload = await response.json();
     companionData.settings = { ...companionData.settings, ...(payload.settings || {}) };
     fillEditableSettings(payload.settings || {});
+    if (payload.settings?.model?.api_key_configured) void discoverModels({ silent: true });
   } catch {
     // The rest of the companion remains usable when settings are unavailable.
   }
@@ -499,11 +580,16 @@ async function loadEditableSettings() {
 
 async function saveModelSettings(event) {
   event.preventDefault();
+  if (!elements.modelId?.value.trim()) {
+    if (elements.modelSettingsStatus) elements.modelSettingsStatus.textContent = "请先连接并选择一个模型";
+    return;
+  }
   const submit = elements.modelSettingsForm?.querySelector('button[type="submit"]');
   if (submit) submit.disabled = true;
   if (elements.modelSettingsStatus) elements.modelSettingsStatus.textContent = "正在保存…";
   const apiKey = elements.modelApiKey.value.trim();
   const body = {
+    provider: elements.modelProvider.value,
     base_url: elements.modelBaseUrl.value.trim(),
     model: elements.modelId.value.trim(),
   };
@@ -1398,6 +1484,27 @@ for (const tab of elements.memoryTabs) {
 }
 elements.profileForm?.addEventListener("submit", saveProfile);
 elements.modelSettingsForm?.addEventListener("submit", saveModelSettings);
+elements.modelProvider?.addEventListener("change", () => {
+  syncModelProviderFields();
+  renderModelOptions([]);
+  if (elements.modelId) elements.modelId.value = "";
+  if (elements.modelManualId) elements.modelManualId.value = "";
+  if (elements.modelManualDetails) elements.modelManualDetails.open = false;
+  if (elements.modelSettingsStatus) elements.modelSettingsStatus.textContent = "填入密钥后连接，就能选择模型。";
+});
+elements.modelCatalog?.addEventListener("change", () => {
+  if (elements.modelCatalog.value && elements.modelId) {
+    elements.modelId.value = elements.modelCatalog.value;
+    if (elements.modelManualId) elements.modelManualId.value = elements.modelCatalog.value;
+  }
+});
+elements.modelManualId?.addEventListener("input", () => {
+  if (elements.modelId) elements.modelId.value = elements.modelManualId.value.trim();
+  if (elements.modelCatalog && elements.modelCatalog.value !== elements.modelId?.value) {
+    elements.modelCatalog.value = "";
+  }
+});
+elements.modelDiscover?.addEventListener("click", () => void discoverModels());
 if (elements.themeSelect && window.HoneyOSTheme) {
   elements.themeSelect.value = window.HoneyOSTheme.get();
   elements.themeSelect.addEventListener("change", () => {
