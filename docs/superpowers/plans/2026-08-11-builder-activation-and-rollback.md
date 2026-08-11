@@ -377,8 +377,10 @@ git commit -m "feat(companion): preflight builder slots with synthetic data"
   no confirmation token appears in model/tool text or rendered event payloads.
 - The exact current-user quote remains defense-in-depth UX evidence, not the
   authorization boundary.
-- Successful confirmation launches only the trusted gateway-owned detached
-  worker using a sealed inherited capability/FD and returns `switching`.
+- Successful confirmation only performs the durable authorization CAS and
+  returns `authorized` / ready-for-dynamic-check. It does not start a worker,
+  import candidate code, or switch a service in this task. Task 5 owns the
+  trusted post-confirmation dynamic check and `authorized -> switching` handoff.
 
 - [ ] **Step 1: Write failing authorization and replay tests**
 
@@ -405,7 +407,7 @@ Expected: FAIL because the tool is not registered.
 
 - [ ] **Step 3: Implement token hashing, TTL, and tool boundary**
 
-Store only the hash of the server-side callback secret in the private record.
+Store only the hash of a server-side derived callback secret in the private record.
 Generate 32 random bytes, expire after 10 minutes, pop/transition before
 launching, and use `hmac.compare_digest`. Treat an `always` UI choice as a
 one-time confirmation; never persist a bypass. Persist replay protection across
@@ -455,6 +457,9 @@ git commit -m "feat(companion): require owner confirmation for builder activatio
 - Produces: `ActivationWorker(record_path: Path, service: ServiceController, health: HealthProbe, backup: BackupController)`.
 - Produces: `run() -> int`, returning `0` only for `healthy` or a verified `rolled_back` state.
 - Produces a gateway-owned detached launcher that hands the worker a sealed inherited capability/FD; activation is not exposed as a shell subcommand.
+- Consumes only an exact-digest activation in `authorized`; dynamic checks and
+  the worker's first state handoff are `authorized -> switching`, never a
+  pre-confirmation action.
 - Consumes: `run_gateway_command`, runtime identity, existing quick snapshot/SQLite integrity helpers, and platform service managers.
 - Produces a testable `ManagedGatewayDefinition` abstraction that reads,
   installs, and restores the exact service definition with explicit

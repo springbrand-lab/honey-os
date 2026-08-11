@@ -151,7 +151,6 @@ private immutable slot:
 │   │   └── runtime.json
 │   └── <change-id>-<digest>/
 │       ├── source/
-│       ├── venv/
 │       ├── runtime.json
 │       └── preflight.json
 └── activations/
@@ -180,15 +179,16 @@ before switching. The slot contains no `.git` directory.
 3. recompute and bind the candidate digest;
 4. materialize the complete pinned source tree into a private slot without
    `.git`, credentials, real data, or the Builder workspace's environment;
-5. create an isolated virtual environment from the already-approved dependency
-   set;
-6. run syntax/import checks, targeted tests, core Builder safety tests, and CLI
-   startup smoke checks with synthetic temporary data;
-7. write a private preflight receipt.
+5. statically validate required release artifacts, file types/modes/sizes, and
+   changed Python syntax without importing or executing candidate code;
+6. write a private preflight receipt bound to the exact staged digests.
 
 Staging does not change the running service and does not need activation
 confirmation. A failed stage leaves the old HoneyOS untouched and produces no
 activatable token.
+
+Dynamic imports, CLI smoke tests, candidate tests, and service health checks
+are deliberately deferred until after the owner confirms this exact digest.
 
 ### 4. Owner confirmation
 
@@ -229,7 +229,8 @@ arbitrary model-provided arguments. The worker:
 10. commits success or performs rollback.
 
 The worker never imports candidate Python. Candidate code first executes only
-inside the isolated preflight process and then in the newly started gateway.
+after exact owner confirmation, in the trusted post-confirmation dynamic check
+and then in the newly started gateway.
 Service installation has a true no-load/no-start mode on launchd, systemd,
 Windows, and s6; the worker starts the candidate only after durable checkpoints.
 
