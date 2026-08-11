@@ -114,6 +114,23 @@ git diff --check
 Observed results: `46 passed in 4.88s`; `All checks passed!`; no whitespace
 errors.
 
+### Companion control-plane follow-up
+
+Added RED cases for companion configuration, permission UI, distribution,
+project workspace boundary, doctor/health, runtime identity, and setup files.
+The focused run initially reported seven failures because those changes were
+only out of scope rather than explicitly protected. Added them to the running
+protected-path policy, then ran:
+
+```text
+.venv/bin/python -m pytest -q tests/honeyos/test_builder_workspace.py tests/honeyos/test_builder_cli.py
+.venv/bin/ruff check honeyos/companion/builder_workspace.py tests/honeyos/test_builder_workspace.py
+git diff --check
+```
+
+Observed results: `60 passed in 6.75s`; `All checks passed!`; no whitespace
+errors.
+
 ## Fix after review
 
 ### RED evidence
@@ -160,3 +177,51 @@ Observed results: `23 passed`; `25 passed`; `All checks passed!`; no whitespace
 errors. Candidate ordinary code is not subject to an import ban: only the
 trusted pre-activation control plane is prohibited from importing or executing
 candidate code.
+
+## Third fix after architecture review
+
+### RED evidence
+
+Added a regression matrix that broadens both the candidate-visible manifest
+and the same-user `trusted-policy.json` to `**`, then changes
+`honeyos/model_tools.py`, `honeyos/toolsets.py`,
+`honeyos/agent/agent_runtime_helpers.py`, `honeyos/runtime/middleware.py`, or
+`honeyos/tools/registry.py`. Ran:
+
+```text
+.venv/bin/python -m pytest -q tests/honeyos/test_builder_workspace.py
+```
+
+Observed result: `5 failed, 45 passed`. Each host execution/control-plane path
+was incorrectly marked `review_ready`, showing that task metadata could still
+expand the security boundary.
+
+### Fix and GREEN evidence
+
+- Introduced running-code-owned `DEFAULT_ACTIVATABLE_PATHS`, an explicit
+  release-1 product surface for companion behavior, persona/memory, browser
+  presentation, ordinary companion skills, tests, and docs.
+- Protected all agent, runtime, gateway, tools, CLI, core, provider, plugin,
+  and migration trees plus root agent-loop/tool-dispatch files. Candidate
+  classification is now protected-first, then static allowlist, then dynamic
+  task relevance.
+- Retained task policy/manifest metadata as an audit and narrowing record, but
+  removed the false claim that it is inaccessible to a same-user terminal.
+  The static allowlist remains effective when both records are broadened.
+- Included exact changed paths with Git status alongside the candidate digest
+  in `review.json`, so a later owner confirmation can display exactly what it
+  binds.
+- Updated the design and implementation plan to document that same-user OS
+  state is not a sandbox and that the static activation surface is the security
+  boundary.
+
+Commands:
+
+```text
+.venv/bin/python -m pytest -q tests/honeyos/test_builder_workspace.py tests/honeyos/test_builder_cli.py
+.venv/bin/ruff check honeyos/companion/builder_workspace.py tests/honeyos/test_builder_workspace.py
+git diff --check
+```
+
+Observed results: `52 passed in 5.77s`; `All checks passed!`; no whitespace
+errors.
