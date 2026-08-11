@@ -39,6 +39,7 @@ const elements = {
   conversationModel: document.querySelector("#conversation-model"),
   distillationModel: document.querySelector("#distillation-model"),
   proactiveSetting: document.querySelector("#proactive-setting"),
+  themeSelect: document.querySelector("#theme-select"),
   modelSettingsForm: document.querySelector("#model-settings-form"),
   modelBaseUrl: document.querySelector("#model-base-url"),
   modelId: document.querySelector("#model-id"),
@@ -387,7 +388,10 @@ async function loadHistoryPreview(item, button) {
     if (!response.ok) throw new Error("history_unavailable");
     const data = await response.json();
     const messages = (data.data || []).filter(
-      (message) => ["user", "assistant"].includes(message.role) && typeof message.content === "string",
+      (message) =>
+        ["user", "assistant"].includes(message.role) &&
+        typeof message.content === "string" &&
+        message.content.trim().length > 0,
     );
     const heading = document.createElement("header");
     const title = document.createElement("h2");
@@ -400,7 +404,7 @@ async function loadHistoryPreview(item, button) {
     for (const message of messages) {
       const bubble = document.createElement("p");
       bubble.className = "history-message " + message.role;
-      bubble.textContent = message.content;
+      bubble.textContent = message.content.trim();
       transcript.append(bubble);
     }
     if (!messages.length) transcript.append(emptyPageState("这段聊天没有可显示的消息", "工具过程不会出现在这里。"));
@@ -1394,6 +1398,12 @@ for (const tab of elements.memoryTabs) {
 }
 elements.profileForm?.addEventListener("submit", saveProfile);
 elements.modelSettingsForm?.addEventListener("submit", saveModelSettings);
+if (elements.themeSelect && window.HoneyOSTheme) {
+  elements.themeSelect.value = window.HoneyOSTheme.get();
+  elements.themeSelect.addEventListener("change", () => {
+    elements.themeSelect.value = window.HoneyOSTheme.set(elements.themeSelect.value);
+  });
+}
 for (const button of elements.channelLinkButtons) {
   button.addEventListener("click", () => void startChannelLink(button.dataset.channelLink, button));
 }

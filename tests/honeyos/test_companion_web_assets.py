@@ -152,3 +152,35 @@ def test_settings_styles_cover_editable_cards_qr_dialog_and_mobile_layout():
     assert ".channel-link-dialog" in styles
     assert ".channel-link-qr" in styles
     assert "@media (max-width: 720px)" in styles
+
+
+def test_theme_can_follow_system_or_be_overridden_and_persisted():
+    page = (ASSETS / "index.html").read_text(encoding="utf-8")
+    bootstrap = (ASSETS / "file-open.js").read_text(encoding="utf-8")
+    script = (ASSETS / "app.js").read_text(encoding="utf-8")
+    styles = (ASSETS / "styles.css").read_text(encoding="utf-8")
+
+    assert 'id="theme-select"' in page
+    assert 'value="system"' in page
+    assert 'value="light"' in page
+    assert 'value="dark"' in page
+    assert 'window.matchMedia("(prefers-color-scheme: dark)")' in bootstrap
+    assert 'window.localStorage.setItem(storageKey, value)' in bootstrap
+    assert 'document.documentElement.dataset.theme = resolved' in bootstrap
+    assert 'window.HoneyOSTheme.set(elements.themeSelect.value)' in script
+    assert ':root[data-theme="dark"]' in styles
+    assert ".settings-list { width: min(100%,780px); margin: 0 auto; padding: 22px 0 44px; display: block; }" in styles
+
+
+def test_history_layout_uses_shared_radii_and_theme_surfaces():
+    page = (ASSETS / "index.html").read_text(encoding="utf-8")
+    script = (ASSETS / "app.js").read_text(encoding="utf-8")
+    styles = (ASSETS / "styles.css").read_text(encoding="utf-8")
+
+    assert "在这里查看完整记录" in page
+    assert "grid-template-columns: minmax(230px,.7fr) minmax(0,1.3fr)" in styles
+    assert "border-radius: var(--radius-control)" in styles
+    assert ".history-message.assistant { background: var(--surface-muted); }" in styles
+    assert ".history-message.user { background: var(--user-message); }" in styles
+    assert "message.content.trim().length > 0" in script
+    assert "bubble.textContent = message.content.trim()" in script

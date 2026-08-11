@@ -4,8 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
-    <meta name="theme-color" content="#f2f0f2" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#171519" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#efede8" />
     <title>HoneyOS</title>
     <script src="./file-open.js"></script>
     <link rel="stylesheet" href="./styles.css" />
@@ -176,7 +175,11 @@
         <div class="page-scroll history-layout">
           <div class="history-list" id="history-list"></div>
           <aside class="history-preview" id="history-preview">
-            <div class="history-preview-empty"><svg class="app-icon" aria-hidden="true"><use href="./icons.svg#history"></use></svg><p>选择一段聊天，在这里查看。</p></div>
+            <div class="page-empty-state">
+              <span aria-hidden="true">◇</span>
+              <strong>选择一段聊天</strong>
+              <p>在这里查看完整记录。</p>
+            </div>
           </aside>
         </div>
       </section>
@@ -191,6 +194,17 @@
           <button class="page-close" type="button" data-view-target="chat" aria-label="回到聊天"><svg class="app-icon" aria-hidden="true"><use href="./icons.svg#close"></use></svg></button>
         </header>
         <div class="page-scroll settings-list">
+          <section class="settings-group">
+            <h2>外观</h2>
+            <label class="settings-row" for="theme-select">
+              <span><strong>显示模式</strong><small>可以跟随系统，也可以固定使用浅色或深色</small></span>
+              <select id="theme-select" aria-label="显示模式">
+                <option value="system">跟随系统</option>
+                <option value="light">浅色</option>
+                <option value="dark">深色</option>
+              </select>
+            </label>
+          </section>
           <section class="settings-group">
             <h2>隐私与记忆</h2>
             <button type="button" data-view-target="memories"><span><strong>记忆保存在本地</strong><small>当前使用本机 SQLite 和记忆文件</small></span><em>已开启 ›</em></button>
