@@ -8,9 +8,11 @@ a human developer; this first version deliberately has no install operation.
 
 from __future__ import annotations
 
-import json
 import fnmatch
+import hashlib
+import json
 import re
+import stat
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -23,14 +25,27 @@ DEFAULT_PROTECTED_PATHS = (
     ".env.*",
     "honeyos/agent/file_safety.py",
     "honeyos/companion/builder_workspace.py",
+    "honeyos/companion/builder_activation*.py",
     "honeyos/companion/companion_skills/honeyos-builder/**",
     "honeyos/companion/companion_skills/honeyos-self-extension/**",
     "honeyos/companion/projects.py",
     "honeyos/runtime/auth.py",
+    "honeyos/runtime/**",
     "honeyos/runtime/builder_cmd.py",
+    "honeyos/cli/service.py",
     "honeyos/tools/approval.py",
+    "honeyos/tools/write_approval.py",
+    "honeyos/tools/companion_builder_tool.py",
     "honeyos/tools/permission_policy.py",
     "honeyos/tools/threat_patterns.py",
+    "pyproject.toml",
+    "uv.lock",
+    "requirements*.txt",
+    "requirements/**/*.txt",
+    "install.sh",
+    "Install-HoneyOS.command",
+    "scripts/install*.sh",
+    "scripts/update*.sh",
 )
 
 
@@ -50,6 +65,13 @@ class BuilderReviewReport:
     out_of_scope_changes: tuple[str, ...]
     installable: bool
     report_path: Path
+    candidate_digest: str = ""
+
+
+@dataclass(frozen=True)
+class _ChangedPath:
+    relative: str
+    status: str
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -186,14 +208,22 @@ def prepare_builder_change(
     )
 
 
-def _changed_paths(workspace: Path) -> tuple[str, ...]:
+def _changed_paths(workspace: Path) -> tuple[_ChangedPath, ...]:
     completed = subprocess.run(
-        ["git", "-C", str(workspace), "status", "--porcelain=v1", "-z"],
+        [
+            "git",
+            "-C",
+            str(workspace),
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+            "-z",
+        ],
         check=True,
         capture_output=True,
         text=True,
     )
-    paths: list[str] = []
+    paths: list[_ChangedPath] = []
     records = completed.stdout.split("\0")
     index = 0
     while index < len(records):
@@ -205,10 +235,65 @@ def _changed_paths(workspace: Path) -> tuple[str, ...]:
         path = record[3:]
         if "R" in status or "C" in status:
             # Porcelain -z emits the destination first and the source next.
+            source = records[index] if index < len(records) else ""
             index += 1
-        if path and path not in paths:
-            paths.append(path)
-    return tuple(sorted(paths))
+            if "R" in status and source:
+                paths.append(_ChangedPath(source, "D"))
+        if path:
+            paths.append(_ChangedPath(path, status))
+    return tuple(
+        sorted(
+            {path.relative: path for path in paths}.values(),
+            key=lambda path: path.relative,
+        )
+    )
+
+
+def _digest_update(digest: hashlib._Hash, value: bytes) -> None:
+    digest.update(len(value).to_bytes(8, "big"))
+    digest.update(value)
+
+
+def candidate_digest(
+    workspace: Path, source_commit: str, paths: Iterable[_ChangedPath | str]
+) -> str:
+    """Return a deterministic digest of the exact candidate files reviewed."""
+
+    digest = hashlib.sha256()
+    _digest_update(digest, source_commit.encode("utf-8"))
+    candidates = sorted(
+        (
+            path
+            if isinstance(path, _ChangedPath)
+            else _ChangedPath(relative=str(path), status="")
+            for path in paths
+        ),
+        key=lambda path: path.relative,
+    )
+    for changed in candidates:
+        relative = changed.relative
+        parts = Path(relative).parts
+        if not relative or Path(relative).is_absolute() or ".." in parts:
+            raise ValueError(f"unsafe candidate path: {relative}")
+        path = workspace / relative
+        if path.is_symlink():
+            raise ValueError(f"candidate path is a symlink: {relative}")
+        try:
+            if path.exists():
+                if not path.is_file():
+                    raise ValueError(f"candidate path is not a file: {relative}")
+                mode = f"{stat.S_IMODE(path.stat().st_mode):04o}".encode("ascii")
+                content = path.read_bytes()
+            else:
+                mode = b"deleted"
+                content = b"<deleted>"
+        except OSError as exc:
+            raise ValueError(f"candidate path is unreadable: {relative}") from exc
+        _digest_update(digest, relative.encode("utf-8"))
+        _digest_update(digest, changed.status.encode("ascii"))
+        _digest_update(digest, mode)
+        _digest_update(digest, content)
+    return digest.hexdigest()
 
 
 def _matches_any(path: str, patterns: Iterable[str]) -> bool:
@@ -235,13 +320,14 @@ def inspect_builder_change(change_root: Path | str) -> BuilderReviewReport:
     allowed: list[str] = []
     protected: list[str] = []
     out_of_scope: list[str] = []
-    for path in _changed_paths(workspace):
-        if _matches_any(path, protected_patterns):
-            protected.append(path)
-        elif _matches_any(path, allowed_patterns):
-            allowed.append(path)
+    changed_paths = _changed_paths(workspace)
+    for changed in changed_paths:
+        if _matches_any(changed.relative, protected_patterns):
+            protected.append(changed.relative)
+        elif _matches_any(changed.relative, allowed_patterns):
+            allowed.append(changed.relative)
         else:
-            out_of_scope.append(path)
+            out_of_scope.append(changed.relative)
 
     if protected or out_of_scope:
         status = "blocked"
@@ -249,12 +335,16 @@ def inspect_builder_change(change_root: Path | str) -> BuilderReviewReport:
         status = "review_ready"
     else:
         status = "no_changes"
+    source_commit = str(manifest.get("source_commit", ""))
+    digest = candidate_digest(workspace, source_commit, changed_paths)
     report_path = root / "review.json"
     report_payload = {
         "schema_version": 1,
         "change_id": manifest.get("change_id"),
         "status": status,
-        "inspected_at": datetime.now(timezone.utc).isoformat(),
+        "source_commit": source_commit,
+        "candidate_digest": digest,
+        "reviewed_at": datetime.now(timezone.utc).isoformat(),
         "allowed_changes": allowed,
         "protected_changes": protected,
         "out_of_scope_changes": out_of_scope,
@@ -276,4 +366,5 @@ def inspect_builder_change(change_root: Path | str) -> BuilderReviewReport:
         out_of_scope_changes=tuple(out_of_scope),
         installable=False,
         report_path=report_path,
+        candidate_digest=digest,
     )

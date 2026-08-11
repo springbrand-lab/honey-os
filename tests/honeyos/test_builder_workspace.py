@@ -36,6 +36,20 @@ def _source_repo(tmp_path: Path) -> Path:
     return source
 
 
+def _prepared_change(
+    tmp_path: Path, *, allowed_paths: tuple[str, ...] = ("honeyos/companion/**",)
+):
+    from honeyos.companion.builder_workspace import prepare_builder_change
+
+    return prepare_builder_change(
+        source_repo=_source_repo(tmp_path),
+        goal="改善记忆",
+        allowed_paths=allowed_paths,
+        builder_root=tmp_path / "HoneyOS Builder",
+        change_id="candidate-review-001",
+    )
+
+
 def test_prepare_builder_change_clones_review_only_workspace(tmp_path):
     from honeyos.companion.builder_workspace import prepare_builder_change
 
@@ -146,3 +160,62 @@ def test_inspect_builder_change_does_not_mark_empty_candidate_review_ready(tmp_p
 
     assert report.status == "no_changes"
     assert report.installable is False
+
+
+def test_inspect_binds_review_to_candidate_digest(tmp_path):
+    from honeyos.companion.builder_workspace import inspect_builder_change
+
+    prepared = _prepared_change(tmp_path)
+    feature = prepared.workspace / "honeyos" / "companion" / "feature.py"
+    feature.write_text("VALUE = 'candidate'\n", encoding="utf-8")
+
+    first = inspect_builder_change(prepared.change_root)
+    report_json = json.loads(first.report_path.read_text(encoding="utf-8"))
+    feature.write_text("VALUE = 'changed-after-review'\n", encoding="utf-8")
+    second = inspect_builder_change(prepared.change_root)
+
+    assert first.candidate_digest
+    assert second.candidate_digest != first.candidate_digest
+    assert report_json["source_commit"]
+    assert report_json["candidate_digest"] == first.candidate_digest
+    assert report_json["reviewed_at"]
+
+
+def test_candidate_digest_rejects_symlink(tmp_path):
+    from honeyos.companion.builder_workspace import candidate_digest
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    target = tmp_path / "outside.py"
+    target.write_text("VALUE = 'outside'\n", encoding="utf-8")
+    (workspace / "candidate.py").symlink_to(target)
+
+    with pytest.raises(ValueError, match="symlink"):
+        candidate_digest(workspace, "source-commit", ("candidate.py",))
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "honeyos/companion/builder_activation.py",
+        "honeyos/runtime/builder_activation_worker.py",
+        "honeyos/tools/companion_builder_tool.py",
+        "honeyos/runtime/gateway.py",
+        "honeyos/runtime/backup.py",
+        "pyproject.toml",
+        "uv.lock",
+        "install.sh",
+    ),
+)
+def test_builder_blocks_activation_and_dependency_surfaces(tmp_path, path):
+    from honeyos.companion.builder_workspace import inspect_builder_change
+
+    prepared = _prepared_change(tmp_path, allowed_paths=("**",))
+    target = prepared.workspace / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("changed\n", encoding="utf-8")
+
+    report = inspect_builder_change(prepared.change_root)
+
+    assert report.status == "blocked"
+    assert path in report.protected_changes

@@ -85,6 +85,7 @@ def builder_command(args: argparse.Namespace) -> int:
                 "out_of_scope_changes": list(report.out_of_scope_changes),
                 "installable": report.installable,
                 "report": str(report.report_path),
+                "candidate_digest": report.candidate_digest,
             }
         else:
             print(f"builder: unknown action: {action}", file=sys.stderr)

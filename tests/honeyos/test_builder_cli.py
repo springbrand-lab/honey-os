@@ -66,6 +66,16 @@ def test_builder_prepare_cli_uses_managed_projects_and_returns_manifest(
     assert manifest.is_file()
     assert payload["installation"] == "review_only"
 
+    (workspace / "honeyos" / "companion" / "feature.py").write_text(
+        "VALUE = 2\n", encoding="utf-8"
+    )
+    inspect_args = parser.parse_args(["builder", "inspect", "memory-cli-001"])
+
+    assert builder_command(inspect_args) == 0
+
+    inspect_payload = json.loads(capsys.readouterr().out)
+    assert inspect_payload["candidate_digest"]
+
 
 def test_honeyos_main_exposes_builder_command():
     completed = subprocess.run(
