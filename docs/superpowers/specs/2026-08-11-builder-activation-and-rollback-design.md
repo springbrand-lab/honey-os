@@ -47,6 +47,17 @@ reviewed design. Candidates in this release may change existing HoneyOS Python,
 Web assets, adapters, prompts, Skills, and tests within the manifest's explicit
 allowed paths.
 
+Candidate code is untrusted until the owner confirms one exact digest. That
+confirmation promotes it to the trusted local HoneyOS application. The active
+application must read memories, render the Web UI, and perform companion work,
+so it runs with HoneyOS's local capabilities. This design protects against
+scope drift, candidate tampering before confirmation, startup/data failure, and
+irreversible deployment; it does not claim a same-user sandbox against
+intentionally malicious Python or JavaScript after activation. Credentials and
+channel binding, profile redaction, permission/model-control routing, message
+delivery routing, bundled Skill instructions, and prompt templates stay outside
+the release-1 activatable surface.
+
 ## User experience
 
 ### Candidate preparation

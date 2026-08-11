@@ -126,20 +126,13 @@ DEFAULT_ACTIVATABLE_PATHS = (
     "tests/**",
     "README.md",
     "honeyos/companion/activity.py",
-    "honeyos/companion/channels.py",
     "honeyos/companion/continuity.py",
     "honeyos/companion/distillation.py",
-    "honeyos/companion/memory_policy.py",
-    "honeyos/companion/model_intent.py",
     "honeyos/companion/persistent_memory.py",
-    "honeyos/companion/profile.py",
     "honeyos/companion/status_copy.py",
-    "honeyos/companion/topic_delivery.py",
     "honeyos/companion/topic_pool.py",
     "honeyos/companion/topic_scout.py",
-    "honeyos/companion/templates/**",
     "honeyos/companion/web_assets/**",
-    "honeyos/companion/companion_skills/**",
 )
 
 

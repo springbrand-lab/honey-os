@@ -15,6 +15,14 @@
 - Normal Skill installation remains immediate and does not restart core HoneyOS.
 - Candidate code never modifies the trusted Builder activation, approval, auth, backup, filesystem-safety, or service-switch control plane. Activation eligibility is controlled by a fixed, running-code-owned companion product allowlist; all host agent-loop, gateway, runtime, tool-dispatch, CLI, core, provider, and plugin paths are protected. Before activation, the trusted control plane never imports or executes candidate code.
 - Same-user OS state is not a sandbox. The task manifest and trusted-policy record bind/restrict a requested change for audit and UX, but cannot expand the static activation surface even if both are altered.
+- Candidate code is untrusted until the owner confirms one exact digest. That
+  confirmation promotes it to the trusted local application, which necessarily
+  runs with HoneyOS's data/tool capabilities. The controls here prevent
+  accidental boundary edits and deployment failure; they do not claim to
+  sandbox intentionally malicious same-user code after activation.
+- Credential/channel binding, profile redaction, permission and model-control
+  routing, delivery routing, bundled Skill instructions, and prompt templates
+  remain protected in release 1.
 - Candidate dependency/build changes (`pyproject.toml`, `uv.lock`, installers, release scripts) are blocked in this release.
 - `SOUL.md`, identity, relationship, memories, `state.db`, credentials, channel bindings, Skills, cron jobs, UI overlays, and projects remain under the existing `HONEYOS_HOME` and are never overlaid by a slot.
 - No GitHub account, push, branch merge, or PR is part of local activation.
