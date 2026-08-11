@@ -298,12 +298,15 @@ git commit -m "feat(companion): add private builder version slots"
 
 **Files:**
 - Modify: `honeyos/companion/builder_activation.py`
+- Modify: `pyproject.toml`
+- Modify: `uv.lock`
+- Modify: `tests/honeyos/test_builder_activation.py`
 - Create: `tests/honeyos/test_builder_preflight.py`
 
 **Interfaces:**
 - Produces: `preflight(activation_id: str, runner: ProcessRunner | None = None) -> PreflightReceipt`
 - `PreflightReceipt` includes `success`, `checks`, `candidate_digest`, `python_executable`, `source_root`, and redacted `error`.
-- Consumes: existing approved dependency files from `bundled_root`; candidate changes to dependency files are already blocked.
+- Consumes: existing approved dependency files from `bundled_root`; candidate changes to dependency files are already blocked. The normal `honeyos` runtime extra includes pinned pytest so every distribution install can execute the fixed Builder boundary tests.
 
 - [ ] **Step 1: Write failing isolation and preflight tests**
 
@@ -341,7 +344,10 @@ Expected: FAIL because `preflight` does not exist.
 Create a slot-local virtual environment using the current trusted interpreter.
 Install the complete slot source using the unchanged, locked approved dependency
 set and an explicit non-editable installation rooted at `slot/source`; fail
-closed when required approved artifacts are unavailable. Run every command with
+closed when required approved artifacts are unavailable. Build from a disposable
+archive outside the read-only source; make only the current trusted runtime's
+installed dependency set visible to the slot venv (not an editable running
+checkout). Run every command with
 `cwd=slot/source`, a temporary synthetic `HONEYOS_HOME`, `PYTHONPATH` cleared,
 and `PYTHONPYCACHEPREFIX` pointing to a disposable directory outside the
 read-only slot source:
@@ -371,7 +377,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add honeyos/companion/builder_activation.py tests/honeyos/test_builder_preflight.py
+git add honeyos/companion/builder_activation.py pyproject.toml uv.lock tests/honeyos/test_builder_activation.py tests/honeyos/test_builder_preflight.py
 git commit -m "feat(companion): preflight builder slots with synthetic data"
 ```
 

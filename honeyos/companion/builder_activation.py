@@ -11,16 +11,20 @@ import contextlib
 import hashlib
 import json
 import os
+import site
 import shutil
 import stat
 import subprocess
+import sys
 import tarfile
 import tempfile
+import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Protocol
 
 from honeyos.companion.builder_workspace import (
     BUILDER_POLICY_VERSION,
@@ -53,6 +57,9 @@ _REVIEW_SCHEMA_VERSION = 1
 _SLOT_SCHEMA_VERSION = 1
 _ACTIVATION_SCHEMA_VERSION = 1
 _JOURNAL_SCHEMA_VERSION = 1
+_PREFLIGHT_SCHEMA_VERSION = 1
+_PREFLIGHT_TIMEOUT_SECONDS = 45
+_PREFLIGHT_OUTPUT_LIMIT = 512
 _TRANSITIONS = {
     "staged": {"awaiting_confirmation", "invalidated"},
     "awaiting_confirmation": {"switching", "denied", "expired", "invalidated"},
@@ -78,8 +85,108 @@ class StagedActivation:
 ActivationRecord = StagedActivation
 
 
+@dataclass(frozen=True)
+class ProcessCommand:
+    """A fully specified, isolated preflight command for an injectable runner."""
+
+    argv: tuple[str, ...]
+    cwd: Path
+    env: Mapping[str, str]
+    timeout_seconds: int
+    output_limit: int = _PREFLIGHT_OUTPUT_LIMIT
+
+
+@dataclass(frozen=True)
+class ProcessResult:
+    returncode: int | None
+    stdout: str = ""
+    stderr: str = ""
+    timed_out: bool = False
+
+
+class ProcessRunner(Protocol):
+    def run(self, command: ProcessCommand) -> ProcessResult:
+        """Run one bounded preflight command without a shell."""
+
+
+@dataclass(frozen=True)
+class PreflightCheck:
+    name: str
+    returncode: int | None
+    duration_ms: int
+    output: str
+    timed_out: bool
+
+
+@dataclass(frozen=True)
+class PreflightReceipt:
+    """Private evidence that a staged slot is runnable in an isolated context."""
+
+    activation_id: str
+    success: bool
+    candidate_digest: str
+    slot_tree_digest: str
+    python_executable: Path
+    source_root: Path
+    checks: tuple[PreflightCheck, ...]
+    error: str
+    record_path: Path
+
+
+class _SubprocessRunner:
+    """The production runner; network and provider access are absent by design."""
+
+    def run(self, command: ProcessCommand) -> ProcessResult:
+        try:
+            completed = subprocess.run(
+                command.argv,
+                cwd=command.cwd,
+                env=dict(command.env),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=command.timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as exc:
+            return ProcessResult(
+                returncode=None,
+                stdout=_as_text(exc.stdout),
+                stderr=_as_text(exc.stderr),
+                timed_out=True,
+            )
+        return ProcessResult(
+            returncode=completed.returncode,
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+        )
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _as_text(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
+def _redact_preflight_text(value: str, *, limit: int = _PREFLIGHT_OUTPUT_LIMIT) -> str:
+    """Keep diagnostics small and never persist obvious credential values."""
+
+    import re
+
+    compact = value.replace("\x00", " ")
+    compact = re.sub(r"(?i)(bearer\s+)[^\s]+", r"\1[redacted]", compact)
+    compact = re.sub(
+        r"(?i)((?:api[_-]?key|token|secret|password)\s*[:=]\s*)[^\s,;]+",
+        r"\1[redacted]",
+        compact,
+    )
+    compact = re.sub(r"\bsk-[A-Za-z0-9_-]+", "[redacted]", compact)
+    return compact[-limit:]
 
 
 def _private_directory(path: Path) -> None:
@@ -753,6 +860,384 @@ class ActivationStore:
         with self._locked():
             return self._verify_staged_unlocked(activation_id)
 
+    @staticmethod
+    def _slot_python(preflight_root: Path) -> Path:
+        if os.name == "nt":
+            return preflight_root / "venv" / "Scripts" / "python.exe"
+        return preflight_root / "venv" / "bin" / "python"
+
+    @staticmethod
+    def _slot_site_packages(preflight_root: Path) -> Path:
+        if os.name == "nt":
+            return preflight_root / "venv" / "Lib" / "site-packages"
+        return (
+            preflight_root
+            / "venv"
+            / "lib"
+            / f"python{sys.version_info.major}.{sys.version_info.minor}"
+            / "site-packages"
+        )
+
+    def _link_trusted_runtime_dependencies(self, preflight_root: Path) -> None:
+        """Expose the installed, release-approved runtime dependencies only.
+
+        ``honeyos`` distribution installs now include the pinned pytest test
+        runner.  A private ``.pth`` lets the ephemeral slot venv use that
+        trusted dependency set without copying it or adding the active source
+        checkout to ``PYTHONPATH``.  Each HoneyOS import is independently
+        asserted to resolve from the candidate slot before this can succeed.
+        """
+
+        trusted_prefix = Path(sys.prefix).resolve()
+        trusted_sites: list[Path] = []
+        for raw_site in site.getsitepackages():
+            candidate = Path(raw_site).resolve()
+            try:
+                candidate.relative_to(trusted_prefix)
+            except ValueError:
+                continue
+            if candidate.is_dir() and not candidate.is_symlink():
+                trusted_sites.append(candidate)
+        if not trusted_sites:
+            raise ActivationError("approved preflight test tooling is unavailable")
+        slot_site = self._slot_site_packages(preflight_root)
+        _private_directory(slot_site)
+        dependency_path = slot_site / "trusted-runtime-dependencies.pth"
+        dependency_path.write_text(
+            "".join(f"{path}\n" for path in trusted_sites), encoding="utf-8"
+        )
+        dependency_path.chmod(0o600)
+
+    def _preflight_path(self, record: ActivationRecord) -> Path:
+        return record.slot_root / "preflight.json"
+
+    @staticmethod
+    def _build_preflight_archive(source_root: Path, preflight_root: Path) -> Path:
+        """Package frozen slot bytes outside the source tree for pip to build."""
+
+        archive = preflight_root / "candidate-source.tar.gz"
+        with tarfile.open(archive, "w:gz") as stream:
+            for current, directories, files in os.walk(source_root, followlinks=False):
+                current_path = Path(current)
+                for name in sorted(directories + files):
+                    path = current_path / name
+                    info = os.lstat(path)
+                    if stat.S_ISLNK(info.st_mode) or not (
+                        stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)
+                    ):
+                        raise ActivationError("slot source contains an unsafe preflight path")
+                    stream.add(
+                        path,
+                        arcname=path.relative_to(source_root).as_posix(),
+                        recursive=False,
+                    )
+        archive.chmod(0o600)
+        return archive
+
+    @staticmethod
+    def _required_preflight_artifacts(source_root: Path) -> tuple[Path, ...]:
+        required = (
+            source_root / "pyproject.toml",
+            source_root / "uv.lock",
+            source_root / "tests" / "honeyos" / "test_builder_workspace.py",
+        )
+        for path in required:
+            if not path.is_file() or path.is_symlink():
+                raise ActivationError("approved preflight artifact is unavailable")
+        pyproject = (source_root / "pyproject.toml").read_text(encoding="utf-8")
+        lockfile = (source_root / "uv.lock").read_text(encoding="utf-8")
+        if "[build-system]" not in pyproject or "pytest" not in (pyproject + lockfile):
+            raise ActivationError("approved preflight test tooling is unavailable")
+        return required
+
+    @staticmethod
+    def _preflight_environment(preflight_root: Path) -> dict[str, str]:
+        home = preflight_root / "home"
+        honeyos_home = preflight_root / "honeyos-home"
+        pycache = preflight_root / "pycache"
+        temporary = preflight_root / "tmp"
+        for directory in (home, honeyos_home, pycache, temporary):
+            _private_directory(directory)
+        # Deliberately build a whitelist rather than filtering os.environ: a
+        # new provider/credential variable must not silently become inherited.
+        return {
+            "PATH": os.defpath,
+            "HOME": str(home),
+            "HONEYOS_HOME": str(honeyos_home),
+            "PYTHONPYCACHEPREFIX": str(pycache),
+            "PYTHONPATH": "",
+            "VIRTUAL_ENV": "",
+            "PYTHONNOUSERSITE": "1",
+            "TMPDIR": str(temporary),
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+        }
+
+    @staticmethod
+    def _selected_candidate_tests(record: ActivationRecord) -> tuple[str, ...]:
+        paths = _read_private_object(
+            record.slot_root / "trusted" / "changed-paths.json",
+            description="staged changed paths",
+        ).get("changed_paths")
+        if not isinstance(paths, list):
+            raise ActivationError("staged changed paths are invalid")
+        selected: list[str] = []
+        for item in paths:
+            if (
+                not isinstance(item, dict)
+                or not isinstance(item.get("path"), str)
+                or not isinstance(item.get("status"), str)
+            ):
+                raise ActivationError("staged changed paths are invalid")
+            relative = _safe_relative(item["path"], description="staged test path")
+            if (
+                "D" not in item["status"]
+                and relative.parts[:1] == ("tests",)
+                and relative.suffix == ".py"
+            ):
+                selected.append(relative.as_posix())
+        return tuple(sorted(set(selected)))
+
+    def _run_preflight_check(
+        self,
+        *,
+        name: str,
+        argv: tuple[str, ...],
+        source_root: Path,
+        env: Mapping[str, str],
+        runner: ProcessRunner,
+    ) -> PreflightCheck:
+        command = ProcessCommand(
+            argv=argv,
+            cwd=source_root,
+            env=dict(env),
+            timeout_seconds=_PREFLIGHT_TIMEOUT_SECONDS,
+        )
+        started = time.monotonic()
+        result = runner.run(command)
+        duration_ms = min(int((time.monotonic() - started) * 1000), _PREFLIGHT_TIMEOUT_SECONDS * 1000)
+        output = _redact_preflight_text("\n".join(part for part in (result.stdout, result.stderr) if part))
+        return PreflightCheck(
+            name=name,
+            returncode=result.returncode,
+            duration_ms=duration_ms,
+            output=output,
+            timed_out=result.timed_out,
+        )
+
+    @staticmethod
+    def _check_succeeded(check: PreflightCheck) -> bool:
+        return not check.timed_out and check.returncode == 0
+
+    def _write_preflight_receipt(
+        self,
+        record: ActivationRecord,
+        *,
+        success: bool,
+        python_executable: Path,
+        checks: tuple[PreflightCheck, ...],
+        error: str,
+    ) -> PreflightReceipt:
+        safe_error = _redact_preflight_text(error).replace(str(self.home), "[private-home]")
+        path = self._preflight_path(record)
+        payload = {
+            "schema_version": _PREFLIGHT_SCHEMA_VERSION,
+            "activation_id": record.activation_id,
+            "success": success,
+            "candidate_digest": record.candidate_digest,
+            "slot_tree_digest": record.slot_tree_digest,
+            "python_executable": str(python_executable),
+            "source_root": str(record.slot_root / "source"),
+            "checks": [
+                {
+                    "name": check.name,
+                    "returncode": check.returncode,
+                    "duration_ms": check.duration_ms,
+                    "output": check.output,
+                    "timed_out": check.timed_out,
+                }
+                for check in checks
+            ],
+            "error": safe_error,
+            "finished_at": _utc_now(),
+        }
+        _write_private_json(path, payload)
+        return self._preflight_receipt_from_payload(payload, path, record)
+
+    def _preflight_receipt_from_payload(
+        self,
+        payload: Mapping[str, object],
+        path: Path,
+        record: ActivationRecord,
+    ) -> PreflightReceipt:
+        source_root = record.slot_root / "source"
+        python_root = record.slot_root / "preflight" / "venv"
+        raw_checks = payload.get("checks")
+        if (
+            payload.get("schema_version") != _PREFLIGHT_SCHEMA_VERSION
+            or payload.get("activation_id") != record.activation_id
+            or not isinstance(payload.get("success"), bool)
+            or payload.get("candidate_digest") != record.candidate_digest
+            or payload.get("slot_tree_digest") != record.slot_tree_digest
+            or payload.get("source_root") != str(source_root)
+            or not isinstance(payload.get("python_executable"), str)
+            or not isinstance(payload.get("error"), str)
+            or not isinstance(raw_checks, list)
+        ):
+            raise ActivationError("preflight receipt is invalid")
+        # venv commonly exposes ``bin/python`` as a symlink to the trusted
+        # base interpreter.  The executable *entry* must live in this slot;
+        # resolving that legitimate symlink would incorrectly point outside it.
+        python_executable = Path(str(payload["python_executable"])).absolute()
+        try:
+            python_executable.relative_to(python_root.absolute())
+        except ValueError as exc:
+            raise ActivationError("preflight interpreter escapes its trusted root") from exc
+        checks: list[PreflightCheck] = []
+        for item in raw_checks:
+            if not isinstance(item, dict):
+                raise ActivationError("preflight receipt is invalid")
+            name = item.get("name")
+            returncode = item.get("returncode")
+            duration_ms = item.get("duration_ms")
+            output = item.get("output")
+            timed_out = item.get("timed_out")
+            if (
+                not isinstance(name, str)
+                or not (isinstance(returncode, int) or returncode is None)
+                or not isinstance(duration_ms, int)
+                or duration_ms < 0 or duration_ms > _PREFLIGHT_TIMEOUT_SECONDS * 1000
+                or not isinstance(output, str) or len(output) > _PREFLIGHT_OUTPUT_LIMIT
+                or not isinstance(timed_out, bool)
+            ):
+                raise ActivationError("preflight receipt is invalid")
+            checks.append(PreflightCheck(name, returncode, duration_ms, output, timed_out))
+        return PreflightReceipt(
+            activation_id=record.activation_id,
+            success=bool(payload["success"]),
+            candidate_digest=record.candidate_digest,
+            slot_tree_digest=record.slot_tree_digest,
+            python_executable=python_executable,
+            source_root=source_root,
+            checks=tuple(checks),
+            error=str(payload["error"]),
+            record_path=path,
+        )
+
+    def _successful_preflight_unlocked(self, record: ActivationRecord) -> PreflightReceipt:
+        receipt = self._preflight_receipt_from_payload(
+            _read_private_object(self._preflight_path(record), description="preflight receipt"),
+            self._preflight_path(record),
+            record,
+        )
+        if not receipt.success:
+            raise ActivationConflict("preflight must succeed before confirmation")
+        return receipt
+
+    def preflight(
+        self, activation_id: str, runner: ProcessRunner | None = None
+    ) -> PreflightReceipt:
+        """Validate a complete candidate slot without accessing live user data.
+
+        This intentionally uses a restrictive fresh process environment.  It
+        never starts a gateway, contacts a provider, or copies data from the
+        active HoneyOS home; it only records whether this immutable slot can
+        pass bounded local checks.
+        """
+
+        process_runner: ProcessRunner = runner or _SubprocessRunner()
+        with self._locked():
+            _payload, record = self._load_record(activation_id)
+            if record.state != "staged":
+                raise ActivationConflict("only staged candidates can be preflighted")
+            source_root = record.slot_root / "source"
+            preflight_root = record.slot_root / "preflight"
+            if preflight_root.exists() or preflight_root.is_symlink():
+                info = os.lstat(preflight_root)
+                if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
+                    raise ActivationError("preflight workspace is unsafe")
+                shutil.rmtree(preflight_root)
+            _private_directory(preflight_root)
+            python_executable = self._slot_python(preflight_root)
+            checks: list[PreflightCheck] = []
+            try:
+                self._required_preflight_artifacts(source_root)
+                self._verify_staged_unlocked(activation_id)
+                env = self._preflight_environment(preflight_root)
+                source_archive = self._build_preflight_archive(source_root, preflight_root)
+                venv_check = self._run_preflight_check(
+                    name="create_virtualenv",
+                    argv=(
+                        os.fspath(Path(sys.executable).absolute()),
+                        "-m",
+                        "venv",
+                        os.fspath(preflight_root / "venv"),
+                    ),
+                    source_root=source_root,
+                    env=env,
+                    runner=process_runner,
+                )
+                checks.append(venv_check)
+                if not self._check_succeeded(venv_check) or not python_executable.is_file():
+                    raise ActivationError("isolated preflight interpreter is unavailable")
+                self._link_trusted_runtime_dependencies(preflight_root)
+                command_specs = [
+                    (
+                        "install_candidate",
+                        (
+                            os.fspath(python_executable), "-s", "-m", "pip", "install",
+                            "--no-index", "--no-deps", "--no-build-isolation", os.fspath(source_archive),
+                        ),
+                    ),
+                    ("syntax_compile", (os.fspath(python_executable), "-s", "-m", "compileall", "-q", "honeyos")),
+                    (
+                        "slot_origin",
+                        (
+                            os.fspath(python_executable), "-s", "-c",
+                            "import honeyos; import honeyos.runtime.main as main; print(honeyos.__file__); print(main.__file__)",
+                        ),
+                    ),
+                    ("test_runner_available", (os.fspath(python_executable), "-s", "-m", "pytest", "--version")),
+                    ("cli_help", (os.fspath(python_executable), "-s", "-m", "honeyos.runtime.main", "--help")),
+                    ("builder_boundary_tests", (os.fspath(python_executable), "-s", "-m", "pytest", "-q", "tests/honeyos/test_builder_workspace.py")),
+                ]
+                selected_tests = self._selected_candidate_tests(record)
+                if selected_tests:
+                    command_specs.append(("candidate_tests", (os.fspath(python_executable), "-s", "-m", "pytest", "-q", *selected_tests)))
+                for name, argv in command_specs:
+                    check = self._run_preflight_check(
+                        name=name,
+                        argv=argv,
+                        source_root=source_root,
+                        env=env,
+                        runner=process_runner,
+                    )
+                    checks.append(check)
+                    if not self._check_succeeded(check):
+                        raise ActivationError(f"preflight {name} failed")
+                    if name == "slot_origin":
+                        imported = tuple(Path(line).resolve() for line in check.output.splitlines() if line.strip())
+                        if len(imported) != 2 or any(
+                            not path.is_file() or not path.is_relative_to(source_root) for path in imported
+                        ):
+                            raise ActivationError("candidate imports did not resolve from the slot")
+                self._verify_staged_unlocked(activation_id)
+            except Exception as exc:
+                return self._write_preflight_receipt(
+                    record,
+                    success=False,
+                    python_executable=python_executable,
+                    checks=tuple(checks),
+                    error=str(exc),
+                )
+            return self._write_preflight_receipt(
+                record,
+                success=True,
+                python_executable=python_executable,
+                checks=tuple(checks),
+                error="",
+            )
+
     def transition(
         self, activation_id: str, expected: str, target: str, detail: str = ""
     ) -> ActivationRecord:
@@ -768,6 +1253,8 @@ class ActivationStore:
                 )
             if target in {"awaiting_confirmation", "switching"}:
                 self._verify_staged_unlocked(activation_id)
+            if target == "awaiting_confirmation":
+                self._successful_preflight_unlocked(record)
             payload["state"] = target
             payload["updated_at"] = _utc_now()
             payload["detail"] = detail

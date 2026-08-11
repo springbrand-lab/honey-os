@@ -216,11 +216,13 @@ def test_verify_rechecks_slot_tree_without_revisiting_disposable_builder_workspa
 
 def test_activation_transitions_are_compare_and_swap_and_private(tmp_path):
     store, staged, _prepared, _review = _staged_activation(tmp_path)
-    from honeyos.companion.builder_activation import ActivationConflict
+    from honeyos.companion.builder_activation import ActivationConflict, ActivationError
 
-    switched = store.transition(staged.activation_id, "staged", "awaiting_confirmation")
+    with pytest.raises(ActivationError, match="preflight receipt"):
+        store.transition(staged.activation_id, "staged", "awaiting_confirmation")
+    switched = store.transition(staged.activation_id, "staged", "invalidated")
 
-    assert switched.state == "awaiting_confirmation"
+    assert switched.state == "invalidated"
     with pytest.raises(ActivationConflict):
         store.transition(staged.activation_id, "staged", "switching")
     assert (store.activations / f"{staged.activation_id}.json").stat().st_mode & 0o777 == 0o600
