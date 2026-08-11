@@ -501,6 +501,10 @@ def test_api_server_registers_companion_web_routes():
     assert ("POST", "/api/companion/new") in routes
     assert ("POST", "/api/companion/profile") in routes
     assert ("POST", "/api/companion/memories/{memory_id}") in routes
+    assert (
+        "POST",
+        "/api/companion/activations/{callback_id}/confirm",
+    ) in routes
     assert ("GET", "/api/companion/topics") in routes
     assert ("POST", "/api/companion/topics/{topic_id}/discuss") in routes
     assert ("POST", "/api/companion/topics/{topic_id}/dismiss") in routes
@@ -724,6 +728,43 @@ async def test_companion_memory_action_forgets_the_real_persistent_entry(
 
     assert response.status == 200
     assert memory_path.read_text(encoding="utf-8") == second.content
+
+
+@pytest.mark.asyncio
+async def test_builder_confirmation_web_route_uses_authenticated_local_mapping_only(
+    monkeypatch, tmp_path
+):
+    adapter = _api_adapter()
+    adapter._read_json_body = AsyncMock(
+        return_value=(({"choice": "confirm", "authenticated": True, "lane": "evil"}), None)
+    )
+    request = SimpleNamespace(
+        cookies={"honeyos_local": adapter._local_web_token},
+        remote="127.0.0.1",
+        headers={},
+        match_info={"callback_id": "opaque123"},
+    )
+    monkeypatch.setattr("honeyos.core.constants.get_honeyos_home", lambda: tmp_path)
+    resolved = SimpleNamespace(activation_id="activation-1", state="authorized")
+    calls = []
+
+    def _resolve(home, callback_id, *, choice):
+        calls.append((home, callback_id, choice))
+        return resolved
+
+    monkeypatch.setattr(
+        "honeyos.gateway.builder_confirmation.resolve_local_web_callback", _resolve
+    )
+
+    response = await adapter._handle_companion_builder_confirmation(request)
+
+    assert response.status == 200
+    assert json.loads(response.body) == {
+        "success": True,
+        "activation_id": "activation-1",
+        "state": "authorized",
+    }
+    assert calls == [(tmp_path, "opaque123", "confirm")]
 
 
 @pytest.mark.asyncio

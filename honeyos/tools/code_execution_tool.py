@@ -1293,6 +1293,12 @@ def execute_code(
     if not code or not code.strip():
         return tool_error("No code provided.")
 
+    from honeyos.companion.builder_activation import model_control_plane_access_error
+
+    control_plane_error = model_control_plane_access_error(code)
+    if control_plane_error:
+        return tool_error(control_plane_error)
+
     # Dispatch: remote backends use file-based RPC, local uses UDS
     from honeyos.tools.terminal_tool import _get_env_config, _docker_has_host_access
     _env_config = _get_env_config()

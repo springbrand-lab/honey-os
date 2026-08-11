@@ -67,6 +67,9 @@ _STATIC_PREFLIGHT_CHECKS = (
 _CONFIRMATION_SCHEMA_VERSION = 1
 _CANONICAL_OWNER_LANE = "agent:main:companion:dm:owner"
 _CONFIRMATION_TTL = timedelta(minutes=10)
+# Intentionally not exported.  The gateway owns the sole capability instance;
+# model schemas never receive it and ActivationStore has no public resolver.
+_GATEWAY_RESOLVER_CAPABILITY = object()
 _TRANSITIONS = {
     "staged": {"awaiting_confirmation", "invalidated"},
     "awaiting_confirmation": {"authorized", "denied", "expired", "invalidated"},
@@ -75,6 +78,26 @@ _TRANSITIONS = {
     "switching": {"healthy", "rolling_back", "recovery_required"},
     "rolling_back": {"rolled_back", "recovery_required"},
 }
+
+_MODEL_CONTROL_PLANE_MARKERS = (
+    "builder_activation",
+    "builder_confirmation",
+    "builder_activation_worker",
+    "activation_callback_key",
+    "runtime/activations",
+    "runtime\\activations",
+    "runtime/confirmations",
+    "runtime\\confirmations",
+    ".activation.lock",
+    "issue_confirmation",
+    "resolve_gateway_confirmation",
+    "activationstore(",
+    "authorized",
+    "switching",
+    "rolling_back",
+    "rolled_back",
+    "rollback",
+)
 
 
 @dataclass(frozen=True)
@@ -129,17 +152,22 @@ class ActivationConfirmation:
     record_path: Path
 
 
-@dataclass(frozen=True)
-class ActivationInboundContext:
-    """Facts supplied by an authenticated gateway callback, never by the model."""
-
-    lane_key: str
-    channel: str
-    authenticated: bool
-
-
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def model_control_plane_access_error(value: str) -> str | None:
+    """Return a hard denial for model attempts to reach activation internals.
+
+    File mode is only accidental-write protection on a same-user machine.  The
+    model-facing terminal and code tools must separately refuse confirmation,
+    authorization, worker, switching, and rollback control-plane access.
+    """
+
+    lowered = str(value or "").lower().replace("-", "_")
+    if any(marker in lowered for marker in _MODEL_CONTROL_PLANE_MARKERS):
+        return "Blocked: Builder activation confirmation and switching are gateway-owned."
+    return None
 
 
 def _redact_preflight_text(value: str, *, limit: int = _PREFLIGHT_OUTPUT_LIMIT) -> str:
@@ -1220,11 +1248,38 @@ class ActivationStore:
             _write_private_json(record.record_path, payload)
             return self._confirmation_from_payload(confirmation_payload, path)
 
-    def resolve_confirmation(
+    def pending_confirmation_for_channel(
+        self, channel: str, *, now: datetime | None = None
+    ) -> ActivationConfirmation | None:
+        """Return the current opaque card handle for a trusted gateway channel."""
+
+        current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        with self._locked():
+            for path in sorted(self.confirmations.glob("*.json")):
+                payload = _read_private_object(path, description="activation confirmation")
+                confirmation = self._confirmation_from_payload(payload, path)
+                if (
+                    payload.get("status") != "pending"
+                    or confirmation.channel != channel
+                    or current >= self._confirmation_datetime(payload.get("expires_at"))
+                ):
+                    continue
+                activation_payload, activation = self._load_record(confirmation.activation_id)
+                if (
+                    activation.state == "awaiting_confirmation"
+                    and activation.candidate_digest == confirmation.candidate_digest
+                    and activation_payload.get("confirmation_callback_id") == confirmation.callback_id
+                ):
+                    return confirmation
+        return None
+
+    def _resolve_gateway_confirmation(
         self,
         callback_id: str,
-        context: ActivationInboundContext,
         *,
+        capability: object,
+        owner_lane: str,
+        channel: str,
         choice: str = "confirm",
         now: datetime | None = None,
     ) -> ActivationRecord:
@@ -1241,6 +1296,8 @@ class ActivationStore:
         if normalized not in {"confirm", "deny"}:
             raise ActivationConflict("unsupported activation confirmation choice")
         current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        if capability is not _GATEWAY_RESOLVER_CAPABILITY:
+            raise ActivationConflict("activation confirmation is gateway-owned")
         with self._locked():
             path = self._confirmation_path(callback_id)
             confirmation_payload = _read_private_object(
@@ -1248,9 +1305,8 @@ class ActivationStore:
             )
             confirmation = self._confirmation_from_payload(confirmation_payload, path)
             if (
-                not context.authenticated
-                or context.lane_key != _CANONICAL_OWNER_LANE
-                or context.channel != confirmation.channel
+                owner_lane != _CANONICAL_OWNER_LANE
+                or channel != confirmation.channel
             ):
                 raise ActivationConflict("activation confirmation requires an authenticated owner callback")
             expected_hash = hashlib.sha256(

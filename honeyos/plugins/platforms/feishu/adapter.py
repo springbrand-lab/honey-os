@@ -2219,6 +2219,62 @@ class FeishuAdapter(BasePlatformAdapter):
             return SendResult(success=False, error=str(exc))
 
     @staticmethod
+    def _build_builder_activation_card(*, callback_id: str) -> Dict[str, Any]:
+        """Build a one-time Builder card containing only an opaque callback id."""
+
+        def _button(label: str, choice: str, button_type: str) -> Dict[str, Any]:
+            return {
+                "tag": "button",
+                "text": {"tag": "plain_text", "content": label},
+                "type": button_type,
+                "value": {
+                    "honeyos_builder_callback_id": callback_id,
+                    "honeyos_builder_choice": choice,
+                },
+            }
+
+        return {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "title": {"content": "准备启用这次改动", "tag": "plain_text"},
+                "template": "orange",
+            },
+            "elements": [
+                {
+                    "tag": "markdown",
+                    "content": "我已经把这次改动准备好了。确认后才会进入下一步检查。",
+                },
+                {
+                    "tag": "action",
+                    "actions": [
+                        _button("现在启用", "confirm", "primary"),
+                        _button("这次先不启用", "deny", "danger"),
+                    ],
+                },
+            ],
+        }
+
+    async def send_builder_activation_confirmation(
+        self, chat_id: str, callback_id: str, metadata: Optional[Dict[str, Any]] = None
+    ) -> SendResult:
+        """Render an opaque Builder confirmation card for a Feishu owner DM."""
+
+        if not self._client:
+            return SendResult(success=False, error="Not connected")
+        payload = json.dumps(
+            self._build_builder_activation_card(callback_id=callback_id),
+            ensure_ascii=False,
+        )
+        response = await self._feishu_send_with_retry(
+            chat_id=chat_id,
+            msg_type="interactive",
+            payload=payload,
+            reply_to=None,
+            metadata=metadata,
+        )
+        return self._finalize_send_result(response, "send_builder_activation_confirmation failed")
+
+    @staticmethod
     def _build_resolved_approval_card(*, choice: str, user_name: str) -> Dict[str, Any]:
         """Build raw card JSON for a resolved approval action."""
         accepted = choice != "deny"
@@ -2757,6 +2813,10 @@ class FeishuAdapter(BasePlatformAdapter):
             action_value.get("honeyos_update_prompt_action")
             if isinstance(action_value, dict) else None
         )
+        builder_callback_id = (
+            action_value.get("honeyos_builder_callback_id")
+            if isinstance(action_value, dict) else None
+        )
 
         if honeyos_action:
             return self._handle_approval_card_action(event=event, action_value=action_value, loop=loop)
@@ -2765,6 +2825,10 @@ class FeishuAdapter(BasePlatformAdapter):
                 event=event,
                 action_value=action_value,
                 loop=loop,
+            )
+        if builder_callback_id:
+            return self._handle_builder_activation_card_action(
+                event=event, action_value=action_value, loop=loop
             )
 
         self._submit_on_loop(loop, self._handle_card_action_event(data))
@@ -2855,6 +2919,85 @@ class FeishuAdapter(BasePlatformAdapter):
             card.data = self._build_resolved_approval_card(choice=choice, user_name=user_name)
             response.card = card
         return response
+
+    def _handle_builder_activation_card_action(
+        self, *, event: Any, action_value: Dict[str, Any], loop: Any
+    ) -> Any:
+        """Resolve Builder cards only after the Feishu SDK authenticated the click."""
+
+        callback_id = str(action_value.get("honeyos_builder_callback_id") or "")
+        choice = str(action_value.get("honeyos_builder_choice") or "").lower()
+        operator = getattr(event, "operator", None)
+        open_id = str(getattr(operator, "open_id", "") or "")
+        chat_context = getattr(event, "context", None)
+        chat_id = str(getattr(chat_context, "open_chat_id", "") or "")
+        if (
+            not callback_id
+            or choice not in {"confirm", "deny", "always"}
+            or not chat_id
+            or not self._is_interactive_operator_authorized(open_id)
+        ):
+            return P2CardActionTriggerResponse() if P2CardActionTriggerResponse else None
+        self._submit_on_loop(
+            loop,
+            self._resolve_builder_activation_card(
+                callback_id=callback_id,
+                choice=choice,
+                chat_id=chat_id,
+                open_id=open_id,
+            ),
+        )
+        if P2CardActionTriggerResponse is None:
+            return None
+        response = P2CardActionTriggerResponse()
+        if CallBackCard is not None:
+            card = CallBackCard()
+            card.type = "raw"
+            card.data = self._build_resolved_approval_card(
+                choice="once" if choice in {"confirm", "always"} else "deny",
+                user_name=self._get_cached_sender_name(open_id) or open_id,
+            )
+            response.card = card
+        return response
+
+    async def _resolve_builder_activation_card(
+        self, *, callback_id: str, choice: str, chat_id: str, open_id: str
+    ) -> None:
+        """Create a verified DM MessageEvent before calling the gateway resolver."""
+
+        try:
+            sender = SimpleNamespace(open_id=open_id, user_id=None, union_id=None)
+            profile = await self._resolve_sender_profile(sender)
+            chat_info = await self.get_chat_info(chat_id)
+            source = self.build_source(
+                chat_id=chat_id,
+                chat_name=chat_info.get("name") or chat_id,
+                chat_type=self._resolve_source_chat_type(
+                    chat_info=chat_info, event_chat_type="p2p"
+                ),
+                user_id=profile["user_id"],
+                user_name=profile["user_name"],
+                thread_id=None,
+                user_id_alt=profile["user_id_alt"],
+            )
+            callback_event = MessageEvent(
+                text="",
+                message_type=MessageType.COMMAND,
+                source=source,
+                internal=True,
+            )
+            from honeyos.gateway.builder_confirmation import resolve_feishu_callback
+
+            await self._run_blocking(
+                lambda: resolve_feishu_callback(
+                    get_honeyos_home(),
+                    callback_id,
+                    choice=choice,
+                    event=callback_event,
+                )
+            )
+        except Exception:
+            logger.warning("[Feishu] Builder activation callback was rejected", exc_info=True)
 
     def _handle_update_prompt_card_action(self, *, event: Any, action_value: Dict[str, Any], loop: Any) -> Any:
         """Schedule update prompt resolution and build the synchronous callback response."""

@@ -47,70 +47,106 @@ def _ready_confirmation(tmp_path: Path, *, channel: str = "feishu"):
     return store, staged, store.issue_confirmation(staged.activation_id, OWNER, channel), prepared
 
 
-def _owner_context(channel: str = "feishu"):
-    from honeyos.companion.builder_activation import ActivationInboundContext
-
-    return ActivationInboundContext(lane_key=OWNER, channel=channel, authenticated=True)
-
-
-def test_confirmation_requires_authenticated_canonical_owner_and_exact_channel(tmp_path):
+def test_confirmation_has_no_public_context_resolver_or_forgeable_capability(tmp_path):
     store, _staged, confirmation, _prepared = _ready_confirmation(tmp_path)
-    from honeyos.companion.builder_activation import ActivationConflict, ActivationInboundContext
-
-    with pytest.raises(ActivationConflict, match="authenticated owner"):
-        store.resolve_confirmation(
-            confirmation.callback_id,
-            ActivationInboundContext(lane_key=OWNER, channel="feishu", authenticated=False),
-        )
-    with pytest.raises(ActivationConflict, match="authenticated owner"):
-        store.resolve_confirmation(
-            confirmation.callback_id,
-            ActivationInboundContext(lane_key="agent:main:companion:dm:other", channel="feishu", authenticated=True),
-        )
-    with pytest.raises(ActivationConflict, match="authenticated owner"):
-        store.resolve_confirmation(confirmation.callback_id, _owner_context("weixin"))
-
-
-def test_confirmation_is_single_use_and_always_is_still_one_time(tmp_path):
-    store, staged, confirmation, _prepared = _ready_confirmation(tmp_path)
     from honeyos.companion.builder_activation import ActivationConflict
 
-    result = store.resolve_confirmation(confirmation.callback_id, _owner_context(), choice="always")
+    assert not hasattr(store, "resolve_confirmation")
+    with pytest.raises(ActivationConflict, match="gateway-owned"):
+        store._resolve_gateway_confirmation(
+            confirmation.callback_id,
+            capability=object(),
+            owner_lane=OWNER,
+            channel="feishu",
+        )
+
+
+def test_confirmation_is_single_use_and_always_is_still_one_time(tmp_path, monkeypatch):
+    monkeypatch.setenv("HONEYOS_RUNTIME_ID", "honeyos-companion-test")
+    store, staged, confirmation, _prepared = _ready_confirmation(tmp_path, channel="api_server")
+    from honeyos.companion.builder_activation import ActivationConflict
+    from honeyos.gateway.builder_confirmation import resolve_local_web_callback
+
+    result = resolve_local_web_callback(store.home, confirmation.callback_id, choice="always")
 
     assert result.state == "authorized"
     assert result.activation_id == staged.activation_id
     with pytest.raises(ActivationConflict, match="already resolved"):
-        store.resolve_confirmation(confirmation.callback_id, _owner_context())
+        resolve_local_web_callback(store.home, confirmation.callback_id, choice="confirm")
     with pytest.raises(ActivationConflict, match="owner confirmation"):
         store.transition(staged.activation_id, "authorized", "switching")
 
 
-def test_confirmation_persists_across_restart_and_never_exposes_secret(tmp_path):
-    store, staged, confirmation, _prepared = _ready_confirmation(tmp_path)
+def test_confirmation_persists_across_restart_and_never_exposes_secret(tmp_path, monkeypatch):
+    monkeypatch.setenv("HONEYOS_RUNTIME_ID", "honeyos-companion-test")
+    store, staged, confirmation, _prepared = _ready_confirmation(tmp_path, channel="api_server")
     from honeyos.companion.builder_activation import ActivationStore
+    from honeyos.gateway.builder_confirmation import resolve_local_web_callback
 
     payload = json.loads(confirmation.record_path.read_text(encoding="utf-8"))
     assert "secret" not in json.dumps({key: value for key, value in payload.items() if key != "secret_hash"})
     restarted = ActivationStore(store.home, store.bundled_root)
 
-    assert restarted.resolve_confirmation(confirmation.callback_id, _owner_context()).state == "authorized"
+    assert resolve_local_web_callback(restarted.home, confirmation.callback_id, choice="confirm").state == "authorized"
     assert restarted.verify_staged(staged.activation_id).state == "authorized"
 
 
-def test_confirmation_expiry_and_candidate_digest_tamper_fail_closed(tmp_path):
-    store, staged, confirmation, _prepared = _ready_confirmation(tmp_path)
+def test_feishu_gateway_callback_requires_verified_owner_dm_event(tmp_path, monkeypatch):
+    monkeypatch.setenv("HONEYOS_RUNTIME_ID", "honeyos-companion-test")
+    store, _staged, confirmation, _prepared = _ready_confirmation(tmp_path, channel="feishu")
+    from honeyos.companion.builder_activation import ActivationConflict
+    from honeyos.gateway.builder_confirmation import resolve_feishu_callback
+    from honeyos.gateway.config import Platform
+    from honeyos.gateway.platforms.base import MessageEvent
+    from honeyos.gateway.session import SessionSource
+
+    owner_event = MessageEvent(
+        text="",
+        source=SessionSource(
+            platform=Platform.FEISHU,
+            chat_id="owner-chat",
+            chat_type="dm",
+            user_id="owner",
+        ),
+    )
+    assert resolve_feishu_callback(
+        store.home, confirmation.callback_id, choice="confirm", event=owner_event
+    ).state == "authorized"
+
+    store2, _staged2, confirmation2, _prepared2 = _ready_confirmation(tmp_path / "group", channel="feishu")
+    group_event = MessageEvent(
+        text="",
+        source=SessionSource(
+            platform=Platform.FEISHU,
+            chat_id="group-chat",
+            chat_type="group",
+            user_id="owner",
+        ),
+    )
+    with pytest.raises(ActivationConflict, match="authenticated owner"):
+        resolve_feishu_callback(
+            store2.home, confirmation2.callback_id, choice="confirm", event=group_event
+        )
+
+
+def test_confirmation_expiry_and_candidate_digest_tamper_fail_closed(tmp_path, monkeypatch):
+    monkeypatch.setenv("HONEYOS_RUNTIME_ID", "honeyos-companion-test")
+    store, staged, confirmation, _prepared = _ready_confirmation(tmp_path, channel="api_server")
     from honeyos.companion.builder_activation import ActivationConflict, ActivationError
+    from honeyos.gateway.builder_confirmation import resolve_local_web_callback
 
     expired = datetime.fromisoformat(confirmation.expires_at) + timedelta(seconds=1)
     with pytest.raises(ActivationConflict, match="expired"):
-        store.resolve_confirmation(confirmation.callback_id, _owner_context(), now=expired)
+        resolve_local_web_callback(
+            store.home, confirmation.callback_id, choice="confirm", now=expired
+        )
 
-    store2, staged2, confirmation2, _prepared2 = _ready_confirmation(tmp_path / "tamper")
+    store2, staged2, confirmation2, _prepared2 = _ready_confirmation(tmp_path / "tamper", channel="api_server")
     candidate = staged2.slot_root / "source" / "honeyos" / "companion" / "persistent_memory.py"
     candidate.chmod(0o600)
     candidate.write_text("VALUE = 'tampered'\n")
     with pytest.raises(ActivationError, match="slot tree digest"):
-        store2.resolve_confirmation(confirmation2.callback_id, _owner_context())
+        resolve_local_web_callback(store2.home, confirmation2.callback_id, choice="confirm")
 
 
 def test_model_tool_stages_and_requests_but_never_returns_callback_or_authorizes(tmp_path, monkeypatch):
@@ -136,3 +172,32 @@ def test_model_tool_stages_and_requests_but_never_returns_callback_or_authorizes
     assert asked["state"] == "awaiting_owner_confirmation"
     assert "callback" not in asked
     assert "secret" not in asked
+
+
+@pytest.mark.parametrize(
+    ("command", "code"),
+    [
+        (
+            "python -c 'from honeyos.companion.builder_activation import ActivationStore'",
+            "from honeyos.companion.builder_activation import ActivationStore",
+        ),
+        (
+            "cat ~/.honeyos/runtime/confirmations/opaque.json",
+            "open('/tmp/runtime/activations/a.json').read()",
+        ),
+        (
+            "honeyos builder authorized activation-id",
+            "state = 'switching'; print(state)",
+        ),
+    ],
+)
+def test_model_terminal_and_code_paths_cannot_access_builder_control_plane(command, code):
+    from honeyos.tools.code_execution_tool import execute_code
+    from honeyos.tools.terminal_tool import terminal_tool
+
+    terminal = json.loads(terminal_tool(command))
+    code = json.loads(execute_code(code))
+
+    assert terminal["status"] == "blocked"
+    assert "gateway-owned" in terminal["error"]
+    assert "gateway-owned" in code["error"]
