@@ -34,8 +34,8 @@ def _source_repo(tmp_path: Path) -> Path:
     (source / "honeyos" / "__init__.py").write_text("\n", encoding="utf-8")
     (source / "honeyos" / "runtime" / "__init__.py").write_text("\n", encoding="utf-8")
     (source / "honeyos" / "runtime" / "main.py").write_text("VALUE = 'base'\n", encoding="utf-8")
-    (source / "honeyos" / "companion" / "persistent_memory.py").write_text(
-        "MEMORY = 'base'\n", encoding="utf-8"
+    (source / "honeyos" / "companion" / "activity.py").write_text(
+        "ACTIVITY = 'base'\n", encoding="utf-8"
     )
     (source / "pyproject.toml").write_text(
         "[project]\nname = 'honeyos-preflight-test'\nversion = '0.0.1'\n",
@@ -50,7 +50,7 @@ def _source_repo(tmp_path: Path) -> Path:
     return source
 
 
-def _staged_activation(tmp_path: Path, *, candidate: str = "MEMORY = 'candidate'\n"):
+def _staged_activation(tmp_path: Path, *, candidate: str = "ACTIVITY = 'candidate'\n"):
     from honeyos.companion.builder_activation import ActivationStore
     from honeyos.companion.builder_workspace import (
         inspect_builder_change,
@@ -65,7 +65,7 @@ def _staged_activation(tmp_path: Path, *, candidate: str = "MEMORY = 'candidate'
         builder_root=tmp_path / "HoneyOS Builder",
         change_id="candidate-preflight-001",
     )
-    candidate_path = prepared.workspace / "honeyos" / "companion" / "persistent_memory.py"
+    candidate_path = prepared.workspace / "honeyos" / "companion" / "activity.py"
     candidate_path.write_text(candidate, encoding="utf-8")
     assert inspect_builder_change(prepared.change_root).status == "review_ready"
     store = ActivationStore(tmp_path / "home", bundled_root=source)
@@ -130,7 +130,7 @@ def test_transition_recomputes_static_checks_and_rejects_forged_receipt(tmp_path
 def test_slot_source_mutation_invalidates_static_receipt_and_confirmation(tmp_path):
     store, staged, _source = _staged_activation(tmp_path)
     assert store.preflight(staged.activation_id).success is True
-    changed = staged.slot_root / "source" / "honeyos" / "companion" / "persistent_memory.py"
+    changed = staged.slot_root / "source" / "honeyos" / "companion" / "activity.py"
     changed.chmod(changed.stat().st_mode | stat.S_IWUSR)
     changed.write_text("MEMORY = 'tampered'\n", encoding="utf-8")
 

@@ -894,55 +894,9 @@ async function bootstrap() {
   for (const message of data.messages || []) {
     addMessage(message.role, message.content);
   }
-  renderBuilderConfirmation(data.activation_confirmation);
   void refreshTopicCount();
   startProactivePolling();
   scrollToLatest(true);
-}
-
-function renderBuilderConfirmation(card) {
-  if (!card || !card.callback_id) return;
-  const section = document.createElement("section");
-  section.className = "permission-card builder-activation-card";
-  const title = document.createElement("strong");
-  title.textContent = "我把这次改动准备好了";
-  const copy = document.createElement("p");
-  copy.textContent = "要不要现在启用？确认后我才会继续下一步检查。";
-  const actions = document.createElement("div");
-  actions.className = "permission-actions";
-  const addButton = (label, choice, kind) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = kind;
-    button.textContent = label;
-    button.addEventListener("click", async () => {
-      actions.querySelectorAll("button").forEach((item) => { item.disabled = true; });
-      try {
-        const response = await fetch(
-          "/api/companion/activations/" + encodeURIComponent(card.callback_id) + "/confirm",
-          {
-            method: "POST",
-            credentials: "same-origin",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ choice }),
-          },
-        );
-        if (!response.ok) throw new Error("builder_confirmation_unavailable");
-        section.replaceChildren();
-        const done = document.createElement("p");
-        done.textContent = choice === "deny" ? "好，这次先不启用。" : "好，我已经收到你的确认。";
-        section.append(done);
-      } catch {
-        actions.querySelectorAll("button").forEach((item) => { item.disabled = false; });
-        showToast("这次确认没有成功，请重新试一下。");
-      }
-    });
-    actions.append(button);
-  };
-  addButton("现在启用", "confirm", "is-primary");
-  addButton("这次先不启用", "deny", "is-secondary");
-  section.append(title, copy, actions);
-  elements.messages.append(section);
 }
 
 async function sendMessage(text, options = {}) {

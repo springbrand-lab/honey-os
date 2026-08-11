@@ -1,28 +1,27 @@
 """Trusted, non-live staging for reviewed HoneyOS Builder candidates.
 
-This module deliberately has no gateway/service lifecycle code.  It turns an
-already reviewed candidate into a complete immutable source slot, and records
-only the state needed by later trusted confirmation and switching code.
+It turns an already reviewed candidate into a complete immutable source slot.
+After ordinary user confirmation, it atomically selects the slot, restarts the
+trusted local service, and restores the prior slot if health does not return.
 """
 
 from __future__ import annotations
 
 import ast
 import contextlib
-import hmac
 import hashlib
 import json
 import os
-import secrets
 import shutil
 import stat
 import subprocess
 import tarfile
 import tempfile
+import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 from honeyos.companion.builder_workspace import (
@@ -31,7 +30,7 @@ from honeyos.companion.builder_workspace import (
     DEFAULT_PROTECTED_PATHS,
     TRUSTED_POLICY_SCHEMA_VERSION,
     _ChangedPath,
-    _changed_paths,
+    _partial_workspace_changed_paths,
     _git,
     _is_static_activatable,
     _load_json_object,
@@ -64,40 +63,12 @@ _STATIC_PREFLIGHT_CHECKS = (
     "source_tree",
     "candidate_python_syntax",
 )
-_CONFIRMATION_SCHEMA_VERSION = 1
-_CANONICAL_OWNER_LANE = "agent:main:companion:dm:owner"
-_CONFIRMATION_TTL = timedelta(minutes=10)
-# Intentionally not exported.  The gateway owns the sole capability instance;
-# model schemas never receive it and ActivationStore has no public resolver.
-_GATEWAY_RESOLVER_CAPABILITY = object()
 _TRANSITIONS = {
     "staged": {"awaiting_confirmation", "invalidated"},
-    "awaiting_confirmation": {"authorized", "denied", "expired", "invalidated"},
-    # Only the trusted post-confirmation worker may claim this transition.
-    "authorized": {"switching", "invalidated"},
+    "awaiting_confirmation": {"switching", "denied", "expired", "invalidated"},
     "switching": {"healthy", "rolling_back", "recovery_required"},
     "rolling_back": {"rolled_back", "recovery_required"},
 }
-
-_MODEL_CONTROL_PLANE_MARKERS = (
-    "builder_activation",
-    "builder_confirmation",
-    "builder_activation_worker",
-    "activation_callback_key",
-    "runtime/activations",
-    "runtime\\activations",
-    "runtime/confirmations",
-    "runtime\\confirmations",
-    ".activation.lock",
-    "issue_confirmation",
-    "resolve_gateway_confirmation",
-    "activationstore(",
-    "authorized",
-    "switching",
-    "rolling_back",
-    "rolled_back",
-    "rollback",
-)
 
 
 @dataclass(frozen=True)
@@ -140,34 +111,8 @@ class PreflightReceipt:
     record_path: Path
 
 
-@dataclass(frozen=True)
-class ActivationConfirmation:
-    """Opaque, gateway-facing handle for one exact staged activation."""
-
-    callback_id: str
-    activation_id: str
-    candidate_digest: str
-    channel: str
-    expires_at: str
-    record_path: Path
-
-
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def model_control_plane_access_error(value: str) -> str | None:
-    """Return a hard denial for model attempts to reach activation internals.
-
-    File mode is only accidental-write protection on a same-user machine.  The
-    model-facing terminal and code tools must separately refuse confirmation,
-    authorization, worker, switching, and rollback control-plane access.
-    """
-
-    lowered = str(value or "").lower().replace("-", "_")
-    if any(marker in lowered for marker in _MODEL_CONTROL_PLANE_MARKERS):
-        return "Blocked: Builder activation confirmation and switching are gateway-owned."
-    return None
 
 
 def _redact_preflight_text(value: str, *, limit: int = _PREFLIGHT_OUTPUT_LIMIT) -> str:
@@ -481,15 +426,8 @@ class ActivationStore:
         self.runtime_root = self.home / "runtime"
         self.slots = self.runtime_root / "slots"
         self.activations = self.runtime_root / "activations"
-        self.confirmations = self.runtime_root / "confirmations"
         self.journals = self.runtime_root / "journals"
-        for directory in (
-            self.runtime_root,
-            self.slots,
-            self.activations,
-            self.confirmations,
-            self.journals,
-        ):
+        for directory in (self.runtime_root, self.slots, self.activations, self.journals):
             _private_directory(directory)
         self._lock_path = self.runtime_root / ".activation.lock"
         self._lock_path.touch(mode=0o600, exist_ok=True)
@@ -497,6 +435,14 @@ class ActivationStore:
         self._crash_hook = crash_hook
         with self._locked():
             self._reconcile_unlocked()
+
+    @property
+    def _current_pointer_path(self) -> Path:
+        return self.runtime_root / "current-slot.json"
+
+    @property
+    def _previous_pointer_path(self) -> Path:
+        return self.runtime_root / "previous-slot.json"
 
     @contextmanager
     def _locked(self) -> Iterator[None]:
@@ -591,8 +537,6 @@ class ActivationStore:
         try:
             if _git(source_repo, "rev-parse", "HEAD") != source_commit:
                 raise ActivationError("source revision changed after candidate preparation")
-            if _git(workspace, "rev-parse", "HEAD") != source_commit:
-                raise ActivationError("candidate workspace revision changed")
         except subprocess.CalledProcessError as exc:
             raise ActivationError("source repository is unavailable") from exc
         if (
@@ -622,7 +566,12 @@ class ActivationStore:
             raise ActivationError("candidate review is invalid") from exc
         if len(saved_paths) != len(saved_paths_raw) or not saved_paths:
             raise ActivationError("candidate review is invalid")
-        actual_paths = _changed_paths(workspace)
+        try:
+            actual_paths = _partial_workspace_changed_paths(
+                workspace, source_repo, source_commit, allowed_patterns
+            )
+        except ValueError as exc:
+            raise ActivationError("candidate changed after review") from exc
         if actual_paths != saved_paths:
             raise ActivationError("candidate changed after review")
         for changed in actual_paths:
@@ -661,55 +610,6 @@ class ActivationStore:
         if not activation_id or any(part in ("", ".", "..") for part in Path(activation_id).parts):
             raise ActivationError("unsafe activation identifier")
         return self.activations / f"{activation_id}.json"
-
-    def _confirmation_path(self, callback_id: str) -> Path:
-        if not callback_id or not callback_id.isascii() or not callback_id.isalnum():
-            raise ActivationError("unsafe activation confirmation identifier")
-        return self.confirmations / f"{callback_id}.json"
-
-    def _callback_key_path(self) -> Path:
-        return self.runtime_root / ".activation-callback-key"
-
-    def _callback_key_unlocked(self) -> bytes:
-        """Return the server-only callback derivation key.
-
-        Individual confirmation records retain only a hash of their derived
-        secret.  The opaque callback id can therefore survive a gateway restart
-        without becoming a bearer credential in a chat card or model context.
-        """
-
-        path = self._callback_key_path()
-        if not path.exists():
-            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            try:
-                with os.fdopen(descriptor, "wb") as handle:
-                    handle.write(secrets.token_bytes(32))
-                    handle.flush()
-                    os.fsync(handle.fileno())
-            except Exception:
-                with contextlib.suppress(FileNotFoundError):
-                    path.unlink()
-                raise
-            _fsync_directory(path.parent)
-        try:
-            info = os.lstat(path)
-            if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode):
-                raise ActivationError("activation callback key is unsafe")
-            if stat.S_IMODE(info.st_mode) & 0o077:
-                raise ActivationError("activation callback key is not private")
-            value = path.read_bytes()
-        except OSError as exc:
-            raise ActivationError("activation callback key is unavailable") from exc
-        if len(value) != 32:
-            raise ActivationError("activation callback key is invalid")
-        return value
-
-    def _confirmation_secret_unlocked(self, callback_id: str) -> bytes:
-        return hmac.new(
-            self._callback_key_unlocked(),
-            f"honeyos-builder-confirmation:{callback_id}".encode("ascii"),
-            hashlib.sha256,
-        ).digest()
 
     def _record_from_payload(self, payload: Mapping[str, object], path: Path) -> ActivationRecord:
         required = (
@@ -1106,252 +1006,144 @@ class ActivationStore:
                 error="" if failed is None else f"{failed.name} failed",
             )
 
-    def _transition_unlocked(
-        self,
-        payload: dict[str, object],
-        record: ActivationRecord,
-        *,
-        expected: str,
-        target: str,
-        detail: str = "",
-    ) -> ActivationRecord:
-        """Apply a CAS transition while the control-plane lock is held."""
-
-        if target not in _TRANSITIONS.get(expected, set()):
-            raise ActivationConflict(
-                f"invalid activation transition: {expected} -> {target}"
-            )
-        if record.state != expected:
-            raise ActivationConflict(
-                f"activation state is {record.state}, not expected {expected}"
-            )
-        if target == "awaiting_confirmation":
-            self._verify_staged_unlocked(record.activation_id)
-            self._successful_preflight_unlocked(record)
-        payload["state"] = target
-        payload["updated_at"] = _utc_now()
-        payload["detail"] = detail
-        _write_private_json(record.record_path, payload)
-        return self._record_from_payload(payload, record.record_path)
-
     def transition(
         self, activation_id: str, expected: str, target: str, detail: str = ""
     ) -> ActivationRecord:
-        """Apply a non-authorizing durable compare-and-swap transition.
+        """Apply one durable compare-and-swap state transition."""
 
-        This deliberately cannot grant authorization or begin a switch.  Model
-        tooling uses this public control-plane surface, whereas an authenticated
-        callback is the only path to ``authorized`` and Task 5 owns the later
-        ``authorized -> switching`` handoff.
-        """
-
-        if target in {"authorized", "switching"}:
-            raise ActivationConflict("owner confirmation is required for activation")
+        if target not in _TRANSITIONS.get(expected, set()):
+            raise ActivationConflict(f"invalid activation transition: {expected} -> {target}")
         with self._locked():
             payload, record = self._load_record(activation_id)
-            return self._transition_unlocked(
-                payload, record, expected=expected, target=target, detail=detail
-            )
+            if record.state != expected:
+                raise ActivationConflict(
+                    f"activation state is {record.state}, not expected {expected}"
+                )
+            if target in {"awaiting_confirmation", "switching"}:
+                self._verify_staged_unlocked(activation_id)
+            if target == "awaiting_confirmation":
+                self._successful_preflight_unlocked(record)
+            payload["state"] = target
+            payload["updated_at"] = _utc_now()
+            payload["detail"] = detail
+            _write_private_json(record.record_path, payload)
+            return self._record_from_payload(payload, record.record_path)
 
-    @staticmethod
-    def _confirmation_datetime(value: object) -> datetime:
-        if not isinstance(value, str):
-            raise ActivationError("activation confirmation is invalid")
-        try:
-            parsed = datetime.fromisoformat(value)
-        except ValueError as exc:
-            raise ActivationError("activation confirmation is invalid") from exc
-        if parsed.tzinfo is None:
-            raise ActivationError("activation confirmation is invalid")
-        return parsed.astimezone(timezone.utc)
+    def _read_slot_pointer_unlocked(self, path: Path) -> dict[str, object] | None:
+        if not path.exists():
+            return None
+        payload = _read_private_object(path, description="active slot pointer")
+        activation_id = payload.get("activation_id")
+        source_root = payload.get("source_root")
+        if not isinstance(activation_id, str) or not isinstance(source_root, str):
+            raise ActivationError("active slot pointer is invalid")
+        expected = self._slot_root(activation_id) / "source"
+        if Path(source_root).expanduser().resolve() != expected.resolve():
+            raise ActivationError("active slot pointer is invalid")
+        return payload
 
-    def _confirmation_from_payload(
-        self, payload: Mapping[str, object], path: Path
-    ) -> ActivationConfirmation:
-        callback_id = payload.get("callback_id")
-        if (
-            payload.get("schema_version") != _CONFIRMATION_SCHEMA_VERSION
-            or not isinstance(callback_id, str)
-            or not callback_id.isascii()
-            or not callback_id.isalnum()
-            or not isinstance(payload.get("activation_id"), str)
-            or not isinstance(payload.get("candidate_digest"), str)
-            or payload.get("owner_lane") != _CANONICAL_OWNER_LANE
-            or not isinstance(payload.get("channel"), str)
-            or not payload["channel"]
-            or not isinstance(payload.get("secret_hash"), str)
-            or len(payload["secret_hash"]) != 64
-            or payload.get("status") not in {"pending", "consumed", "denied", "expired", "superseded"}
-        ):
-            raise ActivationError("activation confirmation is invalid")
-        expires_at = self._confirmation_datetime(payload.get("expires_at"))
-        self._confirmation_datetime(payload.get("issued_at"))
-        return ActivationConfirmation(
-            callback_id=callback_id,
-            activation_id=str(payload["activation_id"]),
-            candidate_digest=str(payload["candidate_digest"]),
-            channel=str(payload["channel"]),
-            expires_at=expires_at.isoformat(),
-            record_path=path,
+    def _write_current_pointer_unlocked(self, record: ActivationRecord) -> None:
+        _write_private_json(
+            self._current_pointer_path,
+            {
+                "activation_id": record.activation_id,
+                "source_root": str(record.slot_root / "source"),
+                "candidate_digest": record.candidate_digest,
+                "slot_tree_digest": record.slot_tree_digest,
+                "updated_at": _utc_now(),
+            },
         )
 
-    def issue_confirmation(
+    def current_source(self) -> Path | None:
+        """Return the active complete slot source, never a user-data path."""
+
+        with self._locked():
+            pointer = self._read_slot_pointer_unlocked(self._current_pointer_path)
+            return Path(str(pointer["source_root"])) if pointer is not None else None
+
+    def _default_restart(self) -> bool:
+        from honeyos.cli.service import ServiceIdentity, restart_service
+
+        return restart_service(ServiceIdentity.default(self.home)) == 0
+
+    def _default_health_check(self, _record: ActivationRecord) -> bool:
+        from honeyos.cli.service import ServiceIdentity, service_status
+
+        return service_status(ServiceIdentity.default(self.home)) == 0
+
+    def activate_confirmed(
         self,
         activation_id: str,
-        lane_key: str,
-        channel: str,
         *,
-        now: datetime | None = None,
-    ) -> ActivationConfirmation:
-        """Create one opaque owner-only callback for an exact static receipt."""
+        restart: Callable[[], bool] | None = None,
+        health_check: Callable[[ActivationRecord], bool] | None = None,
+        health_timeout_seconds: float = 30.0,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> ActivationRecord:
+        """Switch an already-confirmed complete slot, then restore it on failure.
 
-        if lane_key != _CANONICAL_OWNER_LANE or not channel.strip():
-            raise ActivationConflict("activation confirmation requires the owner DM")
-        current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        This touches only ``home/runtime``.  Conversation memory, model config,
+        credentials, and all other user files are intentionally left in place.
+        """
+
+        restart_fn = restart or self._default_restart
+        health_fn = health_check or self._default_health_check
         with self._locked():
             payload, record = self._load_record(activation_id)
             if record.state != "awaiting_confirmation":
-                raise ActivationConflict("activation is not ready for confirmation")
+                raise ActivationConflict("activation is not awaiting user confirmation")
             self._verify_staged_unlocked(activation_id)
             self._successful_preflight_unlocked(record)
-            previous = payload.get("confirmation_callback_id")
-            if isinstance(previous, str):
-                previous_path = self._confirmation_path(previous)
-                if previous_path.exists():
-                    old_payload = _read_private_object(
-                        previous_path, description="activation confirmation"
-                    )
-                    if old_payload.get("status") == "pending":
-                        old_payload["status"] = "superseded"
-                        old_payload["resolved_at"] = current.isoformat()
-                        _write_private_json(previous_path, old_payload)
-            callback_id = secrets.token_hex(18)
-            secret_hash = hashlib.sha256(
-                self._confirmation_secret_unlocked(callback_id)
-            ).hexdigest()
-            path = self._confirmation_path(callback_id)
-            confirmation_payload: dict[str, object] = {
-                "schema_version": _CONFIRMATION_SCHEMA_VERSION,
-                "callback_id": callback_id,
-                "activation_id": record.activation_id,
-                "candidate_digest": record.candidate_digest,
-                "owner_lane": _CANONICAL_OWNER_LANE,
-                "channel": channel.strip(),
-                "secret_hash": secret_hash,
-                "status": "pending",
-                "issued_at": current.isoformat(),
-                "expires_at": (current + _CONFIRMATION_TTL).isoformat(),
-            }
-            _write_private_json(path, confirmation_payload)
-            payload["confirmation_callback_id"] = callback_id
+            previous = self._read_slot_pointer_unlocked(self._current_pointer_path)
+            if previous is None:
+                self._previous_pointer_path.unlink(missing_ok=True)
+            else:
+                _write_private_json(self._previous_pointer_path, previous)
+            self._write_current_pointer_unlocked(record)
+            payload["state"] = "switching"
             payload["updated_at"] = _utc_now()
             _write_private_json(record.record_path, payload)
-            return self._confirmation_from_payload(confirmation_payload, path)
+            switching = self._record_from_payload(payload, record.record_path)
 
-    def pending_confirmation_for_channel(
-        self, channel: str, *, now: datetime | None = None
-    ) -> ActivationConfirmation | None:
-        """Return the current opaque card handle for a trusted gateway channel."""
+        restarted = bool(restart_fn())
+        deadline = time.monotonic() + max(0.0, health_timeout_seconds)
+        healthy = False
+        while restarted and time.monotonic() <= deadline:
+            if health_fn(switching):
+                healthy = True
+                break
+            if time.monotonic() >= deadline:
+                break
+            sleep(min(0.25, max(0.0, deadline - time.monotonic())))
 
-        current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
         with self._locked():
-            for path in sorted(self.confirmations.glob("*.json")):
-                payload = _read_private_object(path, description="activation confirmation")
-                confirmation = self._confirmation_from_payload(payload, path)
-                if (
-                    payload.get("status") != "pending"
-                    or confirmation.channel != channel
-                    or current >= self._confirmation_datetime(payload.get("expires_at"))
-                ):
-                    continue
-                activation_payload, activation = self._load_record(confirmation.activation_id)
-                if (
-                    activation.state == "awaiting_confirmation"
-                    and activation.candidate_digest == confirmation.candidate_digest
-                    and activation_payload.get("confirmation_callback_id") == confirmation.callback_id
-                ):
-                    return confirmation
-        return None
+            payload, record = self._load_record(activation_id)
+            if record.state != "switching":
+                raise ActivationConflict("activation changed during service handoff")
+            if healthy:
+                payload["state"] = "healthy"
+                payload["updated_at"] = _utc_now()
+                _write_private_json(record.record_path, payload)
+                return self._record_from_payload(payload, record.record_path)
+            payload["state"] = "rolling_back"
+            payload["updated_at"] = _utc_now()
+            _write_private_json(record.record_path, payload)
+            previous = self._read_slot_pointer_unlocked(self._previous_pointer_path)
+            if previous is None:
+                self._current_pointer_path.unlink(missing_ok=True)
+            else:
+                _write_private_json(self._current_pointer_path, previous)
 
-    def _resolve_gateway_confirmation(
-        self,
-        callback_id: str,
-        *,
-        capability: object,
-        owner_lane: str,
-        channel: str,
-        choice: str = "confirm",
-        now: datetime | None = None,
-    ) -> ActivationRecord:
-        """Consume one authenticated callback and enter the authorized state.
-
-        The callback identifier is only a routing handle.  Authorization is
-        bound to gateway-authenticated owner context, exact channel, private
-        derived-secret verification, exact candidate digest, and a durable CAS.
-        """
-
-        normalized = choice.strip().lower()
-        if normalized == "always":
-            normalized = "confirm"
-        if normalized not in {"confirm", "deny"}:
-            raise ActivationConflict("unsupported activation confirmation choice")
-        current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
-        if capability is not _GATEWAY_RESOLVER_CAPABILITY:
-            raise ActivationConflict("activation confirmation is gateway-owned")
+        restart_fn()
         with self._locked():
-            path = self._confirmation_path(callback_id)
-            confirmation_payload = _read_private_object(
-                path, description="activation confirmation"
-            )
-            confirmation = self._confirmation_from_payload(confirmation_payload, path)
-            if (
-                owner_lane != _CANONICAL_OWNER_LANE
-                or channel != confirmation.channel
-            ):
-                raise ActivationConflict("activation confirmation requires an authenticated owner callback")
-            expected_hash = hashlib.sha256(
-                self._confirmation_secret_unlocked(confirmation.callback_id)
-            ).hexdigest()
-            stored_hash = str(confirmation_payload["secret_hash"])
-            if not hmac.compare_digest(expected_hash, stored_hash):
-                raise ActivationError("activation confirmation secret is invalid")
-            if confirmation_payload.get("status") != "pending":
-                raise ActivationConflict("activation confirmation was already resolved")
-            if current >= self._confirmation_datetime(confirmation_payload.get("expires_at")):
-                confirmation_payload["status"] = "expired"
-                confirmation_payload["resolved_at"] = current.isoformat()
-                _write_private_json(path, confirmation_payload)
-                activation_payload, activation = self._load_record(confirmation.activation_id)
-                if activation.state == "awaiting_confirmation":
-                    self._transition_unlocked(
-                        activation_payload,
-                        activation,
-                        expected="awaiting_confirmation",
-                        target="expired",
-                        detail="owner confirmation expired",
-                    )
-                raise ActivationConflict("activation confirmation expired")
-            activation_payload, activation = self._load_record(confirmation.activation_id)
-            if activation.candidate_digest != confirmation.candidate_digest:
-                raise ActivationError("activation confirmation digest is stale")
-            if activation_payload.get("confirmation_callback_id") != confirmation.callback_id:
-                raise ActivationConflict("activation confirmation was superseded")
-            self._verify_staged_unlocked(activation.activation_id)
-            self._successful_preflight_unlocked(activation)
-            target = "authorized" if normalized == "confirm" else "denied"
-            # The activation state is the durable CAS and is committed before
-            # anything in a later worker could start.
-            result = self._transition_unlocked(
-                activation_payload,
-                activation,
-                expected="awaiting_confirmation",
-                target=target,
-                detail="owner confirmed exact candidate" if target == "authorized" else "owner declined activation",
-            )
-            confirmation_payload["status"] = "consumed" if target == "authorized" else "denied"
-            confirmation_payload["resolved_at"] = current.isoformat()
-            _write_private_json(path, confirmation_payload)
-            return result
+            payload, record = self._load_record(activation_id)
+            if record.state != "rolling_back":
+                raise ActivationConflict("activation changed during rollback")
+            payload["state"] = "rolled_back"
+            payload["updated_at"] = _utc_now()
+            payload["detail"] = "new slot did not become healthy; restored previous slot"
+            _write_private_json(record.record_path, payload)
+            return self._record_from_payload(payload, record.record_path)
 
     def resolve_candidate_module(self, activation_id: str, module: str) -> Path:
         """Resolve a module to a slot source file without importing candidate code."""

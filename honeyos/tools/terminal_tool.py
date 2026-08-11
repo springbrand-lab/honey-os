@@ -2289,17 +2289,6 @@ def terminal_tool(
                 "status": "error",
             }, ensure_ascii=False)
 
-        from honeyos.companion.builder_activation import model_control_plane_access_error
-
-        control_plane_error = model_control_plane_access_error(command)
-        if control_plane_error:
-            return json.dumps({
-                "output": "",
-                "exit_code": -1,
-                "error": control_plane_error,
-                "status": "blocked",
-            }, ensure_ascii=False)
-
         # Get configuration
         config = _get_env_config()
         env_type = config["env_type"]

@@ -34,7 +34,6 @@ _SUPPORTED_PLATFORMS = frozenset(DEFAULT_IM_PLATFORMS)
 COMPANION_TOOLSETS = (
     "companion_profile",
     "companion_memory",
-    "companion_builder",
     "proactive_companion",
     "memory",
     "session_search",

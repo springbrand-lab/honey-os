@@ -2164,11 +2164,6 @@ class APIServerAdapter(BasePlatformAdapter):
                 "/api/companion/memories/{memory_id}",
                 self._handle_companion_memory_action,
             ),
-            (
-                "POST",
-                "/api/companion/activations/{callback_id}/confirm",
-                self._handle_companion_builder_confirmation,
-            ),
             ("GET", "/api/companion/topics", self._handle_companion_topics),
             (
                 "POST",
@@ -2483,21 +2478,6 @@ class APIServerAdapter(BasePlatformAdapter):
         except Exception:
             logger.debug("Failed to read companion distillation model", exc_info=True)
 
-        confirmation_card = None
-        try:
-            from honeyos.companion.builder_activation import ActivationStore
-
-            pending = await asyncio.to_thread(
-                ActivationStore(home, Path(__file__).parents[3]).pending_confirmation_for_channel,
-                Platform.API_SERVER.value,
-            )
-            if pending is not None:
-                # This opaque routing id is intentionally delivered only to the
-                # authenticated local Web card, never to model/tool output.
-                confirmation_card = {"callback_id": pending.callback_id}
-        except Exception:
-            logger.debug("Failed to read pending Builder confirmation", exc_info=True)
-
         return web.json_response(
             {
                 "profile": companion_profile(home),
@@ -2514,7 +2494,6 @@ class APIServerAdapter(BasePlatformAdapter):
                 "messages": messages,
                 "memories": [_memory_payload(item) for item in memory_items],
                 "history": history,
-                "activation_confirmation": confirmation_card,
                 "settings": {
                     "memory_location": "local",
                     "conversation_model": str(self._model_name or ""),
@@ -2580,58 +2559,6 @@ class APIServerAdapter(BasePlatformAdapter):
                 status=404,
             )
         return web.json_response({"success": True, "id": memory_id, "action": action})
-
-    async def _handle_companion_builder_confirmation(
-        self, request: "web.Request"
-    ) -> "web.Response":
-        """Resolve a Builder card from the authenticated local-owner route.
-
-        The body may select a one-time confirm or denial but never carries an
-        identity, lane, channel, callback secret, or activation digest.
-        """
-
-        auth_err = self._check_auth(request)
-        if auth_err:
-            return auth_err
-        callback_id = str(request.match_info.get("callback_id") or "").strip()
-        body, err = await self._read_json_body(request)
-        if err:
-            return err
-        choice = str(body.get("choice") or "confirm").strip().lower()
-        if choice not in {"confirm", "deny", "always"}:
-            return web.json_response(
-                _openai_error(
-                    "Unsupported Builder confirmation choice",
-                    code="invalid_builder_confirmation",
-                ),
-                status=400,
-            )
-        try:
-            from honeyos.companion.builder_activation import ActivationConflict, ActivationError
-            from honeyos.core.constants import get_honeyos_home
-            from honeyos.gateway.builder_confirmation import resolve_local_web_callback
-
-            record = await asyncio.to_thread(
-                resolve_local_web_callback,
-                get_honeyos_home(),
-                callback_id,
-                choice=choice,
-            )
-        except (ActivationConflict, ActivationError):
-            return web.json_response(
-                _openai_error(
-                    "Builder confirmation is unavailable",
-                    code="builder_confirmation_unavailable",
-                ),
-                status=409,
-            )
-        return web.json_response(
-            {
-                "success": True,
-                "activation_id": record.activation_id,
-                "state": record.state,
-            }
-        )
 
     async def _handle_companion_profile_update(
         self, request: "web.Request"

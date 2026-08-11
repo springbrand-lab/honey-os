@@ -69,6 +69,10 @@ def _parser() -> argparse.ArgumentParser:
     gateway = commands.add_parser("gateway", help=argparse.SUPPRESS)
     gateway_commands = gateway.add_subparsers(dest="gateway_command", required=True)
     gateway_commands.add_parser("run", help=argparse.SUPPRESS)
+
+    from honeyos.runtime.builder_cmd import build_parser as build_builder_parser
+
+    build_builder_parser(commands)
     return parser
 
 
@@ -197,6 +201,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         finally:
             os.environ.clear()
             os.environ.update(previous)
+    if args.command == "builder":
+        _initialize_embedded(home)
+        from honeyos.runtime.builder_cmd import builder_command
+
+        return builder_command(args)
     if args.command in passthrough_names:
         _initialize_embedded(home)
         runtime_arguments = [args.command]

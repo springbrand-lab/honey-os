@@ -25,8 +25,8 @@ def _source_repo(tmp_path: Path) -> Path:
     (source / "honeyos" / "companion" / "feature.py").write_text(
         "VALUE = 'live'\n", encoding="utf-8"
     )
-    (source / "honeyos" / "companion" / "persistent_memory.py").write_text(
-        "MEMORY = 'live'\n", encoding="utf-8"
+    (source / "honeyos" / "companion" / "activity.py").write_text(
+        "ACTIVITY = 'live'\n", encoding="utf-8"
     )
     (source / "honeyos" / "tools" / "permission_policy.py").write_text(
         "PROTECTED = True\n", encoding="utf-8"
@@ -57,7 +57,7 @@ def _prepared_change(
     )
 
 
-def test_prepare_builder_change_clones_review_only_workspace(tmp_path):
+def test_prepare_builder_change_exposes_only_requested_mutable_files(tmp_path):
     from honeyos.companion.builder_workspace import prepare_builder_change
 
     source = _source_repo(tmp_path)
@@ -66,7 +66,7 @@ def test_prepare_builder_change_clones_review_only_workspace(tmp_path):
     prepared = prepare_builder_change(
         source_repo=source,
         goal="改善跨会话记忆",
-        allowed_paths=("honeyos/companion/**", "tests/honeyos/**"),
+        allowed_paths=("honeyos/companion/**",),
         builder_root=tmp_path / "HoneyOS Builder",
         change_id="memory-upgrade-001",
     )
@@ -74,16 +74,18 @@ def test_prepare_builder_change_clones_review_only_workspace(tmp_path):
     manifest = json.loads(prepared.manifest_path.read_text(encoding="utf-8"))
     assert prepared.workspace != source
     assert prepared.workspace.is_relative_to(tmp_path / "HoneyOS Builder")
-    assert _git(prepared.workspace, "branch", "--show-current") == (
-        "honeyos-builder/memory-upgrade-001"
-    )
+    assert not (prepared.workspace / ".git").exists()
+    assert (prepared.workspace / "honeyos" / "companion" / "activity.py").is_file()
+    assert not (prepared.workspace / "honeyos" / "companion" / "feature.py").exists()
+    assert not (prepared.workspace / "honeyos" / "tools").exists()
+    assert not (prepared.workspace / "honeyos" / "runtime").exists()
     assert manifest["goal"] == "改善跨会话记忆"
     assert manifest["source_commit"] == _git(source, "rev-parse", "HEAD")
-    assert manifest["installation"]["mode"] == "review_only"
+    assert manifest["installation"]["mode"] == "user_confirmation_required"
     assert manifest["installation"]["automatic"] is False
     assert "honeyos/tools/permission_policy.py" in manifest["protected_paths"]
     assert (
-        "honeyos/companion/companion_skills/honeyos-builder/**"
+        "honeyos/companion/builder_activation*.py"
         in manifest["protected_paths"]
     )
     assert live_file.read_text(encoding="utf-8") == "VALUE = 'live'\n"
@@ -141,10 +143,12 @@ def test_inspect_builder_change_blocks_protected_and_out_of_scope_edits(tmp_path
         builder_root=tmp_path / "HoneyOS Builder",
         change_id="memory-review-001",
     )
-    (prepared.workspace / "honeyos" / "companion" / "persistent_memory.py").write_text(
+    (prepared.workspace / "honeyos" / "companion" / "activity.py").write_text(
         "VALUE = 'candidate'\n", encoding="utf-8"
     )
-    (prepared.workspace / "honeyos" / "tools" / "permission_policy.py").write_text(
+    protected_path = prepared.workspace / "honeyos" / "tools" / "permission_policy.py"
+    protected_path.parent.mkdir(parents=True)
+    protected_path.write_text(
         "PROTECTED = False\n", encoding="utf-8"
     )
     (prepared.workspace / "README.md").write_text(
@@ -154,7 +158,7 @@ def test_inspect_builder_change_blocks_protected_and_out_of_scope_edits(tmp_path
     report = inspect_builder_change(prepared.change_root)
 
     assert report.status == "blocked"
-    assert report.allowed_changes == ("honeyos/companion/persistent_memory.py",)
+    assert report.allowed_changes == ("honeyos/companion/activity.py",)
     assert report.protected_changes == ("honeyos/tools/permission_policy.py",)
     assert report.out_of_scope_changes == ("README.md",)
     assert report.installable is False
@@ -187,7 +191,7 @@ def test_inspect_binds_review_to_candidate_digest(tmp_path):
     from honeyos.companion.builder_workspace import inspect_builder_change
 
     prepared = _prepared_change(tmp_path)
-    feature = prepared.workspace / "honeyos" / "companion" / "persistent_memory.py"
+    feature = prepared.workspace / "honeyos" / "companion" / "activity.py"
     feature.write_text("VALUE = 'candidate'\n", encoding="utf-8")
 
     first = inspect_builder_change(prepared.change_root)
@@ -215,17 +219,20 @@ def test_candidate_digest_rejects_symlink(tmp_path):
         candidate_digest(workspace, "source-commit", ("candidate.py",))
 
 
-def test_inspect_rejects_workspace_commit_different_from_review_base(tmp_path):
-    from honeyos.companion.builder_workspace import inspect_builder_change
-
+def test_partial_workspace_never_contains_git_history(tmp_path):
     prepared = _prepared_change(tmp_path)
-    feature = prepared.workspace / "honeyos" / "companion" / "persistent_memory.py"
-    feature.write_text("VALUE = 'committed candidate'\n", encoding="utf-8")
-    _git(prepared.workspace, "add", str(feature.relative_to(prepared.workspace)))
-    _git(prepared.workspace, "commit", "-m", "candidate change")
 
-    with pytest.raises(ValueError, match="revision"):
-        inspect_builder_change(prepared.change_root)
+    assert not (prepared.workspace / ".git").exists()
+
+
+def test_user_project_coding_does_not_create_builder_state(tmp_path):
+    project = tmp_path / "HoneyOS Projects" / "little-game"
+    project.mkdir(parents=True)
+
+    (project / "index.html").write_text("<h1>hello</h1>\n", encoding="utf-8")
+
+    assert (project / "index.html").is_file()
+    assert not (tmp_path / ".honeyos" / "builder").exists()
 
 
 def test_inspect_blocks_ignored_non_ephemeral_candidate_content(tmp_path):
@@ -247,9 +254,6 @@ def test_inspect_ignores_narrow_ephemeral_cache_content(tmp_path):
     from honeyos.companion.builder_workspace import inspect_builder_change
 
     prepared = _prepared_change(tmp_path)
-    (prepared.workspace / ".git" / "info" / "exclude").write_text(
-        ".pytest_cache/\n", encoding="utf-8"
-    )
     cache = prepared.workspace / ".pytest_cache" / "v" / "cache"
     cache.mkdir(parents=True)
     (cache / "nodeids").write_text("[]\n", encoding="utf-8")
@@ -318,7 +322,7 @@ def test_review_binds_authoritative_policy_scope_and_digest(tmp_path):
     from honeyos.companion.builder_workspace import inspect_builder_change
 
     prepared = _prepared_change(tmp_path)
-    feature = prepared.workspace / "honeyos" / "companion" / "persistent_memory.py"
+    feature = prepared.workspace / "honeyos" / "companion" / "activity.py"
     feature.write_text("VALUE = 'candidate'\n", encoding="utf-8")
 
     report = inspect_builder_change(prepared.change_root)
@@ -328,7 +332,7 @@ def test_review_binds_authoritative_policy_scope_and_digest(tmp_path):
     assert report_json["policy_digest"]
     assert report_json["candidate_digest"] == report.candidate_digest
     assert report_json["changed_paths"] == [
-        {"path": "honeyos/companion/persistent_memory.py", "status": " M"}
+        {"path": "honeyos/companion/activity.py", "status": " M"}
     ]
 
 
@@ -336,13 +340,13 @@ def test_inspect_permits_explicit_companion_behavior_change(tmp_path):
     from honeyos.companion.builder_workspace import inspect_builder_change
 
     prepared = _prepared_change(tmp_path, allowed_paths=("honeyos/companion/**",))
-    path = prepared.workspace / "honeyos" / "companion" / "persistent_memory.py"
+    path = prepared.workspace / "honeyos" / "companion" / "activity.py"
     path.write_text("MEMORY = 'personalized'\n", encoding="utf-8")
 
     report = inspect_builder_change(prepared.change_root)
 
     assert report.status == "review_ready"
-    assert report.allowed_changes == ("honeyos/companion/persistent_memory.py",)
+    assert report.allowed_changes == ("honeyos/companion/activity.py",)
 
 
 @pytest.mark.parametrize(
@@ -358,7 +362,7 @@ def test_inspect_permits_explicit_companion_behavior_change(tmp_path):
         "honeyos/companion/runtime.py",
         "honeyos/companion/setup.py",
         "honeyos/runtime/builder_activation_worker.py",
-        "honeyos/tools/companion_builder_tool.py",
+        "honeyos/companion/continuity.py",
         "honeyos/runtime/gateway.py",
         "honeyos/runtime/backup.py",
         "honeyos/runtime/service_manager.py",
@@ -398,15 +402,16 @@ def test_builder_allows_ordinary_honeyos_code_but_blocks_execution_enforcement(t
     from honeyos.companion.builder_workspace import inspect_builder_change
 
     prepared = _prepared_change(tmp_path, allowed_paths=("honeyos/**",))
-    allowed = prepared.workspace / "honeyos" / "companion" / "persistent_memory.py"
+    allowed = prepared.workspace / "honeyos" / "companion" / "activity.py"
     protected = prepared.workspace / "honeyos" / "tools" / "terminal_tool.py"
     allowed.write_text("VALUE = 'candidate'\n", encoding="utf-8")
+    protected.parent.mkdir(parents=True)
     protected.write_text("def terminal(): pass\n", encoding="utf-8")
 
     report = inspect_builder_change(prepared.change_root)
 
     assert report.status == "blocked"
-    assert report.allowed_changes == ("honeyos/companion/persistent_memory.py",)
+    assert report.allowed_changes == ("honeyos/companion/activity.py",)
     assert report.protected_changes == ("honeyos/tools/terminal_tool.py",)
 
 

@@ -1,4 +1,4 @@
-"""``honeyos builder`` CLI for review-only HoneyOS self-improvement drafts."""
+"""``honeyos builder`` CLI for controlled companion product improvements."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from honeyos.companion.builder_workspace import (
+    _load_trusted_policy,
     inspect_builder_change,
     prepare_builder_change,
 )
@@ -21,15 +22,16 @@ def build_parser(
 ) -> argparse.ArgumentParser:
     parser = parent_subparsers.add_parser(
         "builder",
-        help="Prepare and inspect review-only HoneyOS product changes",
+        help="Prepare, review, and enable a companion product change",
         description=(
-            "Create an isolated, review-only candidate checkout under HoneyOS Projects. "
-            "Builder never installs or replaces the running HoneyOS version."
+            "Create a partial candidate workspace under HoneyOS Projects. "
+            "After a user explicitly confirms it, Builder can switch to a checked slot "
+            "and automatically roll back if it does not become healthy."
         ),
     )
     sub = parser.add_subparsers(dest="builder_action")
 
-    prepare = sub.add_parser("prepare", help="Create an isolated candidate checkout")
+    prepare = sub.add_parser("prepare", help="Create an isolated candidate workspace")
     prepare.add_argument("--source", required=True, help="Local HoneyOS Git checkout")
     prepare.add_argument("--goal", required=True, help="User-visible improvement goal")
     prepare.add_argument(
@@ -47,6 +49,11 @@ def build_parser(
 
     inspect = sub.add_parser("inspect", help="Classify the candidate diff")
     inspect.add_argument("change_id", help="Identifier returned by builder prepare")
+    activate = sub.add_parser(
+        "activate",
+        help="Enable a reviewed change after the user has said to switch it on",
+    )
+    activate.add_argument("change_id", help="Identifier returned by builder prepare")
     parser.set_defaults(_builder_parser=parser)
     return parser
 
@@ -71,7 +78,7 @@ def builder_command(args: argparse.Namespace) -> int:
                 "change_id": prepared.change_id,
                 "workspace": str(prepared.workspace),
                 "manifest": str(prepared.manifest_path),
-                "installation": "review_only",
+                "installation": "awaiting_user_confirmation",
             }
         elif action == "inspect":
             report = inspect_builder_change(
@@ -86,6 +93,30 @@ def builder_command(args: argparse.Namespace) -> int:
                 "installable": report.installable,
                 "report": str(report.report_path),
                 "candidate_digest": report.candidate_digest,
+            }
+        elif action == "activate":
+            from honeyos.companion.builder_activation import ActivationError, ActivationStore
+
+            change_root = get_honeyos_home() / "builder" / "changes" / args.change_id
+            policy, _policy_digest = _load_trusted_policy(change_root)
+            source_repo = Path(str(policy["source_repo"])).expanduser().resolve()
+            store = ActivationStore(get_honeyos_home(), bundled_root=source_repo)
+            staged = store.stage(change_root)
+            receipt = store.preflight(staged.activation_id)
+            if not receipt.success:
+                raise ActivationError("candidate did not pass static checks")
+            store.transition(
+                staged.activation_id,
+                "staged",
+                "awaiting_confirmation",
+                detail="user confirmed product switch",
+            )
+            activated = store.activate_confirmed(staged.activation_id)
+            payload = {
+                "change_id": args.change_id,
+                "activation_id": activated.activation_id,
+                "state": activated.state,
+                "installation": "activated" if activated.state == "healthy" else "rolled_back",
             }
         else:
             print(f"builder: unknown action: {action}", file=sys.stderr)

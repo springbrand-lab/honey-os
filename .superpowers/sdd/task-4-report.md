@@ -1,40 +1,30 @@
-# Task 4 Report: Owner confirmation and Builder tool
+# Task 4 report — simplified Builder activation
 
 ## RED
 
-The focused confirmation test suite was added before the implementation. It
-exercises owner authentication, wrong-channel rejection, one-time replay
-protection, expiry, restart persistence, digest tampering, and the model tool's
-inability to expose callback material or authorize a candidate.
+- `test_builder_activate_stages_static_checks_then_uses_plain_confirmation`
+  failed because `activate` did not exist and preparation still reported
+  `review_only`.
+- `test_public_honeyos_command_exposes_builder` failed because the installed
+  `honeyos` command did not expose Builder.
 
 ## GREEN
 
-`ActivationStore` now persists private callback records with an opaque id,
-digest binding, expiry, canonical owner lane, exact delivery channel, and only
-a hash of a server-derived secret. The authenticated resolver verifies all
-facts, performs the activation state CAS first, then marks the callback used.
-It reaches `authorized`, not `switching`.
+- `honeyos builder activate <change-id>` now stages, performs static preflight,
+  records `awaiting_confirmation`, then switches/restarts with rollback on an
+  unhealthy service.  It is called only after Honey has interpreted the user's
+  ordinary affirmative reply.
+- Builder workspaces contain only the fixed mutable companion allowlist and no
+  Git checkout.  Memory persistence, delivery/routing and user-data files are
+  outside the workspace.
+- The public CLI exposes Builder, the service loads an active complete slot via
+  `PYTHONPATH`, and activation tests prove successful switching and rollback
+  without modifying memory/configuration/credentials.
 
-`companion_builder` is a default companion toolset member. Its schema exposes
-only stage/request/status; it cannot resolve confirmation or launch a worker.
+## Verification
 
-## Deferred
-
-Task 5 owns every post-confirmation dynamic check and the trusted
-`authorized -> switching` handoff. No candidate code, provider, network, or
-service process is started here.
-
-## Review hardening
-
-The initial resolver accepted a constructible context object, which was not an
-adequate authorization boundary. It was removed. The only resolution entry is
-now the gateway-owned resolver capability: the authenticated local-Web route
-maps directly to the canonical owner lane, while the Feishu SDK action path
-first validates the operator and creates a verified private-DM `MessageEvent`.
-Neither endpoint accepts a model-provided owner, lane, channel, or
-`authenticated` boolean.
-
-The authenticated Web bootstrap receives the opaque callback id only as a
-card payload; model tool output does not include it. Model-facing terminal and
-code execution also hard-block Builder confirmation, worker, switch, rollback,
-and control-plane access rather than relying on private file modes alone.
+- Builder/activation/service/skill/config/distribution/Web combined run:
+  **169 passed**.
+- Ruff on all changed Python files: **passed**.
+- `uv lock --check`: **passed**.
+- staged and unstaged whitespace diff checks: **passed**.

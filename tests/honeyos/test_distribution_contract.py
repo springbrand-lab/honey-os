@@ -35,7 +35,6 @@ def test_distribution_contract_exposes_companion_action_tools_without_orchestrat
 
     assert {
         "companion_memory",
-        "companion_builder",
         "proactive_companion",
         "memory",
         "session_search",

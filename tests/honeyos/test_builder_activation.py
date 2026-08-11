@@ -26,8 +26,8 @@ def _source_repo(tmp_path: Path) -> Path:
     (source / "honeyos" / "companion").mkdir(parents=True)
     (source / "honeyos" / "runtime").mkdir(parents=True)
     (source / "tests" / "honeyos").mkdir(parents=True)
-    (source / "honeyos" / "companion" / "persistent_memory.py").write_text(
-        "MEMORY = 'live'\n", encoding="utf-8"
+    (source / "honeyos" / "companion" / "activity.py").write_text(
+        "ACTIVITY = 'live'\n", encoding="utf-8"
     )
     (source / "honeyos" / "runtime" / "main.py").write_text(
         "RUNTIME = 'live'\n", encoding="utf-8"
@@ -56,8 +56,8 @@ def _review_ready_change(tmp_path: Path):
         builder_root=tmp_path / "HoneyOS Builder",
         change_id="candidate-slot-001",
     )
-    (prepared.workspace / "honeyos" / "companion" / "persistent_memory.py").write_text(
-        "MEMORY = 'candidate'\n", encoding="utf-8"
+    (prepared.workspace / "honeyos" / "companion" / "activity.py").write_text(
+        "ACTIVITY = 'candidate'\n", encoding="utf-8"
     )
     review = inspect_builder_change(prepared.change_root)
     assert review.status == "review_ready"
@@ -70,6 +70,26 @@ def _staged_activation(tmp_path: Path):
     source, prepared, review = _review_ready_change(tmp_path)
     store = ActivationStore(tmp_path / "home", bundled_root=source)
     return store, store.stage(prepared.change_root), prepared, review
+
+
+def test_default_service_handoff_targets_the_activation_data_home(tmp_path, monkeypatch):
+    from honeyos.companion.builder_activation import ActivationStore
+
+    store = ActivationStore(tmp_path / "nondefault-home", bundled_root=tmp_path)
+    observed = []
+
+    monkeypatch.setattr(
+        "honeyos.cli.service.restart_service",
+        lambda identity: observed.append(identity.data_home) or 0,
+    )
+    monkeypatch.setattr(
+        "honeyos.cli.service.service_status",
+        lambda identity: observed.append(identity.data_home) or 0,
+    )
+
+    assert store._default_restart() is True
+    assert store._default_health_check(None) is True
+    assert observed == [store.home, store.home]
 
 
 def test_stage_materializes_complete_reviewed_source_into_private_slot(tmp_path):
@@ -90,7 +110,7 @@ def test_stage_materializes_complete_reviewed_source_into_private_slot(tmp_path)
     assert (staged.slot_root / "source" / "pyproject.toml").is_file()
     assert (staged.slot_root / "source" / "uv.lock").is_file()
     assert (staged.slot_root / "source" / "tests" / "honeyos" / "test_smoke.py").is_file()
-    assert (staged.slot_root / "source" / "honeyos" / "companion" / "persistent_memory.py").read_text(encoding="utf-8") == "MEMORY = 'candidate'\n"
+    assert (staged.slot_root / "source" / "honeyos" / "companion" / "activity.py").read_text(encoding="utf-8") == "ACTIVITY = 'candidate'\n"
     assert staged.slot_tree_digest
     assert staged.manifest_path.stat().st_mode & 0o777 == 0o600
     assert not any(path.name == "state.db" for path in staged.slot_root.rglob("*"))
@@ -102,20 +122,20 @@ def test_stage_applies_reviewed_deletion_only(tmp_path):
     from honeyos.companion.builder_activation import ActivationStore
     from honeyos.companion.builder_workspace import inspect_builder_change
 
-    (prepared.workspace / "honeyos" / "companion" / "persistent_memory.py").unlink()
+    (prepared.workspace / "honeyos" / "companion" / "activity.py").unlink()
     review = inspect_builder_change(prepared.change_root)
     staged = ActivationStore(tmp_path / "home", source).stage(prepared.change_root)
 
     assert review.status == "review_ready"
-    assert not (staged.slot_root / "source" / "honeyos" / "companion" / "persistent_memory.py").exists()
-    assert (source / "honeyos" / "companion" / "persistent_memory.py").is_file()
+    assert not (staged.slot_root / "source" / "honeyos" / "companion" / "activity.py").exists()
+    assert (source / "honeyos" / "companion" / "activity.py").is_file()
 
 
 def test_changed_candidate_cannot_be_staged_from_old_review(tmp_path):
     source, prepared, _review = _review_ready_change(tmp_path)
     from honeyos.companion.builder_activation import ActivationError, ActivationStore
 
-    (prepared.workspace / "honeyos" / "companion" / "persistent_memory.py").write_text(
+    (prepared.workspace / "honeyos" / "companion" / "activity.py").write_text(
         "tampered\n", encoding="utf-8"
     )
 
@@ -156,7 +176,7 @@ def test_stage_rejects_candidate_symlink(tmp_path):
 
     target = tmp_path / "outside.py"
     target.write_text("outside\n", encoding="utf-8")
-    candidate = prepared.workspace / "honeyos" / "companion" / "persistent_memory.py"
+    candidate = prepared.workspace / "honeyos" / "companion" / "activity.py"
     candidate.unlink()
     candidate.symlink_to(target)
     with pytest.raises(ValueError, match="symlink"):
@@ -231,12 +251,55 @@ def test_activation_transitions_are_compare_and_swap_and_private(tmp_path):
     assert store.activations.stat().st_mode & 0o777 == 0o700
 
 
+def test_confirmed_activation_switches_complete_slot_and_preserves_user_data(tmp_path):
+    store, staged, _prepared, _review = _staged_activation(tmp_path)
+    for name, content in {
+        "memories.sqlite": b"memory-before",
+        "config.yaml": b"config-before",
+        ".env": b"credential-before",
+    }.items():
+        (store.home / name).write_bytes(content)
+    before = {path.name: path.read_bytes() for path in store.home.iterdir() if path.name != "runtime"}
+    store.preflight(staged.activation_id)
+    store.transition(staged.activation_id, "staged", "awaiting_confirmation")
+    restarts: list[str] = []
+
+    activated = store.activate_confirmed(
+        staged.activation_id,
+        restart=lambda: restarts.append("restart") or True,
+        health_check=lambda _record: True,
+    )
+
+    assert activated.state == "healthy"
+    assert restarts == ["restart"]
+    assert store.current_source() == staged.slot_root / "source"
+    assert {path.name: path.read_bytes() for path in store.home.iterdir() if path.name != "runtime"} == before
+
+
+def test_failed_confirmed_activation_restores_previous_slot_and_restarts_it(tmp_path):
+    store, staged, _prepared, _review = _staged_activation(tmp_path)
+    store.preflight(staged.activation_id)
+    store.transition(staged.activation_id, "staged", "awaiting_confirmation")
+    restarts: list[str] = []
+
+    rolled_back = store.activate_confirmed(
+        staged.activation_id,
+        restart=lambda: restarts.append("restart") or True,
+        health_check=lambda _record: False,
+        health_timeout_seconds=0,
+    )
+
+    assert rolled_back.state == "rolled_back"
+    assert restarts == ["restart", "restart"]
+    assert store.current_source() is None
+
+
 def test_stage_rejects_executable_candidate_file(tmp_path):
     source, prepared, _review = _review_ready_change(tmp_path)
     from honeyos.companion.builder_activation import ActivationError, ActivationStore
     from honeyos.companion.builder_workspace import inspect_builder_change
 
-    candidate = prepared.workspace / "honeyos" / "companion" / "persistent_memory.py"
+    candidate = prepared.workspace / "honeyos" / "companion" / "activity.py"
     candidate.chmod(candidate.stat().st_mode | os.X_OK)
     inspect_builder_change(prepared.change_root)
 

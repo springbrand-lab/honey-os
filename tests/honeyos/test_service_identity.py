@@ -76,6 +76,25 @@ def test_generated_service_definitions_contain_only_honeyos_runtime(
         assert "hermes" not in definition.lower()
 
 
+def test_service_uses_the_complete_current_builder_slot_when_present(tmp_path: Path) -> None:
+    import json
+
+    service = _service_module()
+    home = tmp_path / ".honeyos"
+    slot_source = home / "runtime" / "slots" / "candidate" / "source"
+    slot_source.mkdir(parents=True)
+    (home / "runtime" / "current-slot.json").write_text(
+        json.dumps({"activation_id": "candidate", "source_root": str(slot_source)}),
+        encoding="utf-8",
+    )
+
+    launchd = service.render_launchd_plist(service.ServiceIdentity.default(home))
+    systemd = service.render_systemd_unit(service.ServiceIdentity.default(home))
+
+    assert str(slot_source) in launchd
+    assert f"PYTHONPATH={slot_source}" in systemd
+
+
 def test_lifecycle_addresses_only_exact_honeyos_service(monkeypatch, tmp_path: Path) -> None:
     service = _service_module()
     identity = service.ServiceIdentity.default(home=tmp_path / ".honeyos")

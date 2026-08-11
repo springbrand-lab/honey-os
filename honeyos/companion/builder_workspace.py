@@ -1,9 +1,10 @@
-"""Review-only workspaces for user-requested HoneyOS product changes.
+"""Partial workspaces for user-requested HoneyOS product changes.
 
 The companion never edits the checkout that is currently running HoneyOS.
-This module prepares an isolated Git clone plus a machine-readable policy
-manifest.  A later review step decides whether a candidate is safe to hand to
-a human developer; this first version deliberately has no install operation.
+This module prepares a partial, isolated workspace plus a machine-readable
+policy manifest.  Only explicitly supported companion product files appear in
+that workspace; a later review/confirmation flow decides whether to activate a
+complete immutable slot.
 """
 
 from __future__ import annotations
@@ -45,6 +46,16 @@ DEFAULT_PROTECTED_PATHS = (
     "honeyos/companion/__init__.py",
     "honeyos/companion/builder_workspace.py",
     "honeyos/companion/builder_activation*.py",
+    # Structured memory, profile, and topic routing are data/control-plane
+    # modules, not user-customisable companion behavior.
+    "honeyos/companion/continuity.py",
+    "honeyos/companion/distillation.py",
+    "honeyos/companion/memory_policy.py",
+    "honeyos/companion/persistent_memory.py",
+    "honeyos/companion/profile.py",
+    "honeyos/companion/topic_pool.py",
+    "honeyos/companion/topic_delivery.py",
+    "honeyos/companion/templates/companion_soul.md",
     "honeyos/companion/config.py",
     "honeyos/companion/companion_skills/honeyos-builder/**",
     "honeyos/companion/companion_skills/honeyos-self-extension/**",
@@ -73,7 +84,6 @@ DEFAULT_PROTECTED_PATHS = (
     "honeyos/gateway/run.py",
     "honeyos/tools/approval.py",
     "honeyos/tools/write_approval.py",
-    "honeyos/tools/companion_builder_tool.py",
     "honeyos/tools/terminal_tool.py",
     "honeyos/tools/code_execution_tool.py",
     "honeyos/tools/computer_use_tool.py",
@@ -122,17 +132,15 @@ DEFAULT_PROTECTED_PATHS = (
 # to review/activate.  Configuration, installation, status/health, the
 # project/filesystem boundary, permission UI, and Builder wiring stay trusted.
 DEFAULT_ACTIVATABLE_PATHS = (
-    "docs/**",
-    "tests/**",
-    "README.md",
     "honeyos/companion/activity.py",
-    "honeyos/companion/continuity.py",
-    "honeyos/companion/distillation.py",
-    "honeyos/companion/persistent_memory.py",
     "honeyos/companion/status_copy.py",
-    "honeyos/companion/topic_pool.py",
     "honeyos/companion/topic_scout.py",
     "honeyos/companion/web_assets/**",
+    # A deliberately small extension point for a new ordinary companion tool.
+    # Nothing under honeyos/tools is exposed: it dispatches model calls and
+    # owns execution/approval policy.
+    "honeyos/companion/extensions/**",
+    "honeyos/companion/companion_skills/**",
 )
 
 
@@ -310,12 +318,48 @@ def _manifest_matches_trusted_policy(
         "goal",
         "source_repo",
         "source_commit",
-        "branch",
         "workspace",
         "workspace_root",
         "allowed_paths",
     )
     return all(manifest.get(field) == policy.get(field) for field in mirrored_fields)
+
+
+def _source_paths_at_commit(source: Path, source_commit: str) -> tuple[str, ...]:
+    """List tracked source paths without putting a Git checkout in Builder."""
+
+    completed = subprocess.run(
+        ["git", "-C", str(source), "ls-tree", "-r", "--name-only", source_commit],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return tuple(path for path in completed.stdout.splitlines() if path)
+
+
+def _copy_mutable_workspace(
+    *, source: Path, source_commit: str, workspace: Path, allowed: tuple[str, ...]
+) -> None:
+    """Copy only the fixed mutable surface into the candidate workspace."""
+
+    for relative in _source_paths_at_commit(source, source_commit):
+        if not _is_static_activatable(relative) or not _matches_any(relative, allowed):
+            continue
+        source_path = source / relative
+        if source_path.is_symlink() or not source_path.is_file():
+            raise ValueError(f"mutable source path is unsafe: {relative}")
+        try:
+            content = subprocess.run(
+                ["git", "-C", str(source), "show", f"{source_commit}:{relative}"],
+                check=True,
+                capture_output=True,
+            ).stdout
+        except subprocess.CalledProcessError as exc:
+            raise ValueError(f"failed to read mutable source path: {relative}") from exc
+        destination = workspace / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(content)
+        destination.chmod(stat.S_IMODE(source_path.stat().st_mode))
 
 
 def prepare_builder_change(
@@ -327,7 +371,7 @@ def prepare_builder_change(
     change_id: str,
     state_root: Path | str | None = None,
 ) -> PreparedBuilderChange:
-    """Clone ``source_repo`` into an isolated, review-only change workspace."""
+    """Create a partial candidate workspace containing only mutable product files."""
 
     source = Path(source_repo).expanduser().resolve()
     if not source.is_dir() or not (source / ".git").exists():
@@ -356,16 +400,13 @@ def prepare_builder_change(
 
     try:
         source_commit = _git(source, "rev-parse", "HEAD")
-        subprocess.run(
-            ["git", "clone", "--quiet", "--no-hardlinks", str(source), str(workspace)],
-            check=True,
-            capture_output=True,
-            text=True,
+        workspace.mkdir(parents=True)
+        _copy_mutable_workspace(
+            source=source,
+            source_commit=source_commit,
+            workspace=workspace,
+            allowed=allowed,
         )
-        branch = f"honeyos-builder/{normalized_id}"
-        _git(workspace, "switch", "-c", branch)
-        if _git(workspace, "rev-parse", "HEAD") != source_commit:
-            raise ValueError("source checkout changed while Builder was preparing a candidate")
         trusted_policy = {
             "schema_version": TRUSTED_POLICY_SCHEMA_VERSION,
             "policy_version": BUILDER_POLICY_VERSION,
@@ -373,7 +414,6 @@ def prepare_builder_change(
             "goal": goal_text,
             "source_repo": str(source),
             "source_commit": source_commit,
-            "branch": branch,
             "workspace": str(workspace),
             "workspace_root": str(workspace_root),
             "change_root": str(change_root),
@@ -392,7 +432,6 @@ def prepare_builder_change(
             "created_at": datetime.now(timezone.utc).isoformat(),
             "source_repo": str(source),
             "source_commit": source_commit,
-            "branch": branch,
             "workspace": str(workspace),
             "workspace_root": str(workspace_root),
             "allowed_paths": list(allowed),
@@ -404,9 +443,9 @@ def prepare_builder_change(
                 "synthetic_test_data": True,
             },
             "installation": {
-                "mode": "review_only",
+                "mode": "user_confirmation_required",
                 "automatic": False,
-                "requires_human_review": True,
+                "requires_human_review": False,
             },
         }
         manifest_path.write_text(
@@ -554,6 +593,52 @@ def _is_static_activatable(path: str) -> bool:
     return _matches_any(path, DEFAULT_ACTIVATABLE_PATHS)
 
 
+def _git_show_bytes(source: Path, source_commit: str, relative: str) -> bytes:
+    try:
+        return subprocess.run(
+            ["git", "-C", str(source), "show", f"{source_commit}:{relative}"],
+            check=True,
+            capture_output=True,
+        ).stdout
+    except subprocess.CalledProcessError as exc:
+        raise ValueError(f"unable to read review baseline: {relative}") from exc
+
+
+def _partial_workspace_changed_paths(
+    workspace: Path,
+    source: Path,
+    source_commit: str,
+    allowed_patterns: tuple[str, ...],
+) -> tuple[_ChangedPath, ...]:
+    """Diff a deliberately partial Builder workspace against its pinned tree."""
+
+    baseline = {
+        path
+        for path in _source_paths_at_commit(source, source_commit)
+        if _is_static_activatable(path) and _matches_any(path, allowed_patterns)
+    }
+    present: set[str] = set()
+    changed: list[_ChangedPath] = []
+    for path in sorted(workspace.rglob("*")):
+        relative = path.relative_to(workspace).as_posix()
+        if path.is_symlink():
+            raise ValueError(f"candidate path is a symlink: {relative}")
+        if path.is_dir():
+            continue
+        if not path.is_file():
+            raise ValueError(f"candidate path is not a regular file: {relative}")
+        if _is_ephemeral_ignored(relative):
+            continue
+        present.add(relative)
+        if relative not in baseline:
+            changed.append(_ChangedPath(relative, "??"))
+        elif path.read_bytes() != _git_show_bytes(source, source_commit, relative):
+            changed.append(_ChangedPath(relative, " M"))
+    for relative in sorted(baseline - present):
+        changed.append(_ChangedPath(relative, " D"))
+    return tuple(sorted(changed, key=lambda item: item.relative))
+
+
 def inspect_builder_change(change_root: Path | str) -> BuilderReviewReport:
     """Classify a candidate diff without installing or touching live code."""
 
@@ -576,11 +661,17 @@ def inspect_builder_change(change_root: Path | str) -> BuilderReviewReport:
     workspace_root = Path(str(policy["workspace_root"])).expanduser().resolve()
     expected_workspace = workspace_root / "changes" / change_id / "source"
     workspace = Path(str(policy["workspace"])).expanduser().resolve()
-    if workspace != expected_workspace or not (workspace / ".git").exists():
+    if workspace != expected_workspace or not workspace.is_dir() or (workspace / ".git").exists():
         raise ValueError("builder workspace does not match trusted policy")
 
     source_commit = str(policy["source_commit"])
-    if not source_commit or _git(workspace, "rev-parse", "HEAD") != source_commit:
+    source_repo = Path(str(policy["source_repo"])).expanduser().resolve()
+    if (
+        not source_commit
+        or not source_repo.is_dir()
+        or not (source_repo / ".git").is_dir()
+        or _git(source_repo, "rev-parse", "HEAD") != source_commit
+    ):
         raise ValueError("builder workspace revision differs from the trusted review base")
 
     allowed_patterns = _validate_allowed_paths(policy["allowed_paths"])
@@ -591,7 +682,9 @@ def inspect_builder_change(change_root: Path | str) -> BuilderReviewReport:
     allowed: list[str] = []
     protected: list[str] = []
     out_of_scope: list[str] = []
-    changed_paths = _changed_paths(workspace)
+    changed_paths = _partial_workspace_changed_paths(
+        workspace, source_repo, source_commit, allowed_patterns
+    )
     for changed in changed_paths:
         if changed.status == "!!":
             out_of_scope.append(changed.relative)
@@ -634,7 +727,7 @@ def inspect_builder_change(change_root: Path | str) -> BuilderReviewReport:
         "protected_changes": protected,
         "out_of_scope_changes": out_of_scope,
         "installation": {
-            "mode": "review_only",
+            "mode": "user_confirmation_required",
             "automatic": False,
             "installable": False,
         },

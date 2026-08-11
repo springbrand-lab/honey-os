@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 import platform
 import plistlib
 import shlex
@@ -49,12 +50,36 @@ def _returncode(value: object) -> int:
     return int(getattr(value, "returncode", 1))
 
 
+def _current_slot_source(identity: ServiceIdentity) -> Path | None:
+    """Read the runtime-owned active slot pointer for the service environment."""
+
+    pointer = identity.data_home / "runtime" / "current-slot.json"
+    try:
+        payload = json.loads(pointer.read_text(encoding="utf-8"))
+        source = Path(str(payload["source_root"])).expanduser().resolve()
+        slots = (identity.data_home / "runtime" / "slots").resolve()
+        source.relative_to(slots)
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+        return None
+    return source if source.is_dir() and not source.is_symlink() else None
+
+
+def _service_environment(identity: ServiceIdentity) -> dict[str, str]:
+    environment = {"HONEYOS_HOME": str(identity.data_home)}
+    source = _current_slot_source(identity)
+    if source is not None:
+        # The slot is a complete source tree.  Keeping the interpreter/venv
+        # unchanged preserves all user dependencies and provider setup.
+        environment["PYTHONPATH"] = str(source)
+    return environment
+
+
 def render_launchd_plist(identity: ServiceIdentity) -> str:
     logs = identity.data_home / "logs"
     payload = {
         "Label": identity.macos_label,
         "ProgramArguments": list(identity.command_argv()),
-        "EnvironmentVariables": {"HONEYOS_HOME": str(identity.data_home)},
+        "EnvironmentVariables": _service_environment(identity),
         "RunAtLoad": True,
         "KeepAlive": True,
         "StandardOutPath": str(logs / "gateway.log"),
@@ -65,6 +90,7 @@ def render_launchd_plist(identity: ServiceIdentity) -> str:
 
 def render_systemd_unit(identity: ServiceIdentity) -> str:
     command = " ".join(shlex.quote(item) for item in identity.command_argv())
+    environment = _service_environment(identity)
     return "\n".join(
         (
             "[Unit]",
@@ -72,7 +98,7 @@ def render_systemd_unit(identity: ServiceIdentity) -> str:
             "After=network-online.target",
             "",
             "[Service]",
-            f"Environment=HONEYOS_HOME={identity.data_home}",
+            *(f"Environment={key}={value}" for key, value in environment.items()),
             f"ExecStart={command}",
             "Restart=on-failure",
             "RestartSec=5",
