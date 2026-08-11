@@ -62,3 +62,48 @@ git diff --check
 - State and privacy: covered by transition/CAS and permissions tests.
 - Deferred intentionally: preflight venv, owner confirmation, service switch,
   data snapshots, and rollback belong to later tasks.
+
+## Fix after independent review
+
+### RED
+
+Added tests for disposable Builder workspace cleanup, unrelated live source,
+symlinked manifest/policy/review files, read-only source, crashes immediately
+before and after slot publication, and importing without POSIX `fcntl`.
+
+Before the fix these cases failed because verification reopened the disposable
+workspace, `bundled_root` was unused, published slots and records had no staging
+journal, metadata reads followed symlinks, source stayed writable, and the
+module imported `fcntl` unconditionally.
+
+### GREEN
+
+- The live bundled Git root must be the reviewed source at the pinned commit.
+- Staging copies private manifest/policy/review/path evidence into the slot;
+  later verification depends only on that evidence and the full source digest.
+- A durable, fsynced staging journal makes crashes before/after slot publication
+  recover deterministically on the next store initialization.
+- Candidate metadata uses no-follow regular/private-file reads with inode checks.
+- The source tree is frozen read-only after its digest is computed; later byte
+  changes are still detected.
+- File locking selects `fcntl` or `msvcrt` at runtime without a POSIX-only
+  module import.
+- Extraction/copy happens only inside a private temporary root and uses
+  no-follow/inode checks where portable. The documented same-user threat model
+  remains explicit; this does not claim a hostile same-user filesystem sandbox.
+
+Verification:
+
+```text
+.venv/bin/python -m pytest -q tests/honeyos/test_builder_activation.py
+21 passed
+
+.venv/bin/python -m pytest -q tests/honeyos/test_builder_workspace.py tests/honeyos/test_builder_cli.py tests/honeyos/test_builder_activation.py
+81 passed in 10.18s
+
+.venv/bin/ruff check honeyos/companion/builder_activation.py tests/honeyos/test_builder_activation.py
+All checks passed!
+
+git diff --check
+(no output)
+```

@@ -37,15 +37,18 @@ of local activation.
 | Change name, tone, relationship, or remembered content | Typed profile and memory interfaces | Immediate |
 | Add an independent capability | Normal Skill, tool, MCP, or workflow | Install and continue the task; no core restart |
 | Change safe visual presentation tokens, copy, or avatar | Companion UI overlay | Apply after the explicit request; reversible without a core restart |
-| Change memory logic, sessions, structural Web UI, IM adapters, routing, or Runtime | Controlled Builder | Candidate-specific owner confirmation, version switch, restart, health check |
+| Change release-1 activatable companion behavior, memory logic, proactive-topic logic, or structural Web UI | Controlled Builder | Candidate-specific owner confirmation, version switch, restart, health check |
+| Change IM adapters, host Runtime, agent loop, tool dispatch, delivery/model-control routing, or service code | Developer release workflow | Candidate may be discussed, but local self-activation is blocked in release 1 |
 | Change credentials, approval policy, authentication, Builder safeguards, activation safeguards, or filesystem boundaries | Hard blocked | Never self-activated |
 
 The first activation release also blocks dependency and build-system changes
 (`pyproject.toml`, lockfiles, installer scripts, CI/release scripts). Allowing a
 candidate to introduce and execute new supply-chain code requires a separate
-reviewed design. Candidates in this release may change existing HoneyOS Python,
-Web assets, adapters, prompts, Skills, and tests within the manifest's explicit
-allowed paths.
+reviewed design. Candidates in this release may change only the running
+release's explicit companion-product activation surface (selected companion
+behavior/memory/topic Python, structural Web assets, tests, and docs). IM
+adapters, host Runtime, prompts/templates, bundled Skills, tool dispatch, and
+delivery/model-control routing remain outside local self-activation.
 
 Candidate code is untrusted until the owner confirms one exact digest. That
 confirmation promotes it to the trusted local HoneyOS application. The active

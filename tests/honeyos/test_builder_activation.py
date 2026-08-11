@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -65,8 +67,8 @@ def _review_ready_change(tmp_path: Path):
 def _staged_activation(tmp_path: Path):
     from honeyos.companion.builder_activation import ActivationStore
 
-    _source, prepared, review = _review_ready_change(tmp_path)
-    store = ActivationStore(tmp_path / "home", bundled_root=tmp_path / "live")
+    source, prepared, review = _review_ready_change(tmp_path)
+    store = ActivationStore(tmp_path / "home", bundled_root=source)
     return store, store.stage(prepared.change_root), prepared, review
 
 
@@ -77,7 +79,7 @@ def test_stage_materializes_complete_reviewed_source_into_private_slot(tmp_path)
     home = tmp_path / "home"
     (home / "state.db").parent.mkdir(parents=True)
     (home / "state.db").write_text("must-not-copy", encoding="utf-8")
-    store = ActivationStore(home, bundled_root=tmp_path / "live")
+    store = ActivationStore(home, bundled_root=source)
 
     staged = store.stage(prepared.change_root)
 
@@ -102,7 +104,7 @@ def test_stage_applies_reviewed_deletion_only(tmp_path):
 
     (prepared.workspace / "honeyos" / "companion" / "persistent_memory.py").unlink()
     review = inspect_builder_change(prepared.change_root)
-    staged = ActivationStore(tmp_path / "home", tmp_path / "live").stage(prepared.change_root)
+    staged = ActivationStore(tmp_path / "home", source).stage(prepared.change_root)
 
     assert review.status == "review_ready"
     assert not (staged.slot_root / "source" / "honeyos" / "companion" / "persistent_memory.py").exists()
@@ -110,7 +112,7 @@ def test_stage_applies_reviewed_deletion_only(tmp_path):
 
 
 def test_changed_candidate_cannot_be_staged_from_old_review(tmp_path):
-    _source, prepared, _review = _review_ready_change(tmp_path)
+    source, prepared, _review = _review_ready_change(tmp_path)
     from honeyos.companion.builder_activation import ActivationError, ActivationStore
 
     (prepared.workspace / "honeyos" / "companion" / "persistent_memory.py").write_text(
@@ -118,7 +120,7 @@ def test_changed_candidate_cannot_be_staged_from_old_review(tmp_path):
     )
 
     with pytest.raises(ActivationError, match="changed after review"):
-        ActivationStore(tmp_path / "home", tmp_path / "live").stage(prepared.change_root)
+        ActivationStore(tmp_path / "home", source).stage(prepared.change_root)
 
 
 def test_stage_rejects_changed_live_source_head(tmp_path):
@@ -130,12 +132,12 @@ def test_stage_rejects_changed_live_source_head(tmp_path):
     _git(source, "commit", "-m", "unexpected base change")
 
     with pytest.raises(ActivationError, match="source revision"):
-        ActivationStore(tmp_path / "home", tmp_path / "live").stage(prepared.change_root)
+        ActivationStore(tmp_path / "home", source).stage(prepared.change_root)
 
 
 @pytest.mark.parametrize("mutation", ("manifest", "review"))
 def test_stage_rejects_tampered_metadata(tmp_path, mutation):
-    _source, prepared, review = _review_ready_change(tmp_path)
+    source, prepared, review = _review_ready_change(tmp_path)
     from honeyos.companion.builder_activation import ActivationError, ActivationStore
 
     path = prepared.manifest_path if mutation == "manifest" else review.report_path
@@ -144,11 +146,11 @@ def test_stage_rejects_tampered_metadata(tmp_path, mutation):
     path.write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(ActivationError, match="metadata|review"):
-        ActivationStore(tmp_path / "home", tmp_path / "live").stage(prepared.change_root)
+        ActivationStore(tmp_path / "home", source).stage(prepared.change_root)
 
 
 def test_stage_rejects_candidate_symlink(tmp_path):
-    _source, prepared, _review = _review_ready_change(tmp_path)
+    source, prepared, _review = _review_ready_change(tmp_path)
     from honeyos.companion.builder_activation import ActivationError, ActivationStore
     from honeyos.companion.builder_workspace import inspect_builder_change
 
@@ -160,7 +162,7 @@ def test_stage_rejects_candidate_symlink(tmp_path):
     with pytest.raises(ValueError, match="symlink"):
         inspect_builder_change(prepared.change_root)
     with pytest.raises(ActivationError, match="changed after review"):
-        ActivationStore(tmp_path / "home", tmp_path / "live").stage(prepared.change_root)
+        ActivationStore(tmp_path / "home", source).stage(prepared.change_root)
 
 
 def test_candidate_import_resolves_from_slot_source(tmp_path):
@@ -194,23 +196,22 @@ def test_candidate_python_import_cannot_fall_back_to_live_checkout(tmp_path):
     assert Path(completed.stdout.strip()).resolve().is_relative_to(staged.slot_root / "source")
 
 
-def test_verify_rechecks_slot_tree_and_reviewed_diff(tmp_path):
+def test_verify_rechecks_slot_tree_without_revisiting_disposable_builder_workspace(tmp_path):
     store, staged, prepared, _review = _staged_activation(tmp_path)
     from honeyos.companion.builder_activation import ActivationError
 
-    (staged.slot_root / "source" / "honeyos" / "runtime" / "main.py").write_text(
+    tampered = staged.slot_root / "source" / "honeyos" / "runtime" / "main.py"
+    tampered.chmod(tampered.stat().st_mode | stat.S_IWUSR)
+    tampered.write_text(
         "tampered slot\n", encoding="utf-8"
     )
     with pytest.raises(ActivationError, match="slot tree digest"):
         store.verify_staged(staged.activation_id)
 
-    # A newly staged candidate must independently reject post-review workspace bytes.
+    # Once staged, later verification must depend exclusively on staged metadata.
     store2, staged2, prepared2, _review2 = _staged_activation(tmp_path / "second")
-    (prepared2.workspace / "honeyos" / "companion" / "persistent_memory.py").write_text(
-        "tampered review\n", encoding="utf-8"
-    )
-    with pytest.raises(ActivationError, match="changed after review"):
-        store2.verify_staged(staged2.activation_id)
+    shutil.rmtree(prepared2.change_root)
+    assert store2.verify_staged(staged2.activation_id) == staged2
 
 
 def test_activation_transitions_are_compare_and_swap_and_private(tmp_path):
@@ -229,7 +230,7 @@ def test_activation_transitions_are_compare_and_swap_and_private(tmp_path):
 
 
 def test_stage_rejects_executable_candidate_file(tmp_path):
-    _source, prepared, _review = _review_ready_change(tmp_path)
+    source, prepared, _review = _review_ready_change(tmp_path)
     from honeyos.companion.builder_activation import ActivationError, ActivationStore
     from honeyos.companion.builder_workspace import inspect_builder_change
 
@@ -238,4 +239,110 @@ def test_stage_rejects_executable_candidate_file(tmp_path):
     inspect_builder_change(prepared.change_root)
 
     with pytest.raises(ActivationError, match="executable"):
-        ActivationStore(tmp_path / "home", tmp_path / "live").stage(prepared.change_root)
+        ActivationStore(tmp_path / "home", source).stage(prepared.change_root)
+
+
+def test_stage_requires_the_live_bundled_root_to_be_the_reviewed_source(tmp_path):
+    source, prepared, _review = _review_ready_change(tmp_path)
+    from honeyos.companion.builder_activation import ActivationError, ActivationStore
+
+    unrelated = _source_repo(tmp_path / "unrelated")
+
+    with pytest.raises(ActivationError, match="bundled runtime"):
+        ActivationStore(tmp_path / "home", unrelated).stage(prepared.change_root)
+
+
+@pytest.mark.parametrize("metadata_name", ("manifest.json", "trusted-policy.json", "review.json"))
+def test_stage_rejects_symlinked_private_candidate_metadata(tmp_path, metadata_name):
+    source, prepared, review = _review_ready_change(tmp_path)
+    from honeyos.companion.builder_activation import ActivationError, ActivationStore
+
+    original = prepared.change_root / metadata_name
+    if metadata_name == "review.json":
+        original = review.report_path
+    outside = tmp_path / f"outside-{metadata_name}"
+    outside.write_bytes(original.read_bytes())
+    original.unlink()
+    original.symlink_to(outside)
+
+    with pytest.raises(ActivationError, match="metadata|review"):
+        ActivationStore(tmp_path / "home", source).stage(prepared.change_root)
+
+
+def test_stage_snapshots_metadata_and_verifies_after_builder_files_are_deleted(tmp_path):
+    store, staged, prepared, _review = _staged_activation(tmp_path)
+
+    trusted = staged.slot_root / "trusted"
+    assert {path.name for path in trusted.iterdir()} == {
+        "manifest.json",
+        "trusted-policy.json",
+        "review.json",
+        "changed-paths.json",
+    }
+    assert all(path.stat().st_mode & 0o777 == 0o600 for path in trusted.iterdir())
+    shutil.rmtree(prepared.change_root)
+
+    verified = store.verify_staged(staged.activation_id)
+
+    assert verified.candidate_digest == staged.candidate_digest
+    assert verified.slot_tree_digest == staged.slot_tree_digest
+
+
+def test_staged_source_is_read_only_and_tampering_is_detected(tmp_path):
+    store, staged, _prepared, _review = _staged_activation(tmp_path)
+    from honeyos.companion.builder_activation import ActivationError
+
+    source_file = staged.slot_root / "source" / "honeyos" / "runtime" / "main.py"
+    assert not (source_file.stat().st_mode & stat.S_IWUSR)
+    source_file.chmod(source_file.stat().st_mode | stat.S_IWUSR)
+    source_file.write_text("tampered slot\n", encoding="utf-8")
+
+    with pytest.raises(ActivationError, match="slot tree digest"):
+        store.verify_staged(staged.activation_id)
+
+
+def test_reconcile_completes_a_slot_published_before_the_final_record(tmp_path):
+    source, prepared, _review = _review_ready_change(tmp_path)
+    from honeyos.companion.builder_activation import ActivationConflict, ActivationStore
+
+    def crash_after_publish(point: str) -> None:
+        if point == "after_slot_publish":
+            raise SystemExit("simulated crash")
+
+    crashed = ActivationStore(tmp_path / "home", source, crash_hook=crash_after_publish)
+    with pytest.raises(SystemExit, match="simulated crash"):
+        crashed.stage(prepared.change_root)
+
+    recovered = ActivationStore(tmp_path / "home", source)
+    with pytest.raises(ActivationConflict, match="already been staged"):
+        recovered.stage(prepared.change_root)
+    activation_id = next(recovered.activations.glob("*.json")).stem
+    assert recovered.verify_staged(activation_id).state == "staged"
+
+
+def test_reconcile_discards_a_journal_left_before_slot_publication(tmp_path):
+    source, prepared, _review = _review_ready_change(tmp_path)
+    from honeyos.companion.builder_activation import ActivationStore
+
+    def crash_before_publish(point: str) -> None:
+        if point == "before_slot_publish":
+            raise SystemExit("simulated crash")
+
+    crashed = ActivationStore(tmp_path / "home", source, crash_hook=crash_before_publish)
+    with pytest.raises(SystemExit, match="simulated crash"):
+        crashed.stage(prepared.change_root)
+
+    recovered = ActivationStore(tmp_path / "home", source)
+    staged = recovered.stage(prepared.change_root)
+    assert recovered.verify_staged(staged.activation_id).state == "staged"
+
+
+def test_builder_activation_module_imports_without_posix_lock_module(tmp_path, monkeypatch):
+    import importlib
+
+    import honeyos.companion.builder_activation as activation
+
+    monkeypatch.setitem(sys.modules, "fcntl", None)
+    reloaded = importlib.reload(activation)
+
+    assert reloaded.ActivationStore.__name__ == "ActivationStore"

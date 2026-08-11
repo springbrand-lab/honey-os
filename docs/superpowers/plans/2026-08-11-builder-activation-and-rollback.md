@@ -23,6 +23,9 @@
 - Credential/channel binding, profile redaction, permission and model-control
   routing, delivery routing, bundled Skill instructions, and prompt templates
   remain protected in release 1.
+- Host Runtime, gateway/IM adapters, agent loop, tool dispatch, CLI, provider,
+  plugin, migration, and service code are developer-release changes in release
+  1 and cannot be locally self-activated.
 - Candidate dependency/build changes (`pyproject.toml`, `uv.lock`, installers, release scripts) are blocked in this release.
 - `SOUL.md`, identity, relationship, memories, `state.db`, credentials, channel bindings, Skills, cron jobs, UI overlays, and projects remain under the existing `HONEYOS_HOME` and are never overlaid by a slot.
 - No GitHub account, push, branch merge, or PR is part of local activation.
