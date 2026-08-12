@@ -375,6 +375,13 @@ def _runtime_provider_identity(runtime_kwargs: Dict[str, Any]) -> Optional[str]:
     )
 
 
+def _companion_tool_event_type(event_type: str, *, is_error: bool = False) -> str:
+    """Translate executor completion metadata into companion event semantics."""
+    if event_type == "tool.completed" and is_error:
+        return "tool.failed"
+    return event_type
+
+
 def _companion_tool_event_payload(
     *,
     event_type: str,
@@ -4890,6 +4897,10 @@ class APIServerAdapter(BasePlatformAdapter):
                     _enqueue("tool.progress", {"message_id": message_id, "tool_name": tool_name or "_thinking", "delta": preview or ""})
             elif event_type in {"tool.started", "tool.completed", "tool.failed"}:
                 if companion_view:
+                    companion_event_type = _companion_tool_event_type(
+                        event_type,
+                        is_error=bool(kwargs.get("is_error")),
+                    )
                     if event_type == "tool.started":
                         activity_id = _started_activity_id(tool_name, args)
                         activity_args = args
@@ -4897,7 +4908,7 @@ class APIServerAdapter(BasePlatformAdapter):
                         activity_id = _finished_activity_id(tool_name)
                         activity_args = active_activity_args.pop(activity_id, args)
                     payload = _companion_tool_event_payload(
-                        event_type=event_type,
+                        event_type=companion_event_type,
                         message_id=message_id,
                         tool_name=tool_name,
                         activity_id=activity_id,
@@ -4913,7 +4924,7 @@ class APIServerAdapter(BasePlatformAdapter):
                         "preview": preview,
                         "args": args,
                     }
-                _enqueue(event_type, payload)
+                _enqueue(companion_event_type if companion_view else event_type, payload)
 
         def _approval_notify(approval_data: Dict[str, Any]) -> None:
             if not companion_view:
