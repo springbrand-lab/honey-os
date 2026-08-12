@@ -13,12 +13,14 @@ BOOTSTRAP = ROOT / "install.sh"
 
 
 def _run_installer(tmp_path: Path) -> tuple[subprocess.CompletedProcess[str], list[str]]:
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
+    uv_bin = tmp_path / "uv-bin"
+    uv_bin.mkdir()
     uv_log = tmp_path / "uv.log"
-    fake_uv = fake_bin / "uv"
+    fake_uv = uv_bin / "uv"
     fake_uv.write_text(
-        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$UV_LOG\"\n",
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"--version\" ]; then echo \"uv 0.11.21\"; exit 0; fi\n"
+        "printf '%s\\n' \"$*\" >> \"$UV_LOG\"\n",
         encoding="utf-8",
     )
     fake_uv.chmod(0o755)
@@ -28,7 +30,8 @@ def _run_installer(tmp_path: Path) -> tuple[subprocess.CompletedProcess[str], li
     environment.update(
         {
             "HOME": str(tmp_path / "home"),
-            "PATH": f"{fake_bin}:/usr/bin:/bin",
+            "PATH": "/usr/bin:/bin",
+            "UV_INSTALL_DIR": str(uv_bin),
             "UV_LOG": str(uv_log),
         }
     )

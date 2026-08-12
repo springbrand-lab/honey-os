@@ -6,17 +6,29 @@ import tarfile
 from pathlib import Path
 
 
-def test_installer_bootstraps_uv_then_runs_setup(tmp_path):
+def test_installer_uses_private_uv_when_path_contains_old_uv(tmp_path):
     repo = Path(__file__).parents[2]
     fake_bin = tmp_path / "bin"
-    uv_bin = tmp_path / "uv-bin"
+    home = tmp_path / "home"
+    uv_bin = home / ".local" / "share" / "honeyos" / "runtime"
     fake_bin.mkdir()
     log = tmp_path / "uv.log"
+    system_uv_log = tmp_path / "system-uv.log"
+
+    system_uv = fake_bin / "uv"
+    system_uv.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' \"$*\" >> \"$HONEYOS_TEST_SYSTEM_UV_LOG\"\n"
+        "exit 2\n",
+        encoding="utf-8",
+    )
+    system_uv.chmod(0o755)
 
     curl = fake_bin / "curl"
     curl.write_text(
         "#!/bin/sh\n"
         "printf '%s\\n' '#!/bin/sh' "
+        "'if [ \"$1\" = \"--version\" ]; then echo \"uv 0.11.21\"; exit 0; fi' "
         "'printf \"%s\\n\" \"$*\" >> \"$HONEYOS_TEST_UV_LOG\"' "
         "> \"$UV_INSTALL_DIR/uv\"\n"
         "chmod +x \"$UV_INSTALL_DIR/uv\"\n"
@@ -28,12 +40,13 @@ def test_installer_bootstraps_uv_then_runs_setup(tmp_path):
     env = os.environ.copy()
     env.pop("HONEYOS_HOME", None)
     env.pop("H2OS_HOME", None)
+    env.pop("UV_INSTALL_DIR", None)
     env.update(
         {
-            "HOME": str(tmp_path / "home"),
+            "HOME": str(home),
             "PATH": f"{fake_bin}:/usr/bin:/bin",
-            "UV_INSTALL_DIR": str(uv_bin),
             "HONEYOS_TEST_UV_LOG": str(log),
+            "HONEYOS_TEST_SYSTEM_UV_LOG": str(system_uv_log),
         }
     )
     result = subprocess.run(
@@ -50,6 +63,7 @@ def test_installer_bootstraps_uv_then_runs_setup(tmp_path):
         "sync --locked --quiet --extra honeyos",
         "run honeyos setup",
     ]
+    assert not system_uv_log.exists()
 
 
 def test_github_bootstrap_installs_to_stable_user_path(tmp_path):
