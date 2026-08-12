@@ -147,11 +147,17 @@
     const completed = activities.filter(
       (activity) => activity.state === "completed",
     ).length;
+    const failed = activities.filter(
+      (activity) => activity.state === "failed",
+    ).length;
     const active = [...activities]
       .reverse()
       .find((activity) => activity.state === "active");
 
-    if (current.phase === "failed") {
+    if (
+      current.phase === "failed" ||
+      (current.phase === "completed" && failed)
+    ) {
       return {
         state: "failed",
         title: "刚才没走通，我换个办法",

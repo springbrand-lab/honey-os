@@ -126,6 +126,28 @@ process.stdout.write(JSON.stringify(HoneyOSRunState.summarize(state)));
 
 
 @pytest.mark.skipif(NODE is None, reason="Node.js is not installed")
+def test_turn_summary_preserves_failed_tool_after_assistant_completion():
+    summary = _run_state_script(
+        """
+let state = HoneyOSRunState.create(1000);
+state = HoneyOSRunState.reduce(state, {name:'run.started', payload:{}}, 1000);
+state = HoneyOSRunState.reduce(state, {name:'tool.started', payload:{activity:{activity_id:'a1',kind:'reading',state:'active',title:'正在读取文件',detail:''}}}, 1100);
+state = HoneyOSRunState.reduce(state, {name:'tool.failed', payload:{activity:{activity_id:'a1',kind:'reading',state:'failed',title:'刚才没走通，我换个办法',detail:''}}}, 1400);
+state = HoneyOSRunState.reduce(state, {name:'assistant.completed', payload:{content:'文件不存在'}}, 1700);
+process.stdout.write(JSON.stringify(HoneyOSRunState.summarize(state)));
+"""
+    )
+
+    assert summary == {
+        "state": "failed",
+        "title": "刚才没走通，我换个办法",
+        "meta": "做到 0/1 步",
+        "completed": 0,
+        "total": 1,
+    }
+
+
+@pytest.mark.skipif(NODE is None, reason="Node.js is not installed")
 def test_activity_timeline_keeps_start_and_update_times():
     state = _run_state_script(
         """

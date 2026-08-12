@@ -26,6 +26,7 @@ from honeyos.gateway.config import PlatformConfig
 from honeyos.gateway.platforms.api_server import (
     APIServerAdapter,
     _companion_approval_event_payload,
+    _companion_tool_event_type,
     _companion_tool_event_payload,
     _run_completed_event_payload,
     _runtime_provider_identity,
@@ -130,6 +131,26 @@ def test_activity_projection_collapses_success_and_softens_failure():
     assert failed == {
         "activity_id": "activity",
         "kind": "handling",
+        "state": "failed",
+        "title": "刚才没走通，我换个办法",
+        "detail": "",
+    }
+
+
+def test_companion_tool_error_is_projected_as_failed_event():
+    event_type = _companion_tool_event_type("tool.completed", is_error=True)
+    payload = _companion_tool_event_payload(
+        event_type=event_type,
+        message_id="message-1",
+        tool_name="read_file",
+        activity_id="activity-1",
+        args={"path": "/private/missing.txt"},
+    )
+
+    assert event_type == "tool.failed"
+    assert payload["activity"] == {
+        "activity_id": "activity-1",
+        "kind": "reading",
         "state": "failed",
         "title": "刚才没走通，我换个办法",
         "detail": "",
