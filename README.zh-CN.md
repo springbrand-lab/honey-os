@@ -25,7 +25,7 @@ OpenAI、OpenRouter 和 DeepSeek 的官方 Base URL 已内置，普通用户不�
 打开“终端”，粘贴并执行：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Nicole202504/honeyos/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/springbrand-lab/honey-os/main/install.sh | bash
 ```
 
 安装器会从 GitHub 下载当前 HoneyOS 版本，安装到 `~/.local/share/honeyos/app`，并自动准备 Python、`uv` 和依赖。安装和升级都使用同一条命令，不需要下载 ZIP 或双击 `.command` 文件。
@@ -33,8 +33,8 @@ curl -fsSL https://raw.githubusercontent.com/Nicole202504/honeyos/main/install.s
 熟悉 Git 的用户也可以使用：
 
 ```bash
-git clone https://github.com/Nicole202504/honeyos.git
-cd honeyos
+git clone git@github.com:springbrand-lab/honey-os.git
+cd honey-os
 /bin/sh scripts/install_honeyos.sh
 ```
 
@@ -226,7 +226,7 @@ Builder 只把明确允许的产品文件复制到候选工作区。用户确认
 升级时重新执行安装命令：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Nicole202504/honeyos/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/springbrand-lab/honey-os/main/install.sh | bash
 ```
 
 安装器发现已有 HoneyOS 后会自动升级、重启服务并打开网页，不会再次要求填写模型或连接 IM。

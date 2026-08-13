@@ -25,7 +25,7 @@ The official Base URLs for OpenAI, OpenRouter, and DeepSeek are built in. Most u
 Open Terminal, then paste and run:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Nicole202504/honeyos/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/springbrand-lab/honey-os/main/install.sh | bash
 ```
 
 The installer downloads the current HoneyOS release from GitHub, installs it in `~/.local/share/honeyos/app`, and prepares Python, `uv`, and all dependencies. The same command installs and upgrades HoneyOS, so you do not need to download a ZIP file or open a `.command` file.
@@ -33,8 +33,8 @@ The installer downloads the current HoneyOS release from GitHub, installs it in 
 If you are comfortable with Git, you can also run:
 
 ```bash
-git clone https://github.com/Nicole202504/honeyos.git
-cd honeyos
+git clone git@github.com:springbrand-lab/honey-os.git
+cd honey-os
 /bin/sh scripts/install_honeyos.sh
 ```
 
@@ -226,7 +226,7 @@ To enter model settings again or reconnect IM:
 To upgrade, run the installation command again:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Nicole202504/honeyos/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/springbrand-lab/honey-os/main/install.sh | bash
 ```
 
 When the installer finds an existing HoneyOS installation, it upgrades and restarts the service, then opens the browser without asking you to configure the model or IM again.

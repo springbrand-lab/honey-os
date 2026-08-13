@@ -2,7 +2,7 @@
 set -eu
 
 VERSION=0.3.1
-REPOSITORY=Nicole202504/honeyos
+REPOSITORY=springbrand-lab/honey-os
 ARCHIVE_URL="https://github.com/$REPOSITORY/archive/refs/heads/main.tar.gz"
 INSTALL_ROOT="$HOME/.local/share/honeyos"
 INSTALL_DIR="$INSTALL_ROOT/app"

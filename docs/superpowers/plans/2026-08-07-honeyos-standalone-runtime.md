@@ -421,7 +421,7 @@ Expected: all tests pass; archive contains one HoneyOS root, no ignored/private 
 git add README.md scripts tests dist/*.sha256
 git commit -m "build: ship standalone HoneyOS user archive"
 git push -u origin agent/honeyos-standalone-runtime
-gh pr create --repo Nicole202504/test_ai_0806 --base main --head agent/honeyos-standalone-runtime
+gh pr create --repo springbrand-lab/honey-os --base main --head agent/honeyos-standalone-runtime
 ```
 
 The PR body must link the design and this plan, enumerate deleted top-level trees, report retained test counts, show the ZIP file count/size/checksum, and include the Hermes coexistence result.
