@@ -155,6 +155,7 @@ def test_runtime_capability_commands_route_through_honeyos(monkeypatch, tmp_path
         ["model", "list"],
         ["tools"],
         ["computer-use", "doctor", "--json"],
+        ["mcp", "login", "example"],
     ):
         assert main(["--home", str(tmp_path), *arguments]) == 0
 
@@ -162,6 +163,7 @@ def test_runtime_capability_commands_route_through_honeyos(monkeypatch, tmp_path
         (["model", "list"], tmp_path.resolve()),
         (["tools"], tmp_path.resolve()),
         (["computer-use", "doctor", "--json"], tmp_path.resolve()),
+        (["mcp", "login", "example"], tmp_path.resolve()),
     ]
 
 

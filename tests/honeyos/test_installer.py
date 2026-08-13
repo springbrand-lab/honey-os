@@ -60,7 +60,7 @@ def test_installer_uses_private_uv_when_path_contains_old_uv(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert log.read_text(encoding="utf-8").splitlines() == [
-        "sync --locked --quiet --extra honeyos",
+        "sync --locked --quiet --extra honeyos --extra mcp",
         "run honeyos setup",
     ]
     assert not system_uv_log.exists()

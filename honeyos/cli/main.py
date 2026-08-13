@@ -44,6 +44,7 @@ def _parser() -> argparse.ArgumentParser:
         "model": "Configure the companion model",
         "tools": "Configure companion capabilities",
         "computer-use": "Install and check desktop control",
+        "mcp": "Install, authorize, and manage MCP servers",
     }
     for command, help_text in passthrough_commands.items():
         passthrough = commands.add_parser(command, help=help_text, add_help=False)
@@ -140,7 +141,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except SystemExit as exc:
         return int(exc.code or 0)
 
-    passthrough_names = {"skills", "model", "tools", "computer-use"}
+    passthrough_names = {"skills", "model", "tools", "computer-use", "mcp"}
     if unknown and args.command not in passthrough_names:
         print(
             f"honeyos: error: unrecognized arguments: {' '.join(unknown)}",

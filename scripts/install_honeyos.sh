@@ -40,7 +40,7 @@ esac
 
 cd "$REPO_DIR"
 echo "Preparing HoneyOS…"
-"$UV_BIN" sync --locked --quiet --extra honeyos
+"$UV_BIN" sync --locked --quiet --extra honeyos --extra mcp
 
 mkdir -p "$HOME/.local/bin"
 ln -sfn "$REPO_DIR/.venv/bin/honeyos" "$HOME/.local/bin/honeyos"

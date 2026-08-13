@@ -144,6 +144,8 @@ def test_settings_page_edits_model_and_connects_both_im_channels_by_qr():
     assert 'id="channel-link-qr"' in page
     assert "App Secret" not in page
     assert "仍保留在管理后台" not in page
+    assert 'id="mcp-server-list"' in page
+    assert "MCP 工具" in page
 
 
 def test_settings_script_saves_model_without_refilling_key_and_polls_qr_link():
@@ -162,6 +164,12 @@ def test_settings_script_saves_model_without_refilling_key_and_polls_qr_link():
     assert 'elements.modelApiKey.value = ""' in script
     assert "qr_image" in script
     assert "restart_required" in script
+    assert 'fetch("/api/companion/mcp/servers"' in script
+    assert 'window.open("about:blank"' in script
+    assert '"/api/companion/mcp/oauth/flows/"' in script
+    assert "MCP_AUTHORIZATION_PREPARE_TIMEOUT_MS = 90_000" in script
+    assert "授权页面准备超时，请重试" in script
+    assert "showMcpAuthorizationLink(card, payload.authorization_url);" in script
     assert ".innerHTML" not in script
 
 

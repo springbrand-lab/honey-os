@@ -12123,8 +12123,9 @@ _MCP_DASHBOARD_OAUTH_TTL = 15 * 60
 _MAX_PENDING_MCP_OAUTH_FLOWS = 8
 _mcp_oauth_flows: dict[str, "DashboardOAuthFlow"] = {}
 _mcp_oauth_flows_lock = threading.Lock()
-_mcp_oauth_transactions: dict[tuple[str, str], threading.Lock] = {}
-_mcp_oauth_transactions_lock = threading.Lock()
+from honeyos.tools.mcp_dashboard_oauth import (
+    run_dashboard_mcp_oauth as _run_dashboard_mcp_oauth,
+)
 
 
 def _gc_mcp_oauth_flows() -> None:
@@ -12160,102 +12161,6 @@ def _mcp_oauth_callback_url(request: Request, server_name: str) -> str:
     base = urlparse(str(request.base_url))
     prefix = prefix_from_request(request)
     return urlunparse(base._replace(path=f"{prefix}{suffix}", params="", query="", fragment=""))
-
-
-def _mcp_oauth_transaction(flow) -> threading.Lock:
-    key = (flow.honeyos_home, flow.server_name)
-    with _mcp_oauth_transactions_lock:
-        return _mcp_oauth_transactions.setdefault(key, threading.Lock())
-
-
-def _run_dashboard_mcp_oauth(flow, cfg: dict) -> None:
-    """Run the normal MCP probe with dashboard redirect/callback handlers."""
-    from honeyos.runtime.mcp_config import (
-        _oauth_tokens_present,
-        _probe_single_server,
-        _save_mcp_server,
-    )
-    try:
-        from honeyos.agent.secret_scope import (
-            build_profile_secret_scope,
-            reset_secret_scope,
-            set_secret_scope,
-        )
-        from honeyos.core.constants import reset_honeyos_home_override, set_honeyos_home_override
-        from honeyos.tools.mcp_dashboard_oauth import dashboard_oauth_flow
-        from honeyos.tools.mcp_oauth import HoneyOSTokenStorage, force_interactive_oauth
-        from honeyos.tools.mcp_oauth_manager import get_manager
-
-        home_token = set_honeyos_home_override(flow.honeyos_home)
-        secret_token = set_secret_scope(build_profile_secret_scope(Path(flow.honeyos_home)))
-        try:
-            transaction = _mcp_oauth_transaction(flow)
-            with transaction, force_interactive_oauth(), dashboard_oauth_flow(flow):
-                manager = get_manager()
-                storage = HoneyOSTokenStorage(flow.server_name)
-                backup = storage.snapshot()
-                previous_entry = None
-                try:
-                    previous_entry = manager.remove(
-                        flow.server_name,
-                        honeyos_home=flow.honeyos_home,
-                    )
-                    tools = _probe_single_server(
-                        flow.server_name,
-                        cfg,
-                        connect_timeout=max(float(cfg.get("connect_timeout", 0) or 0), 315),
-                    )
-                    if not _oauth_tokens_present(flow.server_name):
-                        raise RuntimeError(
-                            "The server responded, but no OAuth token was obtained — "
-                            "this provider may require a manually-registered OAuth client."
-                        )
-                    _save_mcp_server(flow.server_name, cfg)
-                    flow.tools = [{"name": t, "description": d} for t, d in tools]
-                    flow.mark_approved()
-                    if flow.reconnect_live:
-                        from honeyos.tools.mcp_tool import reconnect_mcp_server
-
-                        reconnect_mcp_server(flow.server_name)
-                except Exception:
-                    storage.restore(backup, only_if_absent=True)
-                    manager.restore_entry(
-                        flow.server_name,
-                        previous_entry,
-                        honeyos_home=flow.honeyos_home,
-                    )
-                    raise
-        finally:
-            reset_secret_scope(secret_token)
-            reset_honeyos_home_override(home_token)
-    except Exception as exc:
-        msg = str(exc)
-        # Providers that gate RFC 7591 registration to pre-approved clients
-        # (Figma's MCP catalog, etc.) 403 the register call before any
-        # authorization URL exists — surface what's actually happening
-        # instead of a bare "403 Forbidden".
-        try:
-            from honeyos.tools.mcp_oauth import humanize_oauth_registration_error
-
-            humanized = humanize_oauth_registration_error(
-                flow.server_name,
-                exc,
-                server_url=cfg.get("url") if isinstance(cfg, dict) else None,
-            )
-            if humanized:
-                msg = humanized
-        except Exception:
-            pass
-        flow.mark_error(msg)
-    finally:
-        flow.mark_worker_done()
-
-
-
-
-
-
-
 
 
 

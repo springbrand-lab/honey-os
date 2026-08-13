@@ -2778,6 +2778,14 @@ input:focus-visible, textarea:focus-visible {
 .model-manual-details label { max-width: 100%; }
 .settings-form-footer { grid-column: 1 / -1; display: flex; justify-content: flex-end; padding-top: 2px; }
 .settings-group .settings-form-footer button { width: auto; min-height: 40px; padding: 0 18px; border: 0; border-radius: 10px; color: #fff; background: #34312d; }
+.mcp-settings-list { padding: 12px; display: grid; gap: 10px; border-top: 1px solid var(--line); }
+.mcp-settings-card { min-width: 0; padding: 14px; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; align-items: start; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-muted); }
+.mcp-settings-card > div { display: grid; gap: 4px; }
+.mcp-settings-card small { line-height: 1.45; }
+.mcp-status { color: var(--accent-strong); font-size: 11px; }
+.settings-group .mcp-settings-card button { grid-column: 1 / -1; min-height: 38px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 9px; color: var(--text); background: var(--surface-raised); }
+.mcp-authorization-link { grid-column: 1 / -1; color: var(--accent-strong); font-size: 12px; font-weight: 620; }
+.mcp-empty-state { margin: 0; padding: 8px 3px; color: var(--text-faint); font-size: 12px; }
 .channel-settings-grid { padding: 12px; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; border-top: 1px solid var(--line); }
 .channel-settings-card { min-width: 0; padding: 14px; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; align-items: start; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-muted); }
 .channel-settings-card > div { display: grid; gap: 4px; }

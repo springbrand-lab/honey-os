@@ -558,6 +558,10 @@ def test_api_server_registers_companion_web_routes():
     assert ("GET", "/honeyos/icons.svg") in routes
     assert ("GET", "/api/companion/bootstrap") in routes
     assert ("GET", "/api/companion/settings") in routes
+    assert ("GET", "/api/companion/mcp/servers") in routes
+    assert ("POST", "/api/companion/mcp/servers/{name}/auth") in routes
+    assert ("GET", "/api/companion/mcp/oauth/flows/{flow_id}") in routes
+    assert ("GET", "/api/companion/mcp/oauth/callback/{server_name}") in routes
     assert ("POST", "/api/companion/settings/models") in routes
     assert ("POST", "/api/companion/settings/model") in routes
     assert ("POST", "/api/companion/channels/{platform}/link") in routes
@@ -574,6 +578,65 @@ def test_api_server_registers_companion_web_routes():
         "POST",
         "/api/companion/proactive/{delivery_id}/complete",
     ) in routes
+
+
+@pytest.mark.asyncio
+async def test_companion_mcp_oauth_starts_and_accepts_callback(monkeypatch, tmp_path):
+    from honeyos.tools.mcp_dashboard_oauth import DashboardOAuthFlow
+
+    monkeypatch.setattr("honeyos.core.constants.get_honeyos_home", lambda: tmp_path)
+    monkeypatch.setattr(
+        "honeyos.runtime.mcp_config._get_mcp_servers",
+        lambda: {"example": {"url": "https://mcp.example.test", "auth": "oauth"}},
+    )
+    adapter = _api_adapter()
+    started = []
+    monkeypatch.setattr(
+        adapter,
+        "_start_companion_mcp_oauth_worker",
+        lambda flow, cfg: started.append((flow, cfg)),
+    )
+    request = SimpleNamespace(
+        cookies={"honeyos_local": adapter._local_web_token},
+        remote="127.0.0.1",
+        headers={},
+        match_info={"name": "example"},
+    )
+
+    response = await adapter._handle_companion_mcp_auth(request)
+    payload = json.loads(response.text)
+
+    assert response.status == 202
+    assert payload["status"] == "starting"
+    assert started
+    flow = adapter._mcp_oauth_flows[payload["flow_id"]]
+    assert isinstance(flow, DashboardOAuthFlow)
+    assert flow.redirect_uri == (
+        "http://127.0.0.1:8642/api/companion/mcp/oauth/callback/example"
+    )
+
+    await flow.publish_authorization_url("https://auth.example.test?state=state-1")
+    wrong_state_callback = SimpleNamespace(
+        remote="127.0.0.1",
+        match_info={"server_name": "example"},
+        query={"code": "code-1", "state": "wrong-state"},
+    )
+    wrong_state_response = await adapter._handle_companion_mcp_oauth_callback(
+        wrong_state_callback
+    )
+    assert wrong_state_response.status == 404
+
+    callback = SimpleNamespace(
+        remote="127.0.0.1",
+        match_info={"server_name": "example"},
+        query={"code": "code-1", "state": "state-1"},
+    )
+    callback_response = await adapter._handle_companion_mcp_oauth_callback(callback)
+
+    assert callback_response.status == 200
+    assert await flow.wait_for_callback(timeout=0.01) == ("code-1", "state-1")
+    replay_response = await adapter._handle_companion_mcp_oauth_callback(callback)
+    assert replay_response.status == 400
 
 
 @pytest.mark.asyncio

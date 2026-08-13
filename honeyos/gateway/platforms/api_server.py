@@ -60,7 +60,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 # Sentinel returned by _resolve_request_profile when a /p/<profile>/ prefix
 # names a profile this gateway does not serve (→ 404). Distinct from None
@@ -185,6 +185,8 @@ def _honeyos_version() -> str:
 # Default settings
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8642
+_MCP_OAUTH_FLOW_TTL = 15 * 60
+_MAX_PENDING_MCP_OAUTH_FLOWS = 8
 MAX_STORED_RESPONSES = 100
 MAX_REQUEST_BYTES = 10_000_000  # 10 MB — accommodates long agent conversations with tool calls
 CHAT_COMPLETIONS_SSE_KEEPALIVE_SECONDS = 30.0
@@ -1505,6 +1507,8 @@ class APIServerAdapter(BasePlatformAdapter):
         # into page JavaScript or persisted to disk.
         self._local_web_token: str = secrets.token_urlsafe(32)
         self._companion_link_manager = None
+        self._mcp_oauth_flows: Dict[str, Any] = {}
+        self._mcp_oauth_flows_lock = threading.Lock()
         self._cors_origins: tuple[str, ...] = self._parse_cors_origins(
             extra.get("cors_origins", os.getenv("API_SERVER_CORS_ORIGINS", "")),
         )
@@ -2166,6 +2170,22 @@ class APIServerAdapter(BasePlatformAdapter):
             ("GET", "/honeyos/icons.svg", self._handle_companion_icons),
             ("GET", "/api/companion/bootstrap", self._handle_companion_bootstrap),
             ("GET", "/api/companion/settings", self._handle_companion_settings),
+            ("GET", "/api/companion/mcp/servers", self._handle_companion_mcp_servers),
+            (
+                "POST",
+                "/api/companion/mcp/servers/{name}/auth",
+                self._handle_companion_mcp_auth,
+            ),
+            (
+                "GET",
+                "/api/companion/mcp/oauth/flows/{flow_id}",
+                self._handle_companion_mcp_oauth_status,
+            ),
+            (
+                "GET",
+                "/api/companion/mcp/oauth/callback/{server_name}",
+                self._handle_companion_mcp_oauth_callback,
+            ),
             (
                 "POST",
                 "/api/companion/settings/models",
@@ -2525,6 +2545,209 @@ class APIServerAdapter(BasePlatformAdapter):
 
         settings = await asyncio.to_thread(companion_settings, get_honeyos_home())
         return web.json_response({"settings": settings})
+
+    def _gc_companion_mcp_oauth_flows(self) -> None:
+        cutoff = time.time() - _MCP_OAUTH_FLOW_TTL
+        with self._mcp_oauth_flows_lock:
+            stale = [
+                flow_id
+                for flow_id, flow in self._mcp_oauth_flows.items()
+                if getattr(flow, "created_at", 0) < cutoff
+            ]
+            for flow_id in stale:
+                self._mcp_oauth_flows.pop(flow_id, None)
+
+    @staticmethod
+    def _safe_companion_mcp_flow(flow) -> Dict[str, Any]:
+        snapshot = flow.snapshot()
+        if snapshot.get("error"):
+            snapshot["error"] = "授权没有完成，请重试。"
+        if flow.tools:
+            snapshot["tools"] = flow.tools
+        return snapshot
+
+    async def _handle_companion_mcp_servers(
+        self, request: "web.Request"
+    ) -> "web.Response":
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+        from honeyos.runtime.mcp_config import _get_mcp_servers, _oauth_tokens_present
+
+        self._gc_companion_mcp_oauth_flows()
+        profile = _api_request_profile.get()
+        with self._mcp_oauth_flows_lock:
+            active = {
+                flow.server_name: flow
+                for flow in sorted(
+                    self._mcp_oauth_flows.values(),
+                    key=lambda item: item.created_at,
+                )
+                if flow.profile == profile
+            }
+        servers = []
+        for name, cfg in _get_mcp_servers().items():
+            if not isinstance(cfg, dict):
+                continue
+            auth_type = str(cfg.get("auth") or "")
+            status = "configured"
+            error = None
+            if auth_type == "oauth":
+                flow = active.get(name)
+                if flow is not None:
+                    status = flow.status
+                    error = "授权没有完成，请重试。" if flow.error else None
+                else:
+                    status = "connected" if _oauth_tokens_present(name) else "authorization_required"
+            servers.append(
+                {
+                    "name": name,
+                    "auth": auth_type or "none",
+                    "enabled": str(cfg.get("enabled", True)).lower()
+                    not in {"false", "0", "no"},
+                    "status": status,
+                    "error": error,
+                }
+            )
+        return web.json_response({"servers": servers})
+
+    def _companion_mcp_callback_url(self, server_name: str) -> str:
+        profile = _api_request_profile.get()
+        prefix = f"/p/{quote(profile, safe='')}" if profile else ""
+        return (
+            f"http://127.0.0.1:{self._port}{prefix}"
+            f"/api/companion/mcp/oauth/callback/{quote(server_name, safe='')}"
+        )
+
+    @staticmethod
+    def _start_companion_mcp_oauth_worker(flow, cfg: dict) -> None:
+        from honeyos.tools.mcp_dashboard_oauth import run_dashboard_mcp_oauth
+
+        threading.Thread(
+            target=run_dashboard_mcp_oauth,
+            args=(flow, cfg),
+            daemon=True,
+            name=f"companion-mcp-oauth-{flow.server_name}",
+        ).start()
+
+    async def _handle_companion_mcp_auth(
+        self, request: "web.Request"
+    ) -> "web.Response":
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+        from honeyos.core.constants import get_honeyos_home
+        from honeyos.runtime.mcp_config import _get_mcp_servers
+        from honeyos.tools.mcp_dashboard_oauth import (
+            DashboardOAuthFlow,
+        )
+
+        self._gc_companion_mcp_oauth_flows()
+        name = str(request.match_info.get("name") or "")
+        servers = _get_mcp_servers()
+        if name not in servers:
+            return web.json_response({"error": "MCP 服务不存在"}, status=404)
+        cfg = dict(servers[name])
+        if not cfg.get("url"):
+            return web.json_response({"error": "stdio MCP 不使用 OAuth"}, status=400)
+        if cfg.get("headers") and cfg.get("auth") != "oauth":
+            return web.json_response({"error": "该 MCP 使用 API Key，不使用 OAuth"}, status=400)
+        cfg["auth"] = "oauth"
+
+        flow_home = str(get_honeyos_home().expanduser().resolve(strict=False))
+        flow = DashboardOAuthFlow(
+            flow_id=secrets.token_urlsafe(24),
+            server_name=name,
+            profile=_api_request_profile.get(),
+            honeyos_home=flow_home,
+            redirect_uri=(cfg.get("oauth") or {}).get("redirect_uri")
+            or self._companion_mcp_callback_url(name),
+            reconnect_live=True,
+        )
+        with self._mcp_oauth_flows_lock:
+            pending = sum(not item.worker_done for item in self._mcp_oauth_flows.values())
+            if pending >= _MAX_PENDING_MCP_OAUTH_FLOWS:
+                return web.json_response({"error": "正在进行的授权过多，请稍后重试"}, status=429)
+            if any(
+                item.server_name == name
+                and item.honeyos_home == flow_home
+                and not item.worker_done
+                for item in self._mcp_oauth_flows.values()
+            ):
+                return web.json_response({"error": "该 MCP 正在授权"}, status=409)
+            self._mcp_oauth_flows[flow.flow_id] = flow
+        self._start_companion_mcp_oauth_worker(flow, cfg)
+        return web.json_response(self._safe_companion_mcp_flow(flow), status=202)
+
+    async def _handle_companion_mcp_oauth_status(
+        self, request: "web.Request"
+    ) -> "web.Response":
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+        self._gc_companion_mcp_oauth_flows()
+        flow_id = str(request.match_info.get("flow_id") or "")
+        with self._mcp_oauth_flows_lock:
+            flow = self._mcp_oauth_flows.get(flow_id)
+        if flow is None or flow.profile != _api_request_profile.get():
+            return web.json_response({"error": "授权已过期，请重试"}, status=404)
+        return web.json_response(self._safe_companion_mcp_flow(flow))
+
+    async def _handle_companion_mcp_oauth_callback(
+        self, request: "web.Request"
+    ) -> "web.Response":
+        if not self._request_is_loopback(request):
+            return web.Response(status=404)
+        self._gc_companion_mcp_oauth_flows()
+        server_name = str(request.match_info.get("server_name") or "")
+        state = request.query.get("state")
+        with self._mcp_oauth_flows_lock:
+            candidates = [
+                flow
+                for flow in self._mcp_oauth_flows.values()
+                if flow.server_name == server_name
+                and flow.profile == _api_request_profile.get()
+                and flow.status == "authorization_required"
+            ]
+        flow = next(
+            (
+                candidate
+                for candidate in candidates
+                if candidate.expected_state is not None
+                and state is not None
+                and secrets.compare_digest(candidate.expected_state, state)
+            ),
+            None,
+        )
+        if flow is None:
+            return web.Response(
+                text="<h1>OAuth flow expired</h1><p>Return to HoneyOS and try again.</p>",
+                content_type="text/html",
+                status=404,
+            )
+        error = request.query.get("error")
+        try:
+            flow.deliver_callback(
+                code=request.query.get("code"),
+                state=state,
+                error=error,
+            )
+        except ValueError:
+            return web.Response(
+                text="<h1>OAuth callback rejected</h1><p>Return to HoneyOS and try again.</p>",
+                content_type="text/html",
+                status=400,
+            )
+        if error:
+            return web.Response(
+                text="<h1>Authorization failed</h1><p>Return to HoneyOS for details.</p>",
+                content_type="text/html",
+                status=400,
+            )
+        return web.Response(
+            text="<h1>Authorization received</h1><p>You can close this tab and return to HoneyOS.</p>",
+            content_type="text/html",
+        )
 
     async def _handle_companion_model_settings(
         self, request: "web.Request"

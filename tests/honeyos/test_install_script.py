@@ -51,7 +51,10 @@ def test_installer_runs_setup_for_a_new_user(tmp_path):
     completed, calls = _run_installer(tmp_path)
 
     assert completed.returncode == 0
-    assert calls == ["sync --locked --quiet --extra honeyos", "run honeyos setup"]
+    assert calls == [
+        "sync --locked --quiet --extra honeyos --extra mcp",
+        "run honeyos setup",
+    ]
     assert "发现已有的 HoneyOS" not in completed.stdout
 
 

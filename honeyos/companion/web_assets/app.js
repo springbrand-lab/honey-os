@@ -52,6 +52,7 @@ const elements = {
   modelApiKey: document.querySelector("#model-api-key"),
   modelDiscover: document.querySelector("#model-discover"),
   modelSettingsStatus: document.querySelector("#model-settings-status"),
+  mcpServerList: document.querySelector("#mcp-server-list"),
   channelLinkButtons: Array.from(document.querySelectorAll("[data-channel-link]")),
   channelLinkDialog: document.querySelector("#channel-link-dialog"),
   channelLinkClose: document.querySelector("#channel-link-close"),
@@ -472,6 +473,7 @@ function hydrateCompanionPages(data) {
     })
     .catch(() => {});
   void loadEditableSettings();
+  void loadMcpServers();
 }
 
 function channelLabel(platform) {
@@ -612,6 +614,160 @@ async function saveModelSettings(event) {
     }
   } finally {
     if (submit) submit.disabled = false;
+  }
+}
+
+function mcpStatusLabel(server) {
+  if (!server.enabled) return "已停用";
+  return {
+    approved: "已连接",
+    connected: "已连接",
+    configured: "已配置",
+    starting: "正在准备授权",
+    authorization_required: "需要授权",
+    error: "授权失败",
+  }[server.status] || "状态未知";
+}
+
+function showMcpAuthorizationLink(card, url) {
+  let link = card.querySelector(".mcp-authorization-link");
+  if (!link) {
+    link = document.createElement("a");
+    link.className = "mcp-authorization-link";
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = "打开授权页";
+    card.append(link);
+  }
+  link.href = url;
+}
+
+const MCP_AUTHORIZATION_PREPARE_TIMEOUT_MS = 90_000;
+
+async function pollMcpAuthorization(flowId, authWindow, card, state) {
+  try {
+    const response = await fetch(
+      "/api/companion/mcp/oauth/flows/" + encodeURIComponent(flowId),
+      { credentials: "same-origin" },
+    );
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "授权状态不可用");
+    if (payload.authorization_url) {
+      showMcpAuthorizationLink(card, payload.authorization_url);
+      if (!state.opened) {
+        state.opened = true;
+        if (authWindow && !authWindow.closed) {
+          authWindow.location.replace(payload.authorization_url);
+        }
+      }
+    }
+    if (payload.status === "approved") {
+      if (authWindow && !authWindow.closed) authWindow.close();
+      showToast("MCP 授权成功");
+      await loadMcpServers();
+      return;
+    }
+    if (payload.status === "error") {
+      card.querySelector(".mcp-status").textContent = payload.error || "授权失败，请重试";
+      state.button.disabled = false;
+      return;
+    }
+    if (!payload.authorization_url && Date.now() >= state.deadline) {
+      if (authWindow && !authWindow.closed) authWindow.close();
+      card.querySelector(".mcp-status").textContent = "授权页面准备超时，请重试";
+      state.button.disabled = false;
+      return;
+    }
+    window.setTimeout(
+      () => void pollMcpAuthorization(flowId, authWindow, card, state),
+      1200,
+    );
+  } catch (error) {
+    card.querySelector(".mcp-status").textContent = error instanceof Error
+      ? error.message
+      : "暂时无法读取授权状态";
+    state.button.disabled = false;
+  }
+}
+
+async function startMcpAuthorization(serverName, button, card) {
+  const authWindow = window.open("about:blank", "honeyos-mcp-oauth", "popup,width=720,height=760");
+  if (authWindow) {
+    authWindow.opener = null;
+    authWindow.document.title = "HoneyOS MCP 授权";
+    authWindow.document.body.textContent = "正在准备授权页面…";
+  }
+  button.disabled = true;
+  card.querySelector(".mcp-status").textContent = "正在准备授权";
+  try {
+    const response = await fetch(
+      "/api/companion/mcp/servers/" + encodeURIComponent(serverName) + "/auth",
+      { method: "POST", credentials: "same-origin" },
+    );
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "暂时无法开始授权");
+    void pollMcpAuthorization(payload.flow_id, authWindow, card, {
+      opened: false,
+      deadline: Date.now() + MCP_AUTHORIZATION_PREPARE_TIMEOUT_MS,
+      button,
+    });
+  } catch (error) {
+    if (authWindow && !authWindow.closed) authWindow.close();
+    card.querySelector(".mcp-status").textContent = error instanceof Error
+      ? error.message
+      : "暂时无法开始授权";
+    button.disabled = false;
+  }
+}
+
+function renderMcpServers(servers) {
+  if (!elements.mcpServerList) return;
+  elements.mcpServerList.replaceChildren();
+  if (!servers.length) {
+    const empty = document.createElement("p");
+    empty.className = "mcp-empty-state";
+    empty.textContent = "还没有安装 MCP，可以直接在对话中让我安装。";
+    elements.mcpServerList.append(empty);
+    return;
+  }
+  servers.forEach((server) => {
+    const card = document.createElement("article");
+    card.className = "mcp-settings-card";
+    const copy = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = server.name;
+    const detail = document.createElement("small");
+    detail.textContent = server.auth === "oauth" ? "OAuth MCP" : "已安装的 MCP";
+    copy.append(name, detail);
+    const status = document.createElement("span");
+    status.className = "mcp-status";
+    status.textContent = server.error || mcpStatusLabel(server);
+    card.append(copy, status);
+    if (server.enabled && server.auth === "oauth" && !["approved", "connected"].includes(server.status)) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = server.status === "error" ? "重新授权" : "授权";
+      button.addEventListener("click", () => void startMcpAuthorization(server.name, button, card));
+      card.append(button);
+    }
+    elements.mcpServerList.append(card);
+  });
+}
+
+async function loadMcpServers() {
+  if (!elements.mcpServerList) return;
+  try {
+    const response = await fetch("/api/companion/mcp/servers", {
+      credentials: "same-origin",
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "MCP 状态不可用");
+    renderMcpServers(Array.isArray(payload.servers) ? payload.servers : []);
+  } catch {
+    const message = document.createElement("p");
+    message.className = "mcp-empty-state";
+    message.textContent = "暂时无法读取 MCP 状态。";
+    elements.mcpServerList.replaceChildren(message);
   }
 }
 
