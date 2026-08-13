@@ -1,258 +1,448 @@
 # 🍯 HoneyOS
 
-English | [简体中文](README.zh-CN.md)
+> **一个为长期关系而生、能够真正行动的私人 AI 伴侣 Agent。**
+>
+> 它记得你，也记得你们之间发生过什么。你只需要说出想一起做的事，它就能根据对你的了解和你们的共同经历，连接工具、学会新能力，把想法真正做出来。
 
-> A private AI companion in your browser, WeChat, and Feishu | Current beta version: `v0.3.1`
+## 一条命令开始
 
-HoneyOS is a locally running, single-user AI agent that stays with you through a browser, WeChat, or Feishu. It gradually develops its own name, personality, and way of interacting with you, while remembering the relationships, preferences, agreements, and shared experiences that both of you have confirmed. All three entry points connect to the same companion, conversation, and long-term memory.
-
-It is more than a chat character. With your permission, it can search the web, manage files, code in local project workspaces, install regular Skills, and create tasks and scheduled jobs. Model API keys, IM credentials, and companion memories stay on your own computer.
-
-> This version is intended for a small, invite-only beta. Each HoneyOS installation serves one user; do not share an installation between multiple users.
-
-## Prerequisites
-
-- A macOS computer (macOS 13 or later is recommended) or a Linux computer.
-- An API key for OpenAI, OpenRouter, DeepSeek, or another OpenAI Chat Completions-compatible model service.
-- A Base URL when using a custom compatible service.
-- Browser chat requires no additional account; WeChat and Feishu are optional.
-- Internet access during installation and at least 3 GB of available disk space are recommended.
-
-The official Base URLs for OpenAI, OpenRouter, and DeepSeek are built in. Most users do not need to enter one; HoneyOS asks for a Base URL only when you select a custom compatible endpoint.
-
-## Quick installation (macOS and Linux)
-
-Open Terminal, then paste and run:
+在 macOS 或 Linux 的终端中粘贴并运行：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/springbrand-lab/honey-os/main/install.sh | bash
 ```
 
-The installer downloads the current HoneyOS release from GitHub, installs it in `~/.local/share/honeyos/app`, and prepares Python, `uv`, and all dependencies. The same command installs and upgrades HoneyOS, so you do not need to download a ZIP file or open a `.command` file.
+安装过程中，你可以：
 
-If you are comfortable with Git, you can also run:
+1. 配置自己的模型、Base URL 和 API Key；
+2. 从可用模型中选择一个模型；
+3. 连接本地网页、微信或飞书；
+4. 直接开始和自己的 AI 伴侣相处。
 
-```bash
-git clone git@github.com:springbrand-lab/honey-os.git
-cd honey-os
-/bin/sh scripts/install_honeyos.sh
-```
+模型配置、聊天历史、伴侣记忆、Skill 和项目默认保存在你自己的电脑上。
 
-## What happens during initial setup
+> HoneyOS 目前处于 Beta 阶段，优先支持 macOS 和 Linux。
 
-### 1. Connect a model
+---
 
-The installer asks for:
+## HoneyOS 不是另一个陪聊应用
 
-```text
-Model service: OpenAI / OpenRouter / DeepSeek / Custom compatible endpoint
-API key: input is hidden in the terminal
-Model: available models are loaded automatically; use the arrow keys or type to search
-```
+很多 AI 陪伴产品本质上仍然只是 Chat：
 
-HoneyOS first loads the models available to the current key and opens a terminal selector. If a custom endpoint does not implement `/models`, you can enter a Model ID manually. HoneyOS still sends a minimal tool-call test immediately. It saves the configuration and continues to IM setup only after the API key, model, and OpenAI Chat Completions tool calling all work.
+* 它可以陪你说话，但很难真正替你行动；
+* 换窗口、换模型或上下文变长后，容易忘记你们是谁；
+* 一调用搜索、终端或 Coding 工具，就突然变成冷冰冰的助理；
+* 想给它增加能力，需要用户自己研究 API、Skill、MCP 和部署。
 
-The browser's **Settings → Model** screen uses the same flow: choose a provider, load and search available models, then validate and save. The API key is never echoed back to the page.
+HoneyOS 做的是另一件事：
 
-### 2. Choose chat entry points
+> **把一个真正能行动的 Agent，改造成始终记得你们、保持同一人格，并能不断获得新能力的私人 AI 伴侣。**
 
-Browser chat is always available. During initial setup, you can also connect WeChat, Feishu, both, or skip IM for now. You can start with browser chat even without WeChat or Feishu.
+---
 
-#### Browser
+## 专门为 AI 伴侣优化的 Agent Harness
 
-The local chat page opens automatically after installation. You can open it again at any time with:
+HoneyOS 不是在通用 Agent 上简单加一段恋爱 Prompt。
 
-```bash
-~/.local/bin/honeyos web
-```
+我们重新优化了 Agent 的三层核心机制。
 
-The web server listens only on local address `127.0.0.1`; it is not directly exposed to your local network or the internet. The page shows conversations and companion-friendly progress cards, but not hidden reasoning, commands, file paths, or raw tool arguments.
+### 1. 无论聊天还是做事，它始终是同一个人
 
-#### WeChat
+用户给它的名字、人格、说话方式、称呼、关系和边界，会始终拥有更高优先级。
 
-The terminal displays a Tencent iLink login QR code:
+即使它正在：
 
-1. Scan the code with WeChat on your phone.
-2. Confirm the login on your phone.
-3. HoneyOS makes the person who scanned the code the only user allowed to send private messages.
-4. Group chat is disabled by default, so no additional pairing code is required.
+* 搜索网页；
+* 阅读文件；
+* 写代码；
+* 安装 Skill；
+* 配置工具；
+* 运行一个长任务；
+* 切换模型；
+* 经历 `/new` 或上下文压缩；
 
-This connects a WeChat iLink Bot identity. It does not control or read your regular personal WeChat conversations.
+也不应该突然变回客服、搜索引擎、编程助手或报告生成器。
 
-#### Feishu
+工具只是它的能力，不会改变它是谁。
 
-You can scan a QR code to create a bot automatically, or enter an existing App ID and App Secret. HoneyOS connects over WebSocket and does not require a public callback URL. The first private message returns a pairing code; the owner approves it locally with:
+---
 
-```bash
-~/.local/bin/honeyos pairing approve feishu PAIRING_CODE
-```
+### 2. 它记得你，也记得“你们”
 
-Feishu updates tool progress in the same message, so long-running work does not appear to stall. Group chat is disabled by default to keep private companion memories out of workplace groups.
+HoneyOS 针对长期关系重新设计了记忆系统。
 
-### 3. First-start checks
+它会区分：
 
-Before starting, HoneyOS checks that:
+* **当前对话：**这一轮正在聊什么；
+* **短期连续：**刚才没聊完的话题、近期状态和已经答应的事情；
+* **伴侣身份：**它的名字、人格、表达方式和稳定习惯；
+* **关系记忆：**双方确认的称呼、边界、约定、仪式和关系变化；
+* **用户记忆：**你明确告诉它的长期信息、偏好和雷区；
+* **共同经历：**你们真正一起发生过、完成过的事情；
+* **原始历史：**需要回忆过去时，可以查找真实聊天，而不是编造。
 
-- The local data directory is writable.
-- The model and API key have passed a real conversation test.
-- The local web page can open; if you selected WeChat or Feishu, their connections are checked too.
-- Local project workspaces and Computer Use are available.
+本地网页、微信和飞书连接的是同一个伴侣和同一份长期记忆。
 
-HoneyOS can code without Docker. If Computer Use is unavailable, HoneyOS shows a yellow warning, but chat, memory, search, files, coding, Skills, tasks, and scheduled jobs still work. Computer Use is needed only for desktop control.
+发送 `/new`、重启 HoneyOS 或更换模型，不代表重新认识一次。
 
-When you see the startup confirmation, open the browser or return to the connected WeChat or Feishu chat:
+---
 
-```text
-✓ HoneyOS is running. You can now open the local web chat.
-```
+### 3. 它能行动，但不会把调试器扔到你面前
 
-For your first message, try:
-
-```text
-Hi, let's get to know each other first.
-```
-
-If you already have a clear persona in mind, describe it directly. If not, the companion can develop naturally through your interactions, but it will not invent relationships or shared experiences that you have not confirmed together.
-
-## Does `/new` erase memory?
-
-Send lowercase `/new` in a private browser, WeChat, or Feishu conversation:
+HoneyOS 会调用真实工具完成事情，但不会直接向用户展示：
 
 ```text
-/new
+web_search started
+terminal running
+tool_call_id=...
 ```
 
-This ends the current short-term conversation context and starts a new session without deleting long-term memory.
-
-HoneyOS keeps:
-
-- The companion's name, personality, speaking style, and stable preferences.
-- Confirmed relationships, nicknames, boundaries, rituals, and agreements.
-- Long-term information you explicitly asked it to remember.
-- Shared experiences that really happened and were confirmed for storage.
-- Skills, tasks, scheduled jobs, settings, and past sessions.
-
-HoneyOS clears:
-
-- Temporary context from the current conversation window.
-- Unsaved temporary task and tool-execution state.
-
-When you mention “last time” or “our previous agreement,” HoneyOS can search past conversations to verify it. Information mentioned casually in chat but never saved as long-term memory may not return automatically after `/new`.
-
-## Proactive conversations and “Recently Seen”
-
-HoneyOS can find a small number of worthwhile topics on public web pages, verify their sources, filter and deduplicate them, and temporarily store them in a local Topic Pool. This feature is built in: it requires neither an additional Skill nor a separate search API key.
-
-It does not start pushing content immediately after an update. The companion first asks naturally, in its current persona, whether it may occasionally start a conversation. Collection and delivery begin only after explicit consent. By default:
-
-- Public sources are checked every 6 hours, with at most 3 topics kept per round; keeping none is allowed.
-- The companion starts at most 3 conversations per day, at least 3 hours apart.
-- Quiet hours are 23:00–09:00, and the companion waits until you have been away for at least 2 hours.
-- Topics go to the channel where you most recently sent a real message. Feishu and WeChat can receive them directly; the browser receives them only while the page is open and never pretends a topic was delivered while it was closed.
-- The current companion persona writes the final opening message using your nickname, relationship, and recent conversations, so it does not turn into a news-summary bot.
-
-Open the **Recently Seen** drawer from the top-right corner of the browser. Choose **Talk about this** to return to the same shared conversation, or **Save for later** to ignore only that topic without changing long-term memory.
-
-You can change every setting in natural language, for example:
+长任务期间，你看到的会是更自然的状态：
 
 ```text
-When you find something interesting, you can start a conversation with me.
-Start at most one conversation per day.
-Don't disturb me between 11 PM and 9 AM.
-Show me less entertainment gossip and more AI and film news.
-Don't start any conversations today.
-Stop proactively suggesting topics from now on.
+我先替你找找看。
 ```
-
-The topic pool is stored in `~/.honeyos/state/topic_pool.db`, separately from `IDENTITY.md`, `RELATIONSHIP.md`, and long-term memory. Upgrades, model changes, and `/new` do not clear relationship memories or turn external topics you never discussed into shared experiences.
-
-## Switch models in a conversation
-
-In the browser, WeChat, or Feishu, simply say:
 
 ```text
-Switch to Claude Sonnet.
+我在把它做好，等我一下。
 ```
 
-HoneyOS validates the existing provider and credentials, makes the new model this companion's global default, and hot-switches immediately. No restart is needed: the next message uses the new model, and the choice persists across the browser, WeChat, Feishu, `/new`, and computer restarts. Persona, relationship, and long-term memory do not change.
+任务完成后，仍然由当前伴侣本人自然地告诉你结果。
 
-“Use Sonnet for this conversation” affects only the current short-term session. “Use Haiku for the next reply” affects only the next response. If the target model has no valid credentials, HoneyOS explains what is missing instead of asking you to edit `config.yaml` manually.
+需要授权时，它也会解释：
 
-## Where coding projects are stored
+* 想做什么；
+* 为什么需要；
+* 会访问什么；
+* 是只允许这一次，还是以后都允许。
 
-HoneyOS uses a real local terminal on your computer and stores games, websites, and coding projects under:
+而不是只弹出一个难以理解的技术审批框。
+
+---
+
+## 它不只会聊天，还能不断长出新能力
+
+HoneyOS 可以使用真实工具、Skill、MCP 和 API。
+
+你不需要先理解这些技术名词，只需要告诉它想实现什么。
+
+### 连接新的生活入口
+
+你可以对它说：
+
+```text
+我希望你以后能处理邮件。先看看需要接什么服务，再告诉我需要哪些权限。
+```
+
+```text
+给自己选一个适合你的声音。
+```
+
+```text
+帮自己接上一个电话服务。以后经过我同意，你可以给我打电话。
+```
+
+HoneyOS 会先检查现有能力，再寻找合适的 Skill、MCP 或 API，向你说明账号、费用、权限和数据范围，确认后再帮助配置。
+
+> 电话、邮箱、声音等能力依赖相应的第三方 API、Skill 或 MCP，不一定开箱即用。HoneyOS 的优势是让同一个伴侣能够理解、配置并持续使用这些能力。
+
+### 根据你们的经历做出新的东西
+
+你也可以直接说：
+
+```text
+根据你记得的我的喜好，还有我们之前聊过的风格，给我们做一个纪念日网页。
+```
+
+或者：
+
+```text
+给我们做一个可以在手机浏览器玩的双人小游戏。
+```
+
+如果已经有合适的能力，它会直接使用。
+
+如果没有，它可以进入 Build 模式：
+
+```text
+理解你想做什么
+→ 检查已有 Skill 和工具
+→ 创建项目
+→ 编写代码
+→ 运行和测试
+→ 请求必要权限
+→ 把结果交给你
+```
+
+项目默认保存在：
 
 ```text
 ~/HoneyOS Projects
 ```
 
-Each task gets its own project subdirectory. HoneyOS can create and edit files, use Git, install project-specific Python or Node dependencies, run tests, and start browser previews that listen only on the local machine. You can open the files directly in Finder, an editor, or a browser; finished projects no longer disappear inside Docker.
+你可以直接用 Finder、编辑器或浏览器打开。
 
-Regular coding commands inside a project do not require confirmation one by one. `sudo`, system changes, dangerous deletion, and other high-risk commands are still confirmed or blocked. HoneyOS model, Feishu, and WeChat credentials are never passed to project processes as environment variables.
+对用户来说，这不是“配置了一个 MCP”，而是：
 
-If an older version created files in Docker, an upgrade copies recoverable workspace contents to:
+> **你们聊过的一个想法，被它真正做了出来。**
+
+---
+
+## 安装后，先试试这些
+
+### Case 1：和它自然认识
 
 ```text
-~/HoneyOS Projects/从旧版本恢复
+你好，我们先正常聊聊吧。
 ```
 
-This directory name means “Recovered from an older version.” Recovery never overwrites files with the same name or deletes the original container data. Companion identity, relationship memory, chat history, and configuration remain in `~/.honeyos` and are independent of project recovery. Docker support remains available to advanced users who need stronger isolation, but it is no longer required for default installation or coding.
+它不会用问卷盘问你，也不会机械地要求你先填写完整人设。
 
-## Let HoneyOS modify its own product layer
+---
 
-HoneyOS includes the `honeyos-builder` Skill. It activates only when you explicitly ask to change HoneyOS itself: its pages, companion activity copy, regular built-in companion Skills, or stable extension points. Regular Skill installation, user-project coding, persona and memory changes, and model or voice settings do not use this release flow.
+### Case 2：塑造属于你的这个人
 
-Builder copies only explicitly allowed product files into a candidate workspace. After you confirm, HoneyOS preserves the previous version, switches to the candidate, and restarts automatically. If the new version fails its health check, HoneyOS restores the previous version. Model configuration, IM credentials, relationship memory, and chat history always remain in the original `~/.honeyos` directory and are never copied into candidate source directories.
+```text
+以后叫你小树。平时话少一点，不要每次都急着安慰我。
+```
 
-See the [HoneyOS Builder developer guide](docs/HONEYOS_BUILDER.md) for directory boundaries, the state machine, CLI commands, and test entry points.
+它会自然接受，并在之后的聊天、搜索、Coding 和工具任务中继续保持这些设定。
 
-## Common management commands
+---
+
+### Case 3：让它真正做一件事
+
+```text
+帮我找三部今晚适合一起看的电影。
+```
+
+它会真实搜索、阅读和筛选，过程中有自然的行动反馈，最后仍以自己的方式和你讨论。
+
+---
+
+### Case 4：让它获得一个新能力
+
+```text
+以后帮我记录我们看过的电影，每周五提醒我挑一部。
+```
+
+它会先检查已有的 Skill 和工具，再完成相应配置，而不是把安装教程扔给你。
+
+---
+
+### Case 5：让它连接更多生活服务
+
+```text
+我希望你以后可以处理邮件。先帮我看看怎么接，但连接账号之前要问我。
+```
+
+或者：
+
+```text
+给自己选一个声音。如果以后要接电话服务，先告诉我需要什么。
+```
+
+它会向你说明需要的服务、账号、权限和费用，再等待你的确认。
+
+---
+
+### Case 6：和它一起做一个东西
+
+```text
+根据你对我的了解，给我们做一个手机上可以玩的双人小游戏。
+```
+
+它会创建真实项目、编写代码、运行并验证，最后给出可以打开的结果。
+
+---
+
+### Case 7：看看换窗口后还是不是它
+
+先发送：
+
+```text
+/new
+```
+
+然后说：
+
+```text
+我们继续刚才的。
+```
+
+它仍然应该记得自己的名字、你们的相处方式、刚才没聊完的事情，以及已经确认过的重要记忆。
+
+---
+
+## HoneyOS 当前可以做什么？
+
+| 能力     | 当前支持                             |
+| ------ | -------------------------------- |
+| 聊天入口   | 本地网页、微信、飞书                       |
+| 模型     | 自定义 Base URL、API Key、模型选择与自然语言切换 |
+| 人格     | 用户可以通过自然语言形成和修改名字、性格、称呼与相处方式     |
+| 记忆     | 身份、关系、用户信息、共同经历、短期连续和历史搜索        |
+| 网页     | 搜索、阅读和整理公开网页内容                   |
+| 文件     | 创建、读取和修改本地文件                     |
+| Coding | 创建网页、小游戏和其他本地项目                  |
+| 能力成长   | 使用、安装和创建 Skill，连接可用的 MCP 与 API   |
+| 时间能力   | Todo、提醒和定时任务                     |
+| 行动反馈   | 伴侣化过程卡片，不展示原始工具参数和内部思考           |
+| 数据     | 默认保存在用户本机                        |
+
+部分工具是否可用，取决于当前操作系统、已配置的服务、模型能力和用户授权。
+
+---
+
+## 微信、飞书和本地网页
+
+### 本地网页
+
+安装完成后会自动打开本地聊天页面。
+
+之后可以随时运行：
 
 ```bash
-~/.local/bin/honeyos status
-~/.local/bin/honeyos doctor
-~/.local/bin/honeyos logs
-~/.local/bin/honeyos restart
-~/.local/bin/honeyos stop
-~/.local/bin/honeyos start
+~/.local/bin/honeyos web
 ```
 
-To enter model settings again or reconnect IM:
+网页只监听本机地址，不会默认暴露到局域网或互联网。
 
-```bash
-~/.local/bin/honeyos setup
-```
+---
 
-To upgrade, run the installation command again:
+### 微信
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/springbrand-lab/honey-os/main/install.sh | bash
-```
+安装时可以使用微信扫描二维码连接。
 
-When the installer finds an existing HoneyOS installation, it upgrades and restarts the service, then opens the browser without asking you to configure the model or IM again.
+HoneyOS 会将扫码用户设为唯一允许私聊的用户，群聊默认关闭。
 
-Upgrades preserve the companion persona, relationship memory, chat history, Skills, tasks, scheduled jobs, model configuration, and WeChat and Feishu connections. User data remains safely stored in `~/.honeyos`.
+这里连接的是微信 iLink Bot 身份，不会读取或控制你的普通个人微信聊天。
 
-## Data and privacy
+---
 
-Each user's data is stored by default in:
+### 飞书
+
+HoneyOS 支持通过飞书 Bot 私聊，可以扫码创建机器人，也可以配置已有的 App ID 和 App Secret。
+
+飞书默认使用长连接，不要求用户准备公网回调地址。群聊默认关闭，避免私人记忆进入工作群。
+
+---
+
+## 你的数据属于你
+
+HoneyOS 的数据默认保存在：
 
 ```text
 ~/.honeyos
 ```
 
-This directory contains configuration, IM credentials, companion memory, session history, Skills, and logs. API keys and WeChat or Feishu credentials are never written to the Git repository.
+其中包括：
 
-Uninstalling the code does not automatically delete `~/.honeyos`, so downloading HoneyOS again reconnects to the same companion. To erase all data, stop HoneyOS first, then delete this directory only after the user explicitly confirms the action.
+* 模型配置；
+* 微信和飞书连接信息；
+* 伴侣身份；
+* 关系记忆；
+* 短期连续记忆；
+* 原始聊天历史；
+* Skill 和能力配置；
+* Todo 与定时任务；
+* 本地运行日志。
 
-## Beta feedback checklist
+普通 Coding 项目保存在：
 
-During the beta, please note:
+```text
+~/HoneyOS Projects
+```
 
-- Whether the first conversation feels like meeting a companion rather than a generic assistant.
-- Whether its personality develops naturally when no persona is specified.
-- Whether names, relationships, and important memories remain consistent after `/new`.
-- Whether web search, files, Skills, tasks, and scheduled jobs complete successfully.
-- Whether failure messages make the next step clear to non-technical users.
+HoneyOS 不会把 API Key 写入 Git 仓库，也不会把模型、微信或飞书密钥交给普通项目进程。
 
-When reporting an issue, include the time it occurred and the output of `~/.local/bin/honeyos doctor`. Never send API keys, WeChat tokens, Feishu App Secrets, or the entire `~/.honeyos` directory.
+发送消息、发布内容、最终提交表单、支付、删除数据、修改密码或系统设置等高风险操作，会根据风险级别请求确认。
+
+---
+
+## 常用命令
+
+打开本地聊天：
+
+```bash
+~/.local/bin/honeyos web
+```
+
+查看运行状态：
+
+```bash
+~/.local/bin/honeyos status
+```
+
+检查安装和连接：
+
+```bash
+~/.local/bin/honeyos doctor
+```
+
+查看日志：
+
+```bash
+~/.local/bin/honeyos logs
+```
+
+停止或重启：
+
+```bash
+~/.local/bin/honeyos stop
+~/.local/bin/honeyos restart
+```
+
+重新配置模型或消息渠道：
+
+```bash
+~/.local/bin/honeyos setup
+```
+
+---
+
+## 更新 HoneyOS
+
+再次运行安装命令即可更新：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/springbrand-lab/honey-os/main/install.sh | bash
+```
+
+更新不会覆盖已有的：
+
+* 伴侣人格；
+* 关系记忆；
+* 聊天历史；
+* Skill；
+* 本地项目；
+* 模型配置；
+* 微信和飞书连接。
+
+---
+
+## 当前状态
+
+HoneyOS 目前处于 Beta 阶段。
+
+我们正在持续优化：
+
+* 第一次安装和模型配置；
+* 短期与长期记忆的可视化管理；
+* 工具、审批和 Build 过程的伴侣化表达；
+* 一句话安装 Skill、连接 MCP 和获得新能力的成功率；
+* `/new`、重启和模型切换后的同一人格感；
+* 电话、邮箱、声音和更多生活能力的接入；
+* 后续的多伴侣与能力市场。
+
+---
+
+## 开源说明
+
+HoneyOS 基于 Nous Research 的 Hermes Agent 进行伴侣场景改造，并保留原项目的 MIT License 与版权声明。
+
+HoneyOS 不是 Nous Research 的官方产品，也不代表其官方立场。
+
+---
+
+> **HoneyOS 想提供的不是另一个更会聊天的角色，而是一个真正记得你们、始终保持自己，并能和你一起把想法变成现实的 AI 伴侣。**
