@@ -37,7 +37,7 @@ def test_public_readme_and_installer_use_honey_os_brand():
     assert "H2OS" not in readme
     assert "Hermes" not in readme
     assert "curl -fsSL" in readme
-    assert "raw.githubusercontent.com/Nicole202504/honeyos/main/install.sh" in readme
+    assert "raw.githubusercontent.com/springbrand-lab/honey-os/main/install.sh" in readme
     assert "uv run h2os" not in readme
     assert "HoneyOS" in installer
     assert 'echo "H2OS' not in installer
