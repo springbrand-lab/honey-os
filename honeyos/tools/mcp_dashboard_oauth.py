@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import logging
 import secrets
 import threading
 import time
@@ -17,6 +18,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator
 from urllib.parse import parse_qs, urlparse
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -245,11 +249,29 @@ def run_dashboard_mcp_oauth(flow: DashboardOAuthFlow, cfg: dict) -> None:
                     flow.tools = [
                         {"name": name, "description": desc} for name, desc in tools
                     ]
-                    flow.mark_approved()
                     if flow.reconnect_live:
-                        from honeyos.tools.mcp_tool import reconnect_mcp_server
+                        from honeyos.tools.mcp_tool import activate_mcp_server
 
-                        reconnect_mcp_server(flow.server_name)
+                        try:
+                            if not activate_mcp_server(flow.server_name):
+                                logger.warning(
+                                    "MCP OAuth succeeded but live activation did not complete for '%s'; "
+                                    "use /reload-mcp to retry",
+                                    flow.server_name,
+                                )
+                        except Exception:
+                            # OAuth and token persistence succeeded.  A live
+                            # activation failure must not roll those back.
+                            logger.warning(
+                                "MCP OAuth succeeded but live activation failed for '%s'",
+                                flow.server_name,
+                                exc_info=True,
+                            )
+                    # Publish completion only after the live runtime has had a
+                    # chance to register the tools.  The UI can safely stop
+                    # polling and the current conversation can use them on its
+                    # next turn.
+                    flow.mark_approved()
                 except Exception:
                     storage.restore(backup, only_if_absent=True)
                     manager.restore_entry(

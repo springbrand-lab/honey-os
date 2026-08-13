@@ -55,6 +55,12 @@ def test_dashboard_oauth_probe_does_not_use_shared_runtime_loop(monkeypatch, tmp
     monkeypatch.setattr(
         "honeyos.runtime.mcp_config._save_mcp_server", lambda *_args: None
     )
+    activated = []
+    monkeypatch.setattr(
+        mcp_tool,
+        "activate_mcp_server",
+        lambda name: activated.append(name) or True,
+    )
 
     flow = DashboardOAuthFlow(
         flow_id="flow-isolated",
@@ -62,9 +68,71 @@ def test_dashboard_oauth_probe_does_not_use_shared_runtime_loop(monkeypatch, tmp
         profile=None,
         honeyos_home=str(tmp_path),
         redirect_uri="http://127.0.0.1:8642/callback",
+        reconnect_live=True,
     )
 
     run_dashboard_mcp_oauth(flow, {"url": "https://mcp.example.test"})
 
     assert flow.status == "approved"
     assert flow.worker_done
+    assert activated == ["example"]
+
+
+def test_activate_mcp_server_registers_server_missing_from_runtime(monkeypatch):
+    import honeyos.tools.mcp_tool as mcp_tool
+
+    monkeypatch.setattr(mcp_tool, "_servers", {})
+    monkeypatch.setattr(mcp_tool, "_server_connecting", set())
+    monkeypatch.setattr(mcp_tool, "_lazy_server_configs", {})
+    monkeypatch.setattr(
+        mcp_tool,
+        "_load_mcp_config",
+        lambda: {"example": {"url": "https://mcp.example.test"}},
+    )
+    registered = []
+
+    def register(servers):
+        registered.append(servers)
+        mcp_tool._servers["example"] = object()
+        return ["example_tool"]
+
+    monkeypatch.setattr(mcp_tool, "register_mcp_servers", register)
+
+    assert mcp_tool.activate_mcp_server("example") is True
+    assert registered == [{"example": {"url": "https://mcp.example.test"}}]
+
+
+def test_between_turns_activation_only_runs_for_new_config_revision(
+    monkeypatch, tmp_path
+):
+    import honeyos.tools.mcp_tool as mcp_tool
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("mcp_servers: {}\n", encoding="utf-8")
+    monkeypatch.setattr("honeyos.runtime.config.get_config_path", lambda: config_path)
+    monkeypatch.setattr(mcp_tool, "_mcp_config_activation_stamps", {})
+    existing_server = object()
+    monkeypatch.setattr(mcp_tool, "_servers", {"notion": existing_server})
+    monkeypatch.setattr(mcp_tool, "_server_connecting", set())
+    monkeypatch.setattr(mcp_tool, "_lazy_server_configs", {})
+    monkeypatch.setattr(
+        mcp_tool,
+        "_load_mcp_config",
+        lambda: {
+            "notion": {"url": "https://mcp.notion.test"},
+            "example": {"url": "https://mcp.example.test"},
+        },
+    )
+    calls = []
+
+    def register(servers):
+        calls.append(servers)
+        mcp_tool._servers["example"] = object()
+        return ["example_tool"]
+
+    monkeypatch.setattr(mcp_tool, "register_mcp_servers", register)
+
+    assert mcp_tool.activate_new_mcp_servers_if_config_changed() == {"example"}
+    assert mcp_tool.activate_new_mcp_servers_if_config_changed() == set()
+    assert mcp_tool._servers["notion"] is existing_server
+    assert calls == [{"example": {"url": "https://mcp.example.test"}}]

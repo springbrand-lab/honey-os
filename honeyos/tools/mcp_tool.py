@@ -3570,6 +3570,10 @@ _server_connect_failures: Dict[str, int] = {}        # name -> consecutive failu
 _CONNECT_RETRY_BASE_BACKOFF_SEC = 30.0
 _CONNECT_RETRY_MAX_BACKOFF_SEC = 600.0
 
+# Per-profile config stamp used by the between-turns hot-load check.  This is
+# deliberately demand-driven (one stat per turn), not a filesystem watcher.
+_mcp_config_activation_stamps: Dict[str, Tuple[int, int]] = {}
+
 
 def _record_connect_failure(server_name: str) -> None:
     """Stamp an exponential-backoff cooldown after a failed connect.
@@ -6515,6 +6519,69 @@ def discover_mcp_tools() -> List[str]:
     finally:
         if cookie not in (None, _LOCK_UNAVAILABLE):
             cookie.release()
+
+
+def activate_mcp_server(server_name: str) -> bool:
+    """Make one newly installed or re-authorized MCP server live now.
+
+    Existing servers only need their transport rebuilt so they can pick up new
+    OAuth credentials.  A server added after process startup is absent from
+    ``_servers`` and must instead be registered from the freshly saved config.
+    """
+    with _lock:
+        server = _servers.get(server_name)
+    if server is not None:
+        return _signal_reconnect(server)
+
+    with _lock:
+        # Explicit install/auth is a user-requested retry, so it should not be
+        # suppressed by a cooldown left by the pre-auth connection attempt.
+        _clear_connect_failure(server_name)
+        _server_connect_errors.pop(server_name, None)
+
+    config = _load_mcp_config().get(server_name)
+    if not isinstance(config, dict):
+        return False
+
+    register_mcp_servers({server_name: config})
+    with _lock:
+        return server_name in _servers or server_name in _lazy_server_configs
+
+
+def activate_new_mcp_servers_if_config_changed() -> Set[str]:
+    """Hot-load newly configured servers once per config-file revision.
+
+    Called at a safe between-turns seam.  Existing connections are left alone;
+    removals and configuration replacements remain the explicit
+    ``/reload-mcp`` path.
+    """
+    try:
+        from honeyos.runtime.config import get_config_path
+
+        config_path = get_config_path()
+        stat = config_path.stat()
+        path_key = str(config_path)
+        stamp = (stat.st_mtime_ns, stat.st_size)
+    except (FileNotFoundError, OSError, ImportError):
+        return set()
+
+    with _lock:
+        if _mcp_config_activation_stamps.get(path_key) == stamp:
+            return set()
+        _mcp_config_activation_stamps[path_key] = stamp
+
+    servers = _load_mcp_config()
+    with _lock:
+        known = set(_servers) | set(_server_connecting) | set(_lazy_server_configs)
+    new_servers = {name: cfg for name, cfg in servers.items() if name not in known}
+    if not new_servers:
+        return set()
+
+    register_mcp_servers(new_servers)
+    with _lock:
+        live = set(_servers) | set(_lazy_server_configs)
+    return set(new_servers) & live
+
 
 def is_mcp_tool_parallel_safe(tool_name: str) -> bool:
     """Check if an MCP tool belongs to a server that supports parallel tool calls.

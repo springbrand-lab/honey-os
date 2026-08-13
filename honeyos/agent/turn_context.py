@@ -417,17 +417,24 @@ def build_turn_context(
     # name and leaves the snapshot untouched on no-change).
     try:
         if not getattr(agent, "_skip_mcp_refresh", False):
-            # Import-cost gate: ``tools.mcp_tool`` pulls in the whole ``mcp``
+            # Import-cost gate: ``honeyos.tools.mcp_tool`` pulls in the whole ``mcp``
             # package (~0.4s measured) even when the user has zero MCP servers
             # configured.  MCP tools can only be registered by code that has
-            # already imported ``tools.mcp_tool`` (discovery, /reload-mcp,
+            # already imported ``honeyos.tools.mcp_tool`` (discovery, /reload-mcp,
             # late-binding refresh) — so if it isn't in sys.modules yet, there
             # is nothing to refresh and the import can be skipped outright.
             # This keeps the no-MCP first turn off the heavy import path
             # without changing behavior for MCP users.
             import sys as _sys
-            if "tools.mcp_tool" in _sys.modules:
-                from honeyos.tools.mcp_tool import has_registered_mcp_tools, refresh_agent_mcp_tools
+
+            if "honeyos.tools.mcp_tool" in _sys.modules:
+                from honeyos.tools.mcp_tool import (
+                    activate_new_mcp_servers_if_config_changed,
+                    has_registered_mcp_tools,
+                    refresh_agent_mcp_tools,
+                )
+
+                activate_new_mcp_servers_if_config_changed()
                 if has_registered_mcp_tools():
                     refresh_agent_mcp_tools(agent, quiet_mode=True)
     except Exception:
