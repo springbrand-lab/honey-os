@@ -274,6 +274,80 @@ HoneyOS 会先检查现有能力，再寻找合适的 Skill、MCP 或 API，向�
 
 ---
 
+## 从其他 AI 迁移到 HoneyOS
+
+迁移不是把旧产品的一整段 System Prompt 原样覆盖进来。
+
+HoneyOS 自己的 `SOUL.md` 负责伴侣关系原则、行动方式和安全边界，应当保留。真正需要带走的是：你为旧 AI 设定的人格、你们确认过的关系、关于你的稳定信息、真实共同经历，以及仍然有用的 Skill、MCP 和项目规则。
+
+### 从 ChatGPT、Claude 等聊天产品迁移
+
+如果原来的 AI 主要用于聊天，可以先从旧产品导出聊天记录，或整理出最重要的对话，保存为 Markdown、TXT 或 JSON 文件，放到：
+
+```text
+~/HoneyOS Projects/迁移资料
+```
+
+然后对 HoneyOS 说：
+
+```text
+请先阅读“迁移资料”，不要马上写入记忆。
+把可以迁移的内容分成：你的名字与人格、我们的关系与边界、关于我的长期信息、真实共同经历、还没完成的约定。
+不要把旧模型的猜测当成事实，也不要迁移密码、Cookie、Token 或 API Key。
+先给我一份迁移草稿，等我确认后再保存。
+```
+
+确认后，HoneyOS 会把内容分别整理到：
+
+| 旧内容 | HoneyOS 中的位置 |
+| --- | --- |
+| AI 的名字、性格、语气和稳定偏好 | `IDENTITY.md` |
+| 双方称呼、关系、边界、仪式和约定 | `RELATIONSHIP.md` |
+| 用户资料、长期偏好和雷区 | `USER.md` |
+| 真实发生的共同经历和长期事实 | `MEMORY.md` |
+
+旧聊天文件会继续作为迁移参考资料，但不会伪装成 HoneyOS 里真实发生的原始聊天记录。只保存你确认过的内容，可以避免把旧模型的幻觉、重复信息或过期设定一起带进来。
+
+### 从 Claude Code 或 Codex 迁移
+
+HoneyOS 内置了迁移命令。建议先只看预览：
+
+```bash
+~/.local/bin/honeyos import-agent claude-code --dry-run
+```
+
+或：
+
+```bash
+~/.local/bin/honeyos import-agent codex --dry-run
+```
+
+预览确认无误后，去掉 `--dry-run` 再执行。HoneyOS 会再次询问是否继续，然后迁移可兼容的：
+
+* `CLAUDE.md` 或 `AGENTS.md` 中的稳定指引；
+* Claude Code 的命令允许与拒绝规则；
+* MCP Server 配置；
+* 已有 Skill；
+* Codex 中已有的 Markdown 记忆。
+
+如果旧配置不在默认的 `~/.claude` 或 `~/.codex`，可以指定位置：
+
+```bash
+~/.local/bin/honeyos import-agent codex --source /你的/旧配置目录 --dry-run
+```
+
+项目代码不需要变成伴侣记忆。把需要继续开发的仓库复制到 `~/HoneyOS Projects`，保留项目自己的 `CLAUDE.md`、`AGENTS.md` 和 Git 历史即可。通用编码习惯可以迁移，某个项目专属的构建命令和代码规范应继续留在项目里。
+
+API Key、登录 Token、Cookie、密码和其他凭据不会被自动迁移。完成导入后，使用下面的命令重新连接模型和账号：
+
+```bash
+~/.local/bin/honeyos setup
+```
+
+无论从哪种产品迁移，都建议遵循同一个顺序：**先预览，后确认；先迁移事实和能力，不直接覆盖 HoneyOS 的 SOUL。**
+
+---
+
 ## HoneyOS 当前可以做什么？
 
 | 能力     | 当前支持                             |
