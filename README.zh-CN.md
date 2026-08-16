@@ -40,6 +40,8 @@ HoneyOS 做的是另一件事：
 
 > **把一个真正能行动的 Agent，改造成始终记得你们、保持同一人格，并能不断获得新能力的私人 AI 伴侣。**
 
+![HoneyOS 伴侣界面：共享记忆、工具执行、日历与关系上下文](docs/assets/honeyos-companion-ui.jpg)
+
 ---
 
 ## 专门为 AI 伴侣优化的 Agent Harness
