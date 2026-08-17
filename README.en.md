@@ -40,7 +40,7 @@ HoneyOS takes a different approach:
 
 > **It turns a capable agent into a private AI companion that remembers your relationship, stays the same person while acting, and can keep gaining new abilities.**
 
-![HoneyOS companion interface with shared memory, tool use, calendar, and relationship context](docs/assets/honeyos-companion-ui.jpg)
+![HoneyOS companion interface with shared memory, tool use, calendar, and relationship context](docs/assets/honeyos-companion-ui.png)
 
 ---
 
