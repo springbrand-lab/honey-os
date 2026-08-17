@@ -1,99 +1,99 @@
 # 🍯 HoneyOS
 
-**English** | [简体中文](README.zh-CN.md)
+[English](README.en.md) | **简体中文**
 
-> **A private AI companion agent built for long-term relationships—and capable of taking real action.**
+> **一个为长期关系而生、能够真正行动的私人 AI 伴侣 Agent。**
 >
-> It remembers you and what has happened between you. Tell it what you want to do together, and it can draw on what it knows about you and your shared history, connect tools, learn new capabilities, and turn the idea into something real.
+> 它记得你，也记得你们之间发生过什么。你只需要说出想一起做的事，它就能根据对你的了解和你们的共同经历，连接工具、学会新能力，把想法真正做出来。
 
-## Start with one command
+## 一条命令开始
 
-Paste this into Terminal on macOS or Linux:
+在 macOS 或 Linux 的终端中粘贴并运行：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/springbrand-lab/honey-os/main/install.sh | bash
 ```
 
-During setup, you can:
+安装过程中，你可以：
 
-1. Configure your model, Base URL, and API key.
-2. Choose from the models available to your account.
-3. Connect the local web app, WeChat, or Feishu.
-4. Start spending time with your own AI companion.
+1. 配置自己的模型、Base URL 和 API Key；
+2. 从可用模型中选择一个模型；
+3. 连接本地网页、微信或飞书；
+4. 直接开始和自己的 AI 伴侣相处。
 
-Model settings, chat history, companion memory, Skills, and projects stay on your computer by default.
+模型配置、聊天历史、伴侣记忆、Skill 和项目默认保存在你自己的电脑上。
 
-> HoneyOS is currently in beta, with macOS and Linux as its primary platforms.
-
----
-
-## HoneyOS is not another roleplay chat app
-
-Many AI companion products are still just chat interfaces:
-
-* They can talk with you, but struggle to take real action for you.
-* They forget who you are together after a long context, a model switch, or a new window.
-* The moment they search, use a terminal, or write code, they turn into a cold assistant.
-* Giving them a new capability means learning APIs, Skills, MCP, and deployment yourself.
-
-HoneyOS takes a different approach:
-
-> **It turns a capable agent into a private AI companion that remembers your relationship, stays the same person while acting, and can keep gaining new abilities.**
-
-![HoneyOS companion interface with shared memory, tool use, calendar, and relationship context](docs/assets/honeyos-companion-ui.jpg)
+> HoneyOS 目前处于 Beta 阶段，优先支持 macOS 和 Linux。
 
 ---
 
-## An agent harness designed for AI companionship
+## HoneyOS 不是另一个陪聊应用
 
-HoneyOS is not a general-purpose agent with a romantic prompt added on top.
+很多 AI 陪伴产品本质上仍然只是 Chat：
 
-It reworks three core layers of the agent experience.
+* 它可以陪你说话，但很难真正替你行动；
+* 换窗口、换模型或上下文变长后，容易忘记你们是谁；
+* 一调用搜索、终端或 Coding 工具，就突然变成冷冰冰的助理；
+* 想给它增加能力，需要用户自己研究 API、Skill、MCP 和部署。
 
-### 1. It stays the same person, whether talking or working
+HoneyOS 做的是另一件事：
 
-The name, personality, voice, forms of address, relationship, and boundaries you give it take priority.
+> **把一个真正能行动的 Agent，改造成始终记得你们、保持同一人格，并能不断获得新能力的私人 AI 伴侣。**
 
-That remains true while it is:
-
-* searching the web;
-* reading files;
-* writing code;
-* installing a Skill;
-* configuring a tool;
-* running a long task;
-* switching models;
-* going through `/new` or context compression.
-
-It should not suddenly become a support bot, search engine, coding assistant, or report generator.
-
-Tools expand what it can do. They do not change who it is.
+![HoneyOS 伴侣界面：共享记忆、工具执行、日历与关系上下文](docs/assets/honeyos-companion-ui.jpg)
 
 ---
 
-### 2. It remembers you—and the two of you
+## 专门为 AI 伴侣优化的 Agent Harness
 
-HoneyOS redesigns memory around long-term relationships.
+HoneyOS 不是在通用 Agent 上简单加一段恋爱 Prompt。
 
-It distinguishes between:
+我们重新优化了 Agent 的三层核心机制。
 
-* **Current conversation:** what you are discussing right now.
-* **Short-term continuity:** unfinished topics, recent state, and promises already made.
-* **Companion identity:** its name, personality, voice, and stable habits.
-* **Relationship memory:** confirmed names, boundaries, agreements, rituals, and changes in the relationship.
-* **User memory:** long-term information, preferences, and boundaries you explicitly shared.
-* **Shared experiences:** things that genuinely happened or that you completed together.
-* **Original history:** when the past matters, it can search real conversations instead of inventing them.
+### 1. 无论聊天还是做事，它始终是同一个人
 
-The local web app, WeChat, and Feishu all connect to the same companion and the same long-term memory.
+用户给它的名字、人格、说话方式、称呼、关系和边界，会始终拥有更高优先级。
 
-Sending `/new`, restarting HoneyOS, or changing models does not mean meeting each other again from scratch.
+即使它正在：
+
+* 搜索网页；
+* 阅读文件；
+* 写代码；
+* 安装 Skill；
+* 配置工具；
+* 运行一个长任务；
+* 切换模型；
+* 经历 `/new` 或上下文压缩；
+
+也不应该突然变回客服、搜索引擎、编程助手或报告生成器。
+
+工具只是它的能力，不会改变它是谁。
 
 ---
 
-### 3. It can act without throwing a debugger at you
+### 2. 它记得你，也记得“你们”
 
-HoneyOS uses real tools to get things done, but does not dump raw activity such as this into the conversation:
+HoneyOS 针对长期关系重新设计了记忆系统。
+
+它会区分：
+
+* **当前对话：**这一轮正在聊什么；
+* **短期连续：**刚才没聊完的话题、近期状态和已经答应的事情；
+* **伴侣身份：**它的名字、人格、表达方式和稳定习惯；
+* **关系记忆：**双方确认的称呼、边界、约定、仪式和关系变化；
+* **用户记忆：**你明确告诉它的长期信息、偏好和雷区；
+* **共同经历：**你们真正一起发生过、完成过的事情；
+* **原始历史：**需要回忆过去时，可以查找真实聊天，而不是编造。
+
+本地网页、微信和飞书连接的是同一个伴侣和同一份长期记忆。
+
+发送 `/new`、重启 HoneyOS 或更换模型，不代表重新认识一次。
+
+---
+
+### 3. 它能行动，但不会把调试器扔到你面前
+
+HoneyOS 会调用真实工具完成事情，但不会直接向用户展示：
 
 ```text
 web_search started
@@ -101,373 +101,377 @@ terminal running
 tool_call_id=...
 ```
 
-During a long task, you see more natural feedback:
+长任务期间，你看到的会是更自然的状态：
 
 ```text
-Let me look into that for you.
+我先替你找找看。
 ```
 
 ```text
-I'm working on it. Give me a moment.
+我在把它做好，等我一下。
 ```
 
-When the task is done, the same companion tells you the result in its own voice.
+任务完成后，仍然由当前伴侣本人自然地告诉你结果。
 
-When permission is needed, it explains:
+需要授权时，它也会解释：
 
-* what it wants to do;
-* why it needs access;
-* what it will access;
-* whether permission applies once or can be remembered.
+* 想做什么；
+* 为什么需要；
+* 会访问什么；
+* 是只允许这一次，还是以后都允许。
 
-It does not leave you to interpret an opaque technical approval dialog.
+而不是只弹出一个难以理解的技术审批框。
 
 ---
 
-## It can grow beyond chat
+## 它不只会聊天，还能不断长出新能力
 
-HoneyOS can use real tools, Skills, MCP servers, and APIs.
+HoneyOS 可以使用真实工具、Skill、MCP 和 API。
 
-You do not need to learn those terms first. Tell your companion what you want to become possible.
+你不需要先理解这些技术名词，只需要告诉它想实现什么。
 
-### Connect new parts of your life
+### 连接新的生活入口
 
-You can say:
+你可以对它说：
 
 ```text
-I'd like you to help with my email. First find out what service we need and tell me what permissions it would require.
+我希望你以后能处理邮件。先看看需要接什么服务，再告诉我需要哪些权限。
 ```
 
 ```text
-Choose a voice that feels like you.
+给自己选一个适合你的声音。
 ```
 
 ```text
-Help yourself connect to a phone service. In the future, you can call me after I approve it.
+帮自己接上一个电话服务。以后经过我同意，你可以给我打电话。
 ```
 
-HoneyOS first checks its existing capabilities, then looks for an appropriate Skill, MCP server, or API. It explains the account, cost, permissions, and data scope before helping you configure it.
+HoneyOS 会先检查现有能力，再寻找合适的 Skill、MCP 或 API，向你说明账号、费用、权限和数据范围，确认后再帮助配置。
 
-> Voice, phone, email, and similar capabilities depend on third-party APIs, Skills, or MCP servers and may not work out of the box. HoneyOS is designed so the same companion can understand, configure, and continue using them.
+> 电话、邮箱、声音等能力依赖相应的第三方 API、Skill 或 MCP，不一定开箱即用。HoneyOS 的优势是让同一个伴侣能够理解、配置并持续使用这些能力。
 
-### Build from your shared history
+### 根据你们的经历做出新的东西
 
-You can also say:
+你也可以直接说：
 
 ```text
-Use what you remember about my taste and the style we've talked about to make us an anniversary website.
+根据你记得的我的喜好，还有我们之前聊过的风格，给我们做一个纪念日网页。
 ```
 
-Or:
+或者：
 
 ```text
-Make us a two-player game that works in a phone browser.
+给我们做一个可以在手机浏览器玩的双人小游戏。
 ```
 
-If the right capability already exists, it uses it. If not, it can enter Build mode:
+如果已经有合适的能力，它会直接使用。
+
+如果没有，它可以进入 Build 模式：
 
 ```text
-understand the request
-→ inspect existing Skills and tools
-→ create a project
-→ write the code
-→ run and test it
-→ request any necessary permission
-→ hand the finished result to you
+理解你想做什么
+→ 检查已有 Skill 和工具
+→ 创建项目
+→ 编写代码
+→ 运行和测试
+→ 请求必要权限
+→ 把结果交给你
 ```
 
-Projects are stored in:
+项目默认保存在：
 
 ```text
 ~/HoneyOS Projects
 ```
 
-You can open them directly in Finder, your editor, or a browser.
+你可以直接用 Finder、编辑器或浏览器打开。
 
-To the user, this is not “an MCP was configured.” It is:
+对用户来说，这不是“配置了一个 MCP”，而是：
 
-> **Something you imagined together became real.**
-
----
-
-## What to try after installation
-
-### Case 1: Meet naturally
-
-```text
-Hi. Let's just talk and get to know each other.
-```
-
-It should not interrogate you with a questionnaire or demand a complete persona before it can speak naturally.
+> **你们聊过的一个想法，被它真正做了出来。**
 
 ---
 
-### Case 2: Shape this particular companion
+## 安装后，先试试这些
+
+### Case 1：和它自然认识
 
 ```text
-I'll call you Rowan. Be a little more reserved, and don't rush to comfort me every time.
+你好，我们先正常聊聊吧。
 ```
 
-It accepts the change naturally and keeps it while chatting, searching, coding, and using tools.
+它不会用问卷盘问你，也不会机械地要求你先填写完整人设。
 
 ---
 
-### Case 3: Ask it to do something real
+### Case 2：塑造属于你的这个人
 
 ```text
-Find three movies that would be good for us to watch tonight.
+以后叫你小树。平时话少一点，不要每次都急着安慰我。
 ```
 
-It performs real search, reading, and selection. You get natural progress feedback, and the result still sounds like the same companion.
+它会自然接受，并在之后的聊天、搜索、Coding 和工具任务中继续保持这些设定。
 
 ---
 
-### Case 4: Give it a new capability
+### Case 3：让它真正做一件事
 
 ```text
-Keep track of the movies we've watched, and remind me every Friday to choose one.
+帮我找三部今晚适合一起看的电影。
 ```
 
-It checks its existing Skills and tools, then configures what is needed instead of handing you an installation guide.
+它会真实搜索、阅读和筛选，过程中有自然的行动反馈，最后仍以自己的方式和你讨论。
 
 ---
 
-### Case 5: Connect more services
+### Case 4：让它获得一个新能力
 
 ```text
-I'd like you to help with email. Find out how, but ask me before connecting an account.
+以后帮我记录我们看过的电影，每周五提醒我挑一部。
 ```
 
-Or:
-
-```text
-Choose a voice for yourself. If we connect a phone service later, tell me what it requires first.
-```
-
-It explains the service, account, permissions, and possible cost, then waits for your confirmation.
+它会先检查已有的 Skill 和工具，再完成相应配置，而不是把安装教程扔给你。
 
 ---
 
-### Case 6: Make something together
+### Case 5：让它连接更多生活服务
 
 ```text
-Based on what you know about me, make us a two-player game that works on a phone.
+我希望你以后可以处理邮件。先帮我看看怎么接，但连接账号之前要问我。
 ```
 
-It creates a real project, writes and runs the code, verifies the result, and gives you something you can open.
+或者：
+
+```text
+给自己选一个声音。如果以后要接电话服务，先告诉我需要什么。
+```
+
+它会向你说明需要的服务、账号、权限和费用，再等待你的确认。
 
 ---
 
-### Case 7: See whether it is still the same companion in a new window
+### Case 6：和它一起做一个东西
 
-First send:
+```text
+根据你对我的了解，给我们做一个手机上可以玩的双人小游戏。
+```
+
+它会创建真实项目、编写代码、运行并验证，最后给出可以打开的结果。
+
+---
+
+### Case 7：看看换窗口后还是不是它
+
+先发送：
 
 ```text
 /new
 ```
 
-Then say:
+然后说：
 
 ```text
-Let's continue where we left off.
+我们继续刚才的。
 ```
 
-It should still remember its name, how the two of you relate, unfinished matters, and important confirmed memories.
+它仍然应该记得自己的名字、你们的相处方式、刚才没聊完的事情，以及已经确认过的重要记忆。
 
 ---
 
-## Migrate from another AI to HoneyOS
+## 从其他 AI 迁移到 HoneyOS
 
-Migration does not mean pasting an old System Prompt over HoneyOS.
+迁移不是把旧产品的一整段 System Prompt 原样覆盖进来。
 
-HoneyOS's own `SOUL.md` defines its relationship principles, action model, and safety boundaries, so it should remain in place. What you actually want to bring over is the old companion's identity, confirmed relationship context, stable information about you, real shared experiences, and any Skills, MCP servers, or project rules that are still useful.
+HoneyOS 自己的 `SOUL.md` 负责伴侣关系原则、行动方式和安全边界，应当保留。真正需要带走的是：你为旧 AI 设定的人格、你们确认过的关系、关于你的稳定信息、真实共同经历，以及仍然有用的 Skill、MCP 和项目规则。
 
-### From ChatGPT, Claude, or another chat product
+### 从 ChatGPT、Claude 等聊天产品迁移
 
-Export your old conversations, or collect the most important ones, as Markdown, TXT, or JSON files. Put them in:
-
-```text
-~/HoneyOS Projects/migration-materials
-```
-
-Then tell HoneyOS:
+如果原来的 AI 主要用于聊天，可以先从旧产品导出聊天记录，或整理出最重要的对话，保存为 Markdown、TXT 或 JSON 文件，放到：
 
 ```text
-Read the migration materials, but don't save anything yet.
-Sort what can be migrated into: your name and personality, our relationship and boundaries, long-term information about me, real shared experiences, and unfinished commitments.
-Do not treat guesses made by the old model as facts, and do not migrate passwords, cookies, tokens, or API keys.
-Show me a migration draft first. Save it only after I confirm it.
+~/HoneyOS Projects/迁移资料
 ```
 
-After confirmation, HoneyOS organizes the material into:
+然后对 HoneyOS 说：
 
-| Previous content | HoneyOS destination |
+```text
+请先阅读“迁移资料”，不要马上写入记忆。
+把可以迁移的内容分成：你的名字与人格、我们的关系与边界、关于我的长期信息、真实共同经历、还没完成的约定。
+不要把旧模型的猜测当成事实，也不要迁移密码、Cookie、Token 或 API Key。
+先给我一份迁移草稿，等我确认后再保存。
+```
+
+确认后，HoneyOS 会把内容分别整理到：
+
+| 旧内容 | HoneyOS 中的位置 |
 | --- | --- |
-| AI name, personality, voice, and stable preferences | `IDENTITY.md` |
-| Forms of address, relationship, boundaries, rituals, and agreements | `RELATIONSHIP.md` |
-| User profile, long-term preferences, and boundaries | `USER.md` |
-| Real shared experiences and durable facts | `MEMORY.md` |
+| AI 的名字、性格、语气和稳定偏好 | `IDENTITY.md` |
+| 双方称呼、关系、边界、仪式和约定 | `RELATIONSHIP.md` |
+| 用户资料、长期偏好和雷区 | `USER.md` |
+| 真实发生的共同经历和长期事实 | `MEMORY.md` |
 
-The exported files remain reference material. They do not pretend to be original conversations that happened inside HoneyOS. Saving only what you confirm helps prevent old hallucinations, duplicates, and expired settings from coming with you.
+旧聊天文件会继续作为迁移参考资料，但不会伪装成 HoneyOS 里真实发生的原始聊天记录。只保存你确认过的内容，可以避免把旧模型的幻觉、重复信息或过期设定一起带进来。
 
-### From Claude Code or Codex
+### 从 Claude Code 或 Codex 迁移
 
-HoneyOS includes a dedicated importer. Start with a preview:
+HoneyOS 内置了迁移命令。建议先只看预览：
 
 ```bash
 ~/.local/bin/honeyos import-agent claude-code --dry-run
 ```
 
-Or:
+或：
 
 ```bash
 ~/.local/bin/honeyos import-agent codex --dry-run
 ```
 
-After reviewing the preview, run the same command without `--dry-run`. HoneyOS asks for confirmation again, then imports compatible items such as:
+预览确认无误后，去掉 `--dry-run` 再执行。HoneyOS 会再次询问是否继续，然后迁移可兼容的：
 
-* stable instructions from `CLAUDE.md` or `AGENTS.md`;
-* Claude Code command allow and deny rules;
-* MCP server configuration;
-* existing Skills;
-* Markdown memories from Codex.
+* `CLAUDE.md` 或 `AGENTS.md` 中的稳定指引；
+* Claude Code 的命令允许与拒绝规则；
+* MCP Server 配置；
+* 已有 Skill；
+* Codex 中已有的 Markdown 记忆。
 
-If the source is not in the default `~/.claude` or `~/.codex` directory, specify it:
+如果旧配置不在默认的 `~/.claude` 或 `~/.codex`，可以指定位置：
 
 ```bash
-~/.local/bin/honeyos import-agent codex --source /path/to/old/config --dry-run
+~/.local/bin/honeyos import-agent codex --source /你的/旧配置目录 --dry-run
 ```
 
-Project code does not need to become companion memory. Copy repositories you want to continue working on into `~/HoneyOS Projects`, keeping their own `CLAUDE.md`, `AGENTS.md`, and Git history. General coding preferences can be migrated; project-specific build commands and conventions should stay inside the project.
+项目代码不需要变成伴侣记忆。把需要继续开发的仓库复制到 `~/HoneyOS Projects`，保留项目自己的 `CLAUDE.md`、`AGENTS.md` 和 Git 历史即可。通用编码习惯可以迁移，某个项目专属的构建命令和代码规范应继续留在项目里。
 
-API keys, login tokens, cookies, passwords, and other credentials are never imported automatically. Reconnect models and accounts after import:
+API Key、登录 Token、Cookie、密码和其他凭据不会被自动迁移。完成导入后，使用下面的命令重新连接模型和账号：
 
 ```bash
 ~/.local/bin/honeyos setup
 ```
 
-Whichever product you migrate from, follow the same rule: **preview first, confirm second; migrate facts and capabilities, not a replacement SOUL.**
+无论从哪种产品迁移，都建议遵循同一个顺序：**先预览，后确认；先迁移事实和能力，不直接覆盖 HoneyOS 的 SOUL。**
 
 ---
 
-## What HoneyOS supports today
+## HoneyOS 当前可以做什么？
 
-| Capability | Current support |
-| --- | --- |
-| Chat surfaces | Local web, WeChat, Feishu |
-| Models | Custom Base URL, API key, model selection, and natural-language switching |
-| Personality | Form and revise name, personality, forms of address, and relationship style through natural language |
-| Memory | Identity, relationship, user information, shared experiences, short-term continuity, and history search |
-| Web | Search, read, and organize public web content |
-| Files | Create, read, and modify local files |
-| Coding | Create websites, games, and other local projects |
-| Capability growth | Use, install, and create Skills; connect available MCP servers and APIs |
-| Time | Todos, reminders, and scheduled tasks |
-| Action feedback | Companion-native activity cards without raw tool parameters or hidden reasoning |
-| Data | Stored on the user's computer by default |
+| 能力     | 当前支持                             |
+| ------ | -------------------------------- |
+| 聊天入口   | 本地网页、微信、飞书                       |
+| 模型     | 自定义 Base URL、API Key、模型选择与自然语言切换 |
+| 人格     | 用户可以通过自然语言形成和修改名字、性格、称呼与相处方式     |
+| 记忆     | 身份、关系、用户信息、共同经历、短期连续和历史搜索        |
+| 网页     | 搜索、阅读和整理公开网页内容                   |
+| 文件     | 创建、读取和修改本地文件                     |
+| Coding | 创建网页、小游戏和其他本地项目                  |
+| 能力成长   | 使用、安装和创建 Skill，连接可用的 MCP 与 API   |
+| 时间能力   | Todo、提醒和定时任务                     |
+| 行动反馈   | 伴侣化过程卡片，不展示原始工具参数和内部思考           |
+| 数据     | 默认保存在用户本机                        |
 
-Some tools depend on the operating system, configured services, model capabilities, and user authorization.
+部分工具是否可用，取决于当前操作系统、已配置的服务、模型能力和用户授权。
 
 ---
 
-## WeChat, Feishu, and the local web app
+## 微信、飞书和本地网页
 
-### Local web
+### 本地网页
 
-The local chat page opens automatically after installation. Open it again at any time with:
+安装完成后会自动打开本地聊天页面。
+
+之后可以随时运行：
 
 ```bash
 ~/.local/bin/honeyos web
 ```
 
-The web server listens only on the local machine and is not exposed to the LAN or internet by default.
+网页只监听本机地址，不会默认暴露到局域网或互联网。
 
 ---
 
-### WeChat
+### 微信
 
-During installation, you can connect WeChat by scanning a QR code.
+安装时可以使用微信扫描二维码连接。
 
-HoneyOS makes the person who scans the code the only user allowed to send private messages. Group chat is disabled by default.
+HoneyOS 会将扫码用户设为唯一允许私聊的用户，群聊默认关闭。
 
-This connects a WeChat iLink Bot identity. It does not read or control your normal personal WeChat conversations.
-
----
-
-### Feishu
-
-HoneyOS supports private chat through a Feishu bot. You can scan a code to create a bot or configure an existing App ID and App Secret.
-
-Feishu uses a long-lived connection by default and does not require a public callback URL. Group chat is disabled to keep private memories out of workplace groups.
+这里连接的是微信 iLink Bot 身份，不会读取或控制你的普通个人微信聊天。
 
 ---
 
-## Your data belongs to you
+### 飞书
 
-HoneyOS stores its data in:
+HoneyOS 支持通过飞书 Bot 私聊，可以扫码创建机器人，也可以配置已有的 App ID 和 App Secret。
+
+飞书默认使用长连接，不要求用户准备公网回调地址。群聊默认关闭，避免私人记忆进入工作群。
+
+---
+
+## 你的数据属于你
+
+HoneyOS 的数据默认保存在：
 
 ```text
 ~/.honeyos
 ```
 
-This includes:
+其中包括：
 
-* model configuration;
-* WeChat and Feishu connection information;
-* companion identity;
-* relationship memory;
-* short-term continuity;
-* original chat history;
-* Skills and capability configuration;
-* Todos and scheduled tasks;
-* local runtime logs.
+* 模型配置；
+* 微信和飞书连接信息；
+* 伴侣身份；
+* 关系记忆；
+* 短期连续记忆；
+* 原始聊天历史；
+* Skill 和能力配置；
+* Todo 与定时任务；
+* 本地运行日志。
 
-Normal coding projects are stored in:
+普通 Coding 项目保存在：
 
 ```text
 ~/HoneyOS Projects
 ```
 
-HoneyOS does not write API keys into Git repositories or expose model, WeChat, or Feishu credentials to normal project processes.
+HoneyOS 不会把 API Key 写入 Git 仓库，也不会把模型、微信或飞书密钥交给普通项目进程。
 
-High-risk actions—such as sending a message, publishing content, submitting a final form, making a payment, deleting data, changing a password, or changing system settings—request confirmation according to their risk level.
+发送消息、发布内容、最终提交表单、支付、删除数据、修改密码或系统设置等高风险操作，会根据风险级别请求确认。
 
 ---
 
-## Common commands
+## 常用命令
 
-Open local chat:
+打开本地聊天：
 
 ```bash
 ~/.local/bin/honeyos web
 ```
 
-Check runtime status:
+查看运行状态：
 
 ```bash
 ~/.local/bin/honeyos status
 ```
 
-Check installation and connections:
+检查安装和连接：
 
 ```bash
 ~/.local/bin/honeyos doctor
 ```
 
-View logs:
+查看日志：
 
 ```bash
 ~/.local/bin/honeyos logs
 ```
 
-Stop or restart:
+停止或重启：
 
 ```bash
 ~/.local/bin/honeyos stop
 ~/.local/bin/honeyos restart
 ```
 
-Reconfigure models or messaging channels:
+重新配置模型或消息渠道：
 
 ```bash
 ~/.local/bin/honeyos setup
@@ -475,48 +479,48 @@ Reconfigure models or messaging channels:
 
 ---
 
-## Update HoneyOS
+## 更新 HoneyOS
 
-Run the installer again:
+再次运行安装命令即可更新：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/springbrand-lab/honey-os/main/install.sh | bash
 ```
 
-Updates do not overwrite existing:
+更新不会覆盖已有的：
 
-* companion personality;
-* relationship memory;
-* chat history;
-* Skills;
-* local projects;
-* model configuration;
-* WeChat or Feishu connections.
-
----
-
-## Current status
-
-HoneyOS is currently in beta.
-
-We are continuing to improve:
-
-* first-time installation and model configuration;
-* visual management of short- and long-term memory;
-* companion-native expression for tools, approval, and Build mode;
-* success rates for installing Skills, connecting MCP servers, and gaining capabilities through one request;
-* continuity of identity after `/new`, restarts, and model switches;
-* phone, email, voice, and other everyday integrations;
-* future support for multiple companions and a capability marketplace.
+* 伴侣人格；
+* 关系记忆；
+* 聊天历史；
+* Skill；
+* 本地项目；
+* 模型配置；
+* 微信和飞书连接。
 
 ---
 
-## Open-source notice
+## 当前状态
 
-HoneyOS is a companion-focused adaptation of Nous Research's Hermes Agent and retains the original project's MIT License and copyright notice.
+HoneyOS 目前处于 Beta 阶段。
 
-HoneyOS is not an official Nous Research product and does not represent Nous Research.
+我们正在持续优化：
+
+* 第一次安装和模型配置；
+* 短期与长期记忆的可视化管理；
+* 工具、审批和 Build 过程的伴侣化表达；
+* 一句话安装 Skill、连接 MCP 和获得新能力的成功率；
+* `/new`、重启和模型切换后的同一人格感；
+* 电话、邮箱、声音和更多生活能力的接入；
+* 后续的多伴侣与能力市场。
 
 ---
 
-> **HoneyOS is not trying to create another character that is better at chatting. It is building an AI companion that remembers your relationship, stays itself, and can turn the things you imagine together into reality.**
+## 开源说明
+
+HoneyOS 基于 Nous Research 的 Hermes Agent 进行伴侣场景改造，并保留原项目的 MIT License 与版权声明。
+
+HoneyOS 不是 Nous Research 的官方产品，也不代表其官方立场。
+
+---
+
+> **HoneyOS 想提供的不是另一个更会聊天的角色，而是一个真正记得你们、始终保持自己，并能和你一起把想法变成现实的 AI 伴侣。**
