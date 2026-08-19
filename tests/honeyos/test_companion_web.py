@@ -557,6 +557,7 @@ def test_api_server_registers_companion_web_routes():
     assert ("GET", "/honeyos/styles.css") in routes
     assert ("GET", "/honeyos/icons.svg") in routes
     assert ("GET", "/api/companion/bootstrap") in routes
+    assert ("GET", "/api/companion/memories") in routes
     assert ("GET", "/api/companion/settings") in routes
     assert ("GET", "/api/companion/mcp/servers") in routes
     assert ("POST", "/api/companion/mcp/servers/{name}/auth") in routes
@@ -578,6 +579,49 @@ def test_api_server_registers_companion_web_routes():
         "POST",
         "/api/companion/proactive/{delivery_id}/complete",
     ) in routes
+
+
+@pytest.mark.asyncio
+async def test_companion_memory_snapshot_returns_live_chapters_and_status(
+    monkeypatch, tmp_path
+):
+    from honeyos.companion.continuity import StructuredMemoryStore
+
+    monkeypatch.setenv("HONEYOS_RUNTIME_ID", "honeyos-companion-v0.3")
+    monkeypatch.setattr("honeyos.core.constants.get_honeyos_home", lambda: tmp_path)
+    lane_key = "agent:main:companion:dm:owner"
+    store = StructuredMemoryStore(tmp_path)
+    memory = store.record(
+        lane_key=lane_key,
+        kind="open_loop",
+        content="下次继续验收记忆",
+        evidence="user_stated",
+        source_session_id="session-memory",
+        source_message_ids=(1,),
+    )
+    chapter = store.record_chapter(
+        lane_key=lane_key,
+        title="一起检查记忆",
+        summary="用户和伴侣一起检查了记忆是否保存。",
+        source_session_id="session-memory",
+        source_message_ids=(1, 2),
+        source_hash="memory-snapshot-chapter",
+    )
+    assert memory is not None and chapter is not None
+
+    adapter = _api_adapter()
+    request = SimpleNamespace(
+        cookies={"honeyos_local": adapter._local_web_token},
+        remote="127.0.0.1",
+        headers={},
+    )
+    response = await adapter._handle_companion_memories(request)
+    payload = json.loads(response.text)
+
+    assert payload["memories"][0]["content"] == "下次继续验收记忆"
+    assert payload["chapters"][0]["title"] == "一起检查记忆"
+    assert payload["chapters"][0]["source_message_ids"] == [1, 2]
+    assert payload["distillation"]["status"] == "idle"
 
 
 @pytest.mark.asyncio

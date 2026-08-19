@@ -70,6 +70,7 @@ class DistillationResult:
     applied: int = 0
     rejected: int = 0
     error: str = ""
+    chapter_id: str = ""
 
 
 def load_distillation_settings(home: Path) -> DistillationSettings:
@@ -240,7 +241,11 @@ async def extract_with_auxiliary_model(
         local_now = job.now
     system_prompt = f"""You distill HoneyOS companion conversations into strict JSON.
 Current local time: {local_now.isoformat()}
-Return one object with an operations array, maximum {job.max_operations} operations.
+Return one object with a required chapter object and an operations array,
+maximum {job.max_operations} operations. The chapter must contain a short title,
+a factual summary of what the user and assistant actually discussed, and
+evidence_message_ids. It is for the user's shared-experience timeline, not a
+claim about the user's identity or personality.
 Allowed kinds: open_loop, temporary_state, commitment, episode.
 Allowed actions: record, resolve, update. Never output forget.
 Every operation must cite one or more evidence_message_ids from the supplied transcript.
@@ -323,6 +328,19 @@ class MemoryDistiller:
             );
             """
         )
+        existing_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(distillation_runs)")
+        }
+        migrations = {
+            "applied_count": "INTEGER NOT NULL DEFAULT 0",
+            "rejected_count": "INTEGER NOT NULL DEFAULT 0",
+            "chapter_id": "TEXT NOT NULL DEFAULT ''",
+        }
+        for column, declaration in migrations.items():
+            if column not in existing_columns:
+                connection.execute(
+                    f"ALTER TABLE distillation_runs ADD COLUMN {column} {declaration}"
+                )
         try:
             os.chmod(self.db_path, 0o600)
         except OSError:
@@ -475,6 +493,108 @@ class MemoryDistiller:
             raise ValueError("distillation response did not contain operations")
         return tuple(operation for operation in operations[:maximum] if isinstance(operation, dict))
 
+    @staticmethod
+    def _parse_chapter(raw: str) -> dict[str, Any]:
+        cleaned = str(raw or "").strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[-1]
+            cleaned = cleaned.rsplit("```", 1)[0].strip()
+        start, end = cleaned.find("{"), cleaned.rfind("}")
+        if start < 0 or end < start:
+            return {}
+        payload = json.loads(cleaned[start : end + 1])
+        chapter = payload.get("chapter") if isinstance(payload, dict) else None
+        return chapter if isinstance(chapter, dict) else {}
+
+    @staticmethod
+    def _fallback_chapter(job: DistillationJob) -> dict[str, Any]:
+        user_messages = [m for m in job.messages if m["role"] == "user"]
+        assistant_messages = [m for m in job.messages if m["role"] == "assistant"]
+        first = user_messages[0] if user_messages else job.messages[0]
+        last = assistant_messages[-1] if assistant_messages else job.messages[-1]
+
+        def snippet(value: str, maximum: int) -> str:
+            cleaned = " ".join(value.split())
+            return cleaned if len(cleaned) <= maximum else cleaned[: maximum - 1] + "…"
+
+        topic = snippet(first["content"], 36)
+        return {
+            "title": f"聊到：{topic}",
+            "summary": (
+                f"你提到“{snippet(first['content'], 180)}”；"
+                f"它回应“{snippet(last['content'], 180)}”。"
+            ),
+            "evidence_message_ids": [m["_row_id"] for m in job.messages],
+        }
+
+    def _record_chapter(self, job: DistillationJob, raw: str):
+        proposed = self._parse_chapter(raw)
+        valid_source_ids = {message["_row_id"] for message in job.messages}
+        try:
+            evidence_ids = tuple(
+                dict.fromkeys(int(value) for value in proposed.get("evidence_message_ids", ()))
+            )
+        except (TypeError, ValueError):
+            evidence_ids = ()
+        title = str(proposed.get("title") or "").strip()
+        summary = str(proposed.get("summary") or "").strip()
+        if (
+            not title
+            or not summary
+            or not evidence_ids
+            or not set(evidence_ids).issubset(valid_source_ids)
+        ):
+            proposed = self._fallback_chapter(job)
+            title = proposed["title"]
+            summary = proposed["summary"]
+            evidence_ids = tuple(proposed["evidence_message_ids"])
+        return self.memories.record_chapter(
+            lane_key=job.lane_key,
+            title=title,
+            summary=summary,
+            source_session_id=job.session_id,
+            source_message_ids=evidence_ids,
+            source_hash=job.source_hash,
+            now=job.now,
+        )
+
+    def latest_status(self, *, lane_key: str) -> dict[str, Any]:
+        """Return a small user-facing snapshot of background organization."""
+
+        if not lane_key:
+            return {"status": "idle", "applied": 0, "rejected": 0, "chapter_id": ""}
+        try:
+            with self._connect() as connection:
+                row = connection.execute(
+                    """
+                    SELECT status, applied_count, rejected_count, chapter_id,
+                           error, created_at, completed_at
+                    FROM distillation_runs
+                    WHERE lane_key = ?
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (lane_key,),
+                ).fetchone()
+            if row is None:
+                return {
+                    "status": "idle",
+                    "applied": 0,
+                    "rejected": 0,
+                    "chapter_id": "",
+                }
+            return {
+                "status": row["status"],
+                "applied": int(row["applied_count"] or 0),
+                "rejected": int(row["rejected_count"] or 0),
+                "chapter_id": str(row["chapter_id"] or ""),
+                "error": str(row["error"] or ""),
+                "started_at": row["created_at"],
+                "completed_at": row["completed_at"],
+            }
+        except (OSError, sqlite3.Error, ValueError, TypeError):
+            return {"status": "unavailable", "applied": 0, "rejected": 0, "chapter_id": ""}
+
     def _apply_operations(
         self, job: DistillationJob, operations: tuple[dict[str, Any], ...]
     ) -> tuple[int, int]:
@@ -595,6 +715,22 @@ class MemoryDistiller:
             active_items = self.memories.list_active(lane_key=lane_key, now=timestamp)
             raw = await self.extractor(job, active_items, dict(main_runtime or {}))
             operations = self._parse_operations(raw, self.settings.max_operations)
+            applied = rejected = 0
+            chapter = self._record_chapter(job, raw)
+            if chapter is None:
+                error = "shared experience could not be persisted"
+                with self._connect() as connection:
+                    connection.execute(
+                        "UPDATE distillation_runs SET status = 'failed', error = ? WHERE id = ?",
+                        (error, job.run_id),
+                    )
+                return DistillationResult(
+                    run_id=job.run_id,
+                    status="failed",
+                    applied=applied,
+                    rejected=rejected,
+                    error=error,
+                )
             applied, rejected = self._apply_operations(job, operations)
             if operations and applied == 0 and rejected:
                 error = "validation rejected every proposed memory operation"
@@ -628,16 +764,24 @@ class MemoryDistiller:
                 connection.execute(
                     """
                     UPDATE distillation_runs
-                    SET status = 'completed', completed_at = ?, error = ''
+                    SET status = 'completed', completed_at = ?, error = '',
+                        applied_count = ?, rejected_count = ?, chapter_id = ?
                     WHERE id = ?
                     """,
-                    (timestamp.isoformat(), job.run_id),
+                    (
+                        timestamp.isoformat(),
+                        applied,
+                        rejected,
+                        chapter.id,
+                        job.run_id,
+                    ),
                 )
             return DistillationResult(
                 run_id=job.run_id,
                 status="completed",
                 applied=applied,
                 rejected=rejected,
+                chapter_id=chapter.id,
             )
         except asyncio.CancelledError:
             try:

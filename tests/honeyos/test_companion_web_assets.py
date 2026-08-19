@@ -26,6 +26,16 @@ def test_companion_product_shell_exposes_user_facing_memory_and_relationship_pag
     assert "记忆保存在本地" in page
 
 
+def test_chat_history_has_no_visible_frontend_entry():
+    page = (ASSETS / "index.html").read_text(encoding="utf-8")
+    script = (ASSETS / "app.js").read_text(encoding="utf-8")
+
+    assert 'data-view-target="history"' not in page
+    assert 'data-view="history"' in page
+    assert "查看原对话" not in script
+    assert 'openView("history")' not in script
+
+
 def test_topic_pool_script_uses_safe_dom_and_separate_visible_chat_copy():
     script = (ASSETS / "app.js").read_text(encoding="utf-8")
 
@@ -77,6 +87,31 @@ def test_companion_memory_page_names_and_filters_durable_memories():
     assert 'long_term_memory: "长期记忆"' in script
     assert 'persistent_memory: "来自长期记忆"' in script
     assert 'persistent_user: "来自对你的了解"' in script
+
+
+def test_memory_page_refreshes_live_and_shows_shared_experience_status():
+    page = (ASSETS / "index.html").read_text(encoding="utf-8")
+    script = (ASSETS / "app.js").read_text(encoding="utf-8")
+
+    assert 'id="memory-sync-status"' in page
+    assert 'data-memory-filter="conversation_chapter"' in page
+    assert 'fetch("/api/companion/memories"' in script
+    assert "function refreshMemories(" in script
+    assert 'if (viewName === "memories")' in script
+    assert "if (completed) refreshMemories" in script
+    assert "companionData.chapters" in script
+
+
+def test_post_chat_memory_polling_waits_for_terminal_distillation_status():
+    script = (ASSETS / "app.js").read_text(encoding="utf-8")
+
+    assert "const MEMORY_SYNC_MAX_ATTEMPTS = 40;" in script
+    assert "const MEMORY_SYNC_STARTUP_GRACE_ATTEMPTS = 3;" in script
+    assert "const MEMORY_SYNC_POLL_INTERVAL_MS = 3_000;" in script
+    assert '["pending", "running"].includes(status)' in script
+    assert "attempt < MEMORY_SYNC_STARTUP_GRACE_ATTEMPTS" in script
+    assert "attempt < MEMORY_SYNC_MAX_ATTEMPTS" in script
+    assert "options.follow &&" in script
 
 
 def test_companion_shell_uses_one_icon_language_and_stable_avatar_surfaces():

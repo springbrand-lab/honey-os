@@ -2677,6 +2677,12 @@ input:focus-visible, textarea:focus-visible {
 .memory-kind { color: var(--accent-strong); font-size: 11px; }
 .memory-card > p { font-size: 14px; line-height: 1.6; }
 .memory-provenance { color: var(--text-faint); font-size: 11px; }
+.memory-sync-status { margin-top: 8px; color: var(--text-faint); font-size: 12px; }
+.memory-sync-status[data-status="running"],
+.memory-sync-status[data-status="pending"] { color: var(--accent-strong); }
+.memory-sync-status[data-status="failed"],
+.memory-sync-status[data-status="unavailable"] { color: var(--danger); }
+.conversation-chapter-card { border-left: 3px solid color-mix(in srgb, var(--accent) 45%, transparent); }
 
 .relationship-layout { width: min(100%,850px); margin: 0 auto; padding: 24px 0 42px; }
 .relationship-hero { padding: 18px; border: 1px solid var(--line); border-radius: var(--radius-card); background: #f7f5f0; box-shadow: none; }

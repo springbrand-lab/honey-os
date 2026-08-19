@@ -30,9 +30,6 @@
           <button class="navigation-item" type="button" data-view-target="relationship">
             <svg class="app-icon" aria-hidden="true"><use href="./icons.svg#heart"></use></svg><span>我们</span>
           </button>
-          <button class="navigation-item" type="button" data-view-target="history">
-            <svg class="app-icon" aria-hidden="true"><use href="./icons.svg#history"></use></svg><span>聊天记录</span>
-          </button>
           <button class="navigation-item" type="button" data-view-target="settings">
             <svg class="app-icon" aria-hidden="true"><use href="./icons.svg#settings"></use></svg><span>设置</span>
           </button>
@@ -63,7 +60,6 @@
               <span>最近看到的</span>
               <span class="topic-pool-count" id="topic-pool-count" hidden></span>
             </button>
-            <button class="header-circle-button" type="button" data-view-target="history" aria-label="查看聊天记录"><svg class="app-icon" aria-hidden="true"><use href="./icons.svg#history"></use></svg></button>
           </div>
         </header>
 
@@ -108,9 +104,10 @@
       <section class="app-page app-view" data-view="memories" aria-labelledby="memories-title">
         <header class="page-header">
           <div>
-            <span class="page-eyebrow">你可以随时修改或忘记</span>
+            <span class="page-eyebrow">你可以查看共同经历，也可以完成或忘记需要延续的事</span>
             <h1 id="memories-title">它记得的事</h1>
             <p>不是一份秘密档案，而是你们正在延续的事情。</p>
+            <p class="memory-sync-status" id="memory-sync-status" aria-live="polite"></p>
           </div>
           <button class="page-close" type="button" data-view-target="chat" aria-label="回到聊天"><svg class="app-icon" aria-hidden="true"><use href="./icons.svg#close"></use></svg></button>
         </header>
@@ -119,7 +116,7 @@
           <button class="memory-tab" type="button" data-memory-filter="long_term_memory">长期记忆</button>
           <button class="memory-tab" type="button" data-memory-filter="temporary_state">最近</button>
           <button class="memory-tab" type="button" data-memory-filter="commitment">答应过的</button>
-          <button class="memory-tab" type="button" data-memory-filter="episode">共同经历</button>
+          <button class="memory-tab" type="button" data-memory-filter="conversation_chapter">共同经历</button>
           <button class="memory-tab" type="button" data-memory-filter="open_loop">待续</button>
         </div>
         <div class="page-scroll memory-list" id="memory-list"></div>

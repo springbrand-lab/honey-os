@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+from io import BytesIO
+import urllib.error
 import urllib.request
 
+import pytest
 import yaml
 
 from honeyos.cli.bootstrap import activate_home
@@ -202,6 +205,168 @@ def test_model_validation_uses_real_non_streaming_chat_completion(monkeypatch):
         }
     ]
     assert "call the honeyos_compatibility_probe tool" in body["messages"][0]["content"]
+
+
+def test_model_validation_requires_the_compatibility_tool(monkeypatch):
+    observed = {}
+
+    def open_request(request, timeout):
+        observed["body"] = json.loads(request.data.decode("utf-8"))
+        return _Response(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call_probe",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "honeyos_compatibility_probe",
+                                        "arguments": '{"value":"honeyos"}',
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", open_request)
+    choice = ModelChoice(
+        provider="deepseek",
+        model="deepseek-v4-pro",
+        base_url="https://api.deepseek.com/v1",
+        key_env="DEEPSEEK_API_KEY",
+    )
+
+    validate_model_key(choice, "valid-key")
+
+    assert observed["body"]["tool_choice"] == "required"
+
+
+def test_deepseek_validation_disables_thinking_for_forced_tool_choice(monkeypatch):
+    observed = {}
+
+    def open_request(request, timeout):
+        observed["body"] = json.loads(request.data.decode("utf-8"))
+        return _Response(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call_probe",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "honeyos_compatibility_probe",
+                                        "arguments": '{"value":"honeyos"}',
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", open_request)
+    choice = ModelChoice(
+        provider="deepseek",
+        model="deepseek-v4-pro",
+        base_url="https://api.deepseek.com/v1",
+        key_env="DEEPSEEK_API_KEY",
+    )
+
+    validate_model_key(choice, "valid-key")
+
+    assert observed["body"]["thinking"] == {"type": "disabled"}
+    assert observed["body"]["max_tokens"] >= 256
+
+
+def test_model_validation_reports_provider_error_message(monkeypatch):
+    def reject_request(request, timeout):
+        raise urllib.error.HTTPError(
+            request.full_url,
+            400,
+            "Bad Request",
+            {},
+            BytesIO(
+                json.dumps(
+                    {
+                        "error": {
+                            "message": "Thinking mode does not support this tool_choice"
+                        }
+                    }
+                ).encode("utf-8")
+            ),
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", reject_request)
+    choice = ModelChoice(
+        provider="deepseek",
+        model="deepseek-v4-pro",
+        base_url="https://api.deepseek.com/v1",
+        key_env="DEEPSEEK_API_KEY",
+    )
+
+    try:
+        validate_model_key(choice, "valid-key")
+    except ValueError as exc:
+        assert "HTTP 400" in str(exc)
+        assert "Thinking mode does not support this tool_choice" in str(exc)
+    else:
+        raise AssertionError("provider error detail was discarded")
+
+
+def test_model_validation_redacts_credentials_and_control_characters(monkeypatch):
+    api_key = "submitted-secret-key"
+
+    def reject_request(request, timeout):
+        raise urllib.error.HTTPError(
+            request.full_url,
+            429,
+            "Too Many Requests",
+            {},
+            BytesIO(
+                json.dumps(
+                    {
+                        "error": {
+                            "message": (
+                                "Rate limit exceeded; retry later.\n"
+                                f"api_key={api_key}\r"
+                                "Authorization: Bearer provider-token-123456\u001b[31m"
+                            )
+                        }
+                    }
+                ).encode("utf-8")
+            ),
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", reject_request)
+    choice = ModelChoice(
+        provider="custom",
+        model="test-model",
+        base_url="https://api.example.com/v1",
+        key_env="HONEYOS_MODEL_API_KEY",
+    )
+
+    with pytest.raises(ValueError) as raised:
+        validate_model_key(choice, api_key)
+
+    message = str(raised.value)
+    assert "Rate limit exceeded; retry later." in message
+    assert api_key not in message
+    assert "provider-token-123456" not in message
+    assert "\n" not in message
+    assert "\r" not in message
+    assert "\x1b" not in message
 
 
 def test_model_validation_rejects_chat_only_model_without_tool_calls(monkeypatch):

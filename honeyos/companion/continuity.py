@@ -83,6 +83,20 @@ class StructuredMemoryItem:
     distillation_run_id: str | None = None
 
 
+@dataclass(frozen=True)
+class ConversationChapter:
+    """One source-backed, user-visible chapter of the shared conversation."""
+
+    id: str
+    lane_key: str
+    title: str
+    summary: str
+    source_session_id: str
+    source_message_ids: tuple[int, ...]
+    source_hash: str
+    created_at: datetime
+
+
 class StructuredMemoryStore:
     """Source-backed companion working memory in the HONEYOS local database."""
 
@@ -122,6 +136,26 @@ class StructuredMemoryStore:
                 updated_at TEXT NOT NULL,
                 expires_at TEXT
             )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS conversation_chapters (
+                id TEXT PRIMARY KEY,
+                lane_key TEXT NOT NULL,
+                title TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                source_session_id TEXT NOT NULL,
+                source_message_ids TEXT NOT NULL,
+                source_hash TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_conversation_chapters_lane
+            ON conversation_chapters (lane_key, created_at DESC)
             """
         )
         existing_columns = {
@@ -370,6 +404,105 @@ class StructuredMemoryStore:
                     (lane_key, self.max_items),
                 ).fetchall()
             return tuple(self._row_to_item(row) for row in rows)
+        except (OSError, sqlite3.Error, ValueError, TypeError):
+            return ()
+
+    @staticmethod
+    def _row_to_chapter(row: sqlite3.Row) -> ConversationChapter:
+        try:
+            source_message_ids = tuple(
+                int(value) for value in json.loads(row["source_message_ids"] or "[]")
+            )
+        except (TypeError, ValueError, json.JSONDecodeError):
+            source_message_ids = ()
+        return ConversationChapter(
+            id=row["id"],
+            lane_key=row["lane_key"],
+            title=row["title"],
+            summary=row["summary"],
+            source_session_id=row["source_session_id"],
+            source_message_ids=source_message_ids,
+            source_hash=row["source_hash"],
+            created_at=_as_utc(datetime.fromisoformat(row["created_at"])),
+        )
+
+    def record_chapter(
+        self,
+        *,
+        lane_key: str,
+        title: str,
+        summary: str,
+        source_session_id: str,
+        source_message_ids: Iterable[int],
+        source_hash: str,
+        now: datetime | None = None,
+    ) -> ConversationChapter | None:
+        """Persist exactly one reviewable chapter for a distilled source range."""
+
+        cleaned_title = self._clean_content(title)[:80]
+        cleaned_summary = self._clean_content(summary)[:800]
+        try:
+            normalized_source_ids = tuple(
+                dict.fromkeys(int(value) for value in source_message_ids)
+            )
+        except (TypeError, ValueError):
+            return None
+        if not all(
+            (lane_key, cleaned_title, cleaned_summary, source_session_id, source_hash)
+        ) or not normalized_source_ids:
+            return None
+        timestamp = _as_utc(now or _utc_now())
+        try:
+            with self._connect() as connection:
+                existing = connection.execute(
+                    "SELECT * FROM conversation_chapters WHERE source_hash = ?",
+                    (source_hash,),
+                ).fetchone()
+                if existing is None:
+                    chapter_id = uuid.uuid4().hex[:12]
+                    connection.execute(
+                        """
+                        INSERT INTO conversation_chapters (
+                            id, lane_key, title, summary, source_session_id,
+                            source_message_ids, source_hash, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            chapter_id,
+                            lane_key,
+                            cleaned_title,
+                            cleaned_summary,
+                            source_session_id,
+                            json.dumps(normalized_source_ids, separators=(",", ":")),
+                            source_hash,
+                            timestamp.isoformat(),
+                        ),
+                    )
+                    existing = connection.execute(
+                        "SELECT * FROM conversation_chapters WHERE id = ?",
+                        (chapter_id,),
+                    ).fetchone()
+            return self._row_to_chapter(existing) if existing is not None else None
+        except (OSError, sqlite3.Error, ValueError, TypeError):
+            return None
+
+    def list_chapters(
+        self, *, lane_key: str, limit: int = 50
+    ) -> tuple[ConversationChapter, ...]:
+        if not lane_key:
+            return ()
+        try:
+            with self._connect() as connection:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM conversation_chapters
+                    WHERE lane_key = ?
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    (lane_key, max(1, min(int(limit), 200))),
+                ).fetchall()
+            return tuple(self._row_to_chapter(row) for row in rows)
         except (OSError, sqlite3.Error, ValueError, TypeError):
             return ()
 
