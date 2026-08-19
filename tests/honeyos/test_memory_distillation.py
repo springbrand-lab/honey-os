@@ -69,6 +69,106 @@ async def test_periodic_distillation_waits_for_twenty_new_messages(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_periodic_distillation_always_persists_a_shared_experience(tmp_path):
+    async def extractor(_job, _active, _runtime):
+        return '{"operations":[]}'
+
+    distiller = MemoryDistiller(
+        tmp_path,
+        settings=DistillationSettings(trigger_messages=20),
+        extractor=extractor,
+    )
+
+    result = await distiller.distill_if_due(
+        lane_key=LANE,
+        session_id="session-shared-experience",
+        messages=_messages(20),
+        reason="periodic",
+        now=NOW,
+    )
+
+    assert result is not None and result.status == "completed"
+    assert result.chapter_id
+    chapters = StructuredMemoryStore(tmp_path).list_chapters(lane_key=LANE)
+    assert len(chapters) == 1
+    assert chapters[0].id == result.chapter_id
+    assert chapters[0].source_message_ids == tuple(range(1, 21))
+    assert chapters[0].source_session_id == "session-shared-experience"
+    assert StructuredMemoryStore(tmp_path).list_active(lane_key=LANE, now=NOW) == ()
+    status = distiller.latest_status(lane_key=LANE)
+    assert status["status"] == "completed"
+    assert status["chapter_id"] == result.chapter_id
+    assert status["applied"] == 0
+    assert status["rejected"] == 0
+
+
+@pytest.mark.asyncio
+async def test_chapter_write_failure_leaves_operations_unapplied_and_retryable(
+    monkeypatch, tmp_path
+):
+    async def extractor(_job, _active, _runtime):
+        return json.dumps(
+            {
+                "operations": [
+                    {
+                        "action": "record",
+                        "kind": "open_loop",
+                        "content": "下次继续聊写入失败",
+                        "evidence": "user_stated",
+                        "evidence_message_ids": [1],
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+    distiller = MemoryDistiller(tmp_path, extractor=extractor)
+    record_chapter = distiller.memories.record_chapter
+    chapter_attempts = 0
+
+    def fail_once(**kwargs):
+        nonlocal chapter_attempts
+        chapter_attempts += 1
+        if chapter_attempts == 1:
+            return None
+        return record_chapter(**kwargs)
+
+    monkeypatch.setattr(distiller.memories, "record_chapter", fail_once)
+
+    failed = await distiller.distill_if_due(
+        lane_key=LANE,
+        session_id="session-write-failure",
+        messages=_messages(20),
+        reason="periodic",
+        now=NOW,
+    )
+
+    assert failed is not None and failed.status == "failed"
+    assert failed.applied == 0
+    assert StructuredMemoryStore(tmp_path).list_active(lane_key=LANE, now=NOW) == ()
+    with distiller._connect() as connection:
+        state = connection.execute(
+            "SELECT * FROM distillation_state WHERE lane_key = ? AND session_id = ?",
+            (LANE, "session-write-failure"),
+        ).fetchone()
+    assert state is None
+
+    completed = await distiller.distill_if_due(
+        lane_key=LANE,
+        session_id="session-write-failure",
+        messages=_messages(20),
+        reason="periodic",
+        now=NOW + timedelta(minutes=1),
+    )
+
+    assert completed is not None and completed.status == "completed"
+    assert completed.run_id == failed.run_id
+    assert completed.applied == 1
+    assert len(StructuredMemoryStore(tmp_path).list_active(lane_key=LANE, now=NOW)) == 1
+    assert len(StructuredMemoryStore(tmp_path).list_chapters(lane_key=LANE)) == 1
+
+
+@pytest.mark.asyncio
 async def test_auxiliary_distillation_accepts_main_runtime_api_mode(monkeypatch, tmp_path):
     captured = {}
 

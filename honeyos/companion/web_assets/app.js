@@ -26,6 +26,7 @@ const elements = {
   navigationItems: Array.from(document.querySelectorAll(".navigation-item")),
   memoryList: document.querySelector("#memory-list"),
   memoryCount: document.querySelector("#memory-count"),
+  memorySyncStatus: document.querySelector("#memory-sync-status"),
   memoryTabs: Array.from(document.querySelectorAll("[data-memory-filter]")),
   profileForm: document.querySelector("#profile-form"),
   profileFormStatus: document.querySelector("#profile-form-status"),
@@ -82,12 +83,17 @@ let activeView = "chat";
 let memoryFilter = "all";
 let companionData = {
   memories: [],
+  chapters: [],
+  distillation: {},
   history: [],
   profile: {},
   settings: {},
 };
 let toastTimer = null;
 let channelLinkPollTimer = null;
+const MEMORY_SYNC_MAX_ATTEMPTS = 40;
+const MEMORY_SYNC_STARTUP_GRACE_ATTEMPTS = 3;
+const MEMORY_SYNC_POLL_INTERVAL_MS = 3_000;
 
 const providerBaseUrls = {
   "openai-api": "https://api.openai.com/v1",
@@ -153,6 +159,9 @@ function openView(viewName) {
       elements.input?.focus();
     });
   }
+  if (viewName === "memories") {
+    void refreshMemories();
+  }
 }
 
 function formatDate(value, options = {}) {
@@ -180,6 +189,7 @@ function memoryKindLabel(kind) {
     temporary_state: "最近",
     commitment: "答应过的",
     episode: "共同经历",
+    conversation_chapter: "共同经历",
     open_loop: "待续",
   }[kind] || "记忆";
 }
@@ -279,16 +289,68 @@ function renderMemoryCard(memory) {
   return card;
 }
 
+function renderChapterCard(chapter) {
+  const card = document.createElement("article");
+  card.className = "memory-card conversation-chapter-card";
+  card.dataset.kind = "conversation_chapter";
+
+  const header = document.createElement("div");
+  header.className = "memory-card-header";
+  const kind = document.createElement("span");
+  kind.className = "memory-kind";
+  kind.textContent = "共同经历";
+  const date = document.createElement("span");
+  date.className = "memory-expiry";
+  date.textContent = formatDate(chapter.created_at, { relative: true });
+  header.append(kind, date);
+
+  const title = document.createElement("h2");
+  title.textContent = chapter.title || "一段共同经历";
+  const summary = document.createElement("p");
+  summary.textContent = chapter.summary || "这段聊天已经保留下来。";
+  const provenance = document.createElement("p");
+  provenance.className = "memory-provenance";
+  provenance.textContent = "来自真实聊天 · 不会作为用户画像注入模型";
+
+  card.append(header, title, summary, provenance);
+  return card;
+}
+
+function renderMemorySyncStatus() {
+  if (!elements.memorySyncStatus) return;
+  const status = companionData.distillation?.status || "idle";
+  elements.memorySyncStatus.dataset.status = status;
+  elements.memorySyncStatus.textContent = {
+    pending: "正在等待整理刚才的聊天…",
+    running: "正在整理刚才的聊天…",
+    completed: "最近一次聊天已整理完成",
+    failed: "最近一次整理没有完成，系统会自动重试",
+    unavailable: "记忆状态暂时不可用",
+    idle: "聊满一段后，会自动整理成可回看的共同经历",
+  }[status] || "记忆会在聊天后自动更新";
+}
+
 function renderMemories() {
   if (!elements.memoryList) return;
-  const memories = companionData.memories.filter(
-    (memory) => memoryFilter === "all" || memory.kind === memoryFilter,
-  );
+  const memories = companionData.memories
+    .filter(
+      (memory) =>
+        memoryFilter === "all" ||
+        memory.kind === memoryFilter ||
+        (memoryFilter === "conversation_chapter" && memory.kind === "episode"),
+    )
+    .map((memory) => ({ type: "memory", value: memory }));
+  const chapters = companionData.chapters
+    .filter(() => memoryFilter === "all" || memoryFilter === "conversation_chapter")
+    .map((chapter) => ({ type: "chapter", value: chapter }));
+  const visibleItems = [...chapters, ...memories];
   if (elements.memoryCount) {
-    elements.memoryCount.textContent = String(companionData.memories.length);
-    elements.memoryCount.hidden = companionData.memories.length === 0;
+    const count = companionData.memories.length + companionData.chapters.length;
+    elements.memoryCount.textContent = String(count);
+    elements.memoryCount.hidden = count === 0;
   }
-  if (!memories.length) {
+  renderMemorySyncStatus();
+  if (!visibleItems.length) {
     elements.memoryList.replaceChildren(
       emptyPageState(
         memoryFilter === "all" ? "还没有整理出需要延续的事情" : "这一类暂时是空的",
@@ -297,7 +359,41 @@ function renderMemories() {
     );
     return;
   }
-  elements.memoryList.replaceChildren(...memories.map(renderMemoryCard));
+  elements.memoryList.replaceChildren(
+    ...visibleItems.map((item) =>
+      item.type === "chapter" ? renderChapterCard(item.value) : renderMemoryCard(item.value),
+    ),
+  );
+}
+
+async function refreshMemories(options = {}) {
+  try {
+    const response = await fetch("/api/companion/memories", {
+      credentials: "same-origin",
+    });
+    if (!response.ok) throw new Error("memory_snapshot_unavailable");
+    const data = await response.json();
+    companionData.memories = Array.isArray(data.memories) ? data.memories : [];
+    companionData.chapters = Array.isArray(data.chapters) ? data.chapters : [];
+    companionData.distillation = data.distillation || {};
+    renderMemories();
+  } catch {
+    companionData.distillation = { status: "unavailable" };
+    renderMemorySyncStatus();
+  }
+  const attempt = Number(options.attempt || 0);
+  const status = companionData.distillation?.status || "idle";
+  const withinStartupGrace = attempt < MEMORY_SYNC_STARTUP_GRACE_ATTEMPTS;
+  if (
+    options.follow &&
+    (withinStartupGrace || ["pending", "running"].includes(status)) &&
+    attempt < MEMORY_SYNC_MAX_ATTEMPTS
+  ) {
+    window.setTimeout(
+      () => void refreshMemories({ follow: true, attempt: attempt + 1 }),
+      MEMORY_SYNC_POLL_INTERVAL_MS,
+    );
+  }
 }
 
 function fillProfileForm(profile) {
@@ -449,6 +545,8 @@ async function startNewConversation() {
 
 function hydrateCompanionPages(data) {
   companionData.memories = Array.isArray(data.memories) ? data.memories : [];
+  companionData.chapters = Array.isArray(data.chapters) ? data.chapters : [];
+  companionData.distillation = data.distillation || {};
   companionData.history = Array.isArray(data.history) ? data.history : [];
   companionData.profile = data.profile_details || {};
   companionData.settings = data.settings || {};
@@ -1336,6 +1434,7 @@ async function sendMessage(text, options = {}) {
     activeAssistantBubble = null;
     elements.input.focus();
   }
+  if (completed) refreshMemories({ follow: true });
   return completed;
 }
 

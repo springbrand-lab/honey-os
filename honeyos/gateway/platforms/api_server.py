@@ -2169,6 +2169,7 @@ class APIServerAdapter(BasePlatformAdapter):
             ("GET", "/honeyos/styles.css", self._handle_companion_styles),
             ("GET", "/honeyos/icons.svg", self._handle_companion_icons),
             ("GET", "/api/companion/bootstrap", self._handle_companion_bootstrap),
+            ("GET", "/api/companion/memories", self._handle_companion_memories),
             ("GET", "/api/companion/settings", self._handle_companion_settings),
             ("GET", "/api/companion/mcp/servers", self._handle_companion_mcp_servers),
             (
@@ -2452,6 +2453,16 @@ class APIServerAdapter(BasePlatformAdapter):
             home,
         )
         memory_items = (*persistent_memory_items, *structured_memory_items)
+        chapters = await asyncio.to_thread(
+            StructuredMemoryStore(home).list_chapters,
+            lane_key=lane_key,
+        )
+        from honeyos.companion.distillation import MemoryDistiller
+
+        distillation = await asyncio.to_thread(
+            MemoryDistiller(home).latest_status,
+            lane_key=lane_key,
+        )
         history = []
         if db is not None:
             try:
@@ -2525,12 +2536,93 @@ class APIServerAdapter(BasePlatformAdapter):
                 "session_key": lane_key,
                 "messages": messages,
                 "memories": [_memory_payload(item) for item in memory_items],
+                "chapters": [
+                    {
+                        "id": chapter.id,
+                        "kind": "conversation_chapter",
+                        "title": chapter.title,
+                        "summary": chapter.summary,
+                        "source_session_id": chapter.source_session_id,
+                        "source_message_ids": list(chapter.source_message_ids),
+                        "created_at": chapter.created_at.isoformat(),
+                    }
+                    for chapter in chapters
+                ],
+                "distillation": distillation,
                 "history": history,
                 "settings": {
                     "memory_location": "local",
                     "conversation_model": str(self._model_name or ""),
                     "distillation_model": distillation_model,
                 },
+            }
+        )
+
+    async def _handle_companion_memories(
+        self, request: "web.Request"
+    ) -> "web.Response":
+        """Return a fresh memory snapshot without reloading the whole chat."""
+
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+        from honeyos.companion.continuity import StructuredMemoryStore
+        from honeyos.companion.distillation import MemoryDistiller
+        from honeyos.companion.persistent_memory import list_persistent_memories
+        from honeyos.core.constants import get_honeyos_home
+        from honeyos.gateway.session import SessionSource, build_session_key
+
+        home = get_honeyos_home()
+        source = SessionSource(
+            platform=Platform.API_SERVER,
+            chat_id="local-owner",
+            chat_type="dm",
+            user_id="local-owner",
+            user_name="主人",
+        )
+        lane_key = build_session_key(source)
+        store = StructuredMemoryStore(home)
+        structured_items, persistent_items, chapters, distillation = await asyncio.gather(
+            asyncio.to_thread(store.list_active, lane_key=lane_key),
+            asyncio.to_thread(list_persistent_memories, home),
+            asyncio.to_thread(store.list_chapters, lane_key=lane_key),
+            asyncio.to_thread(MemoryDistiller(home).latest_status, lane_key=lane_key),
+        )
+
+        def memory_payload(item: Any) -> Dict[str, Any]:
+            return {
+                "id": item.id,
+                "kind": item.kind,
+                "content": item.content,
+                "status": item.status,
+                "evidence": item.evidence,
+                "importance": item.importance,
+                "created_by": item.created_by,
+                "source_session_id": item.source_session_id,
+                "source_message_ids": list(item.source_message_ids),
+                "created_at": item.created_at.isoformat(),
+                "updated_at": item.updated_at.isoformat(),
+                "expires_at": item.expires_at.isoformat() if item.expires_at else None,
+            }
+
+        return web.json_response(
+            {
+                "memories": [
+                    memory_payload(item) for item in (*persistent_items, *structured_items)
+                ],
+                "chapters": [
+                    {
+                        "id": chapter.id,
+                        "kind": "conversation_chapter",
+                        "title": chapter.title,
+                        "summary": chapter.summary,
+                        "source_session_id": chapter.source_session_id,
+                        "source_message_ids": list(chapter.source_message_ids),
+                        "created_at": chapter.created_at.isoformat(),
+                    }
+                    for chapter in chapters
+                ],
+                "distillation": distillation,
             }
         )
 

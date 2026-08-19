@@ -5,6 +5,7 @@ from __future__ import annotations
 import getpass
 import json
 import os
+import re
 import tempfile
 import urllib.error
 import urllib.request
@@ -21,6 +22,31 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 RECOMMENDED_OPENROUTER_MODEL = "z-ai/glm-5.2"
 OPENAI_BASE_URL = "https://api.openai.com/v1"
 DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
+
+
+def _safe_provider_error_detail(message: str, api_key: str) -> str:
+    detail = str(message)
+    if api_key:
+        detail = detail.replace(api_key, "[REDACTED]")
+    detail = re.sub(
+        r"(?i)\bbearer\s+[^\s,;]+",
+        "Bearer [REDACTED]",
+        detail,
+    )
+    detail = re.sub(
+        r"(?i)\b(api[_-]?key|access[_-]?token|authorization|token|password|secret)"
+        r"\b\s*[:=]\s*(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)",
+        lambda match: f"{match.group(1)}=[REDACTED]",
+        detail,
+    )
+    detail = re.sub(r"\b(?:sk|rk|pk)-[A-Za-z0-9._-]{8,}\b", "[REDACTED]", detail)
+    detail = re.sub(
+        r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b",
+        "[REDACTED]",
+        detail,
+    )
+    detail = re.sub(r"[\x00-\x1f\x7f-\x9f]", " ", detail)
+    return " ".join(detail.split())[:300]
 
 
 @dataclass(frozen=True)
@@ -209,38 +235,40 @@ def validate_model_key(choice: ModelChoice, api_key: str) -> None:
     """Verify the selected model can drive the HoneyOS Agent tool loop."""
 
     url = f"{choice.base_url.rstrip('/')}/chat/completions"
-    body = json.dumps(
-        {
-            "model": choice.model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": (
-                        "This is a HoneyOS Agent compatibility test. Please call the "
-                        "honeyos_compatibility_probe tool now with value "
-                        '"honeyos". Do not answer in text.'
-                    ),
-                }
-            ],
-            "tools": [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "honeyos_compatibility_probe",
-                        "description": "Verify that this model can call HoneyOS tools.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {"value": {"type": "string"}},
-                            "required": ["value"],
-                            "additionalProperties": False,
-                        },
+    payload = {
+        "model": choice.model,
+        "messages": [
+            {
+                "role": "user",
+                "content": (
+                    "This is a HoneyOS Agent compatibility test. Please call the "
+                    "honeyos_compatibility_probe tool now with value "
+                    '"honeyos". Do not answer in text.'
+                ),
+            }
+        ],
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "honeyos_compatibility_probe",
+                    "description": "Verify that this model can call HoneyOS tools.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"value": {"type": "string"}},
+                        "required": ["value"],
+                        "additionalProperties": False,
                     },
-                }
-            ],
-            "max_tokens": 64,
-            "stream": False,
-        }
-    ).encode("utf-8")
+                },
+            }
+        ],
+        "tool_choice": "required",
+        "max_tokens": 256,
+        "stream": False,
+    }
+    if choice.provider == "deepseek":
+        payload["thinking"] = {"type": "disabled"}
+    body = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
         url,
         data=body,
@@ -295,7 +323,17 @@ def validate_model_key(choice: ModelChoice, api_key: str) -> None:
     except urllib.error.HTTPError as exc:
         if exc.code in {401, 403}:
             raise ValueError("API Key 无效或没有访问权限") from exc
-        raise ValueError(f"模型服务返回 HTTP {exc.code}") from exc
+        detail = ""
+        try:
+            error_payload = json.loads(exc.read(4096).decode("utf-8"))
+            error = error_payload.get("error") if isinstance(error_payload, dict) else None
+            message = error.get("message") if isinstance(error, dict) else None
+            if isinstance(message, str):
+                detail = _safe_provider_error_detail(message, api_key)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            pass
+        suffix = f"：{detail}" if detail else ""
+        raise ValueError(f"模型服务返回 HTTP {exc.code}{suffix}") from exc
     except urllib.error.URLError as exc:
         raise ValueError(f"无法连接模型服务：{exc.reason}") from exc
 
