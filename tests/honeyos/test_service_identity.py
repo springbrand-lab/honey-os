@@ -208,6 +208,39 @@ def test_macos_install_waits_for_old_gateway_process_to_exit(
     assert [call[1] for call in calls] == ["bootout", "bootstrap"]
 
 
+def test_macos_install_waits_for_old_gateway_port_when_pid_file_is_missing(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import time
+    from honeyos.gateway import status
+
+    service = _service_module()
+    identity = service.ServiceIdentity.default(home=tmp_path / ".honeyos")
+    identity.data_home.mkdir(parents=True)
+    (identity.data_home / "config.yaml").write_text(
+        "platforms:\n  api_server:\n    port: 8642\n", encoding="utf-8"
+    )
+    plist_path = tmp_path / "ai.honeyos.gateway.plist"
+    calls: list[tuple[str, ...]] = []
+    port_probes = iter((True, True, True, False))
+    delays: list[float] = []
+
+    monkeypatch.setattr(service.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(service, "launchd_plist_path", lambda _identity: plist_path)
+    monkeypatch.setattr(status, "get_running_pid", lambda _path: None)
+    monkeypatch.setattr(
+        service, "_local_port_is_listening", lambda _port: next(port_probes)
+    )
+    monkeypatch.setattr(time, "sleep", delays.append)
+
+    assert service.install_service(
+        identity, runner=lambda argv, **_kwargs: calls.append(tuple(argv)) or 0
+    ) == 0
+
+    assert delays == [0.25, 0.25]
+    assert [call[1] for call in calls] == ["bootout", "bootstrap"]
+
+
 def test_linux_restart_rerenders_active_slot_unit_then_reloads_and_restarts(
     monkeypatch, tmp_path: Path
 ) -> None:

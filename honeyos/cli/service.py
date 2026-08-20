@@ -7,6 +7,7 @@ import json
 import platform
 import plistlib
 import shlex
+import socket
 import subprocess
 import sys
 import time
@@ -131,6 +132,36 @@ def _write_systemd_unit(identity: ServiceIdentity) -> Path:
     return path
 
 
+def _configured_gateway_port(identity: ServiceIdentity) -> int:
+    """Return the local API port without requiring a valid full config."""
+
+    port = 8642
+    try:
+        import yaml
+
+        config = yaml.safe_load(
+            (identity.data_home / "config.yaml").read_text(encoding="utf-8")
+        )
+        platforms = config.get("platforms", {}) if isinstance(config, dict) else {}
+        api_server = (
+            platforms.get("api_server", {}) if isinstance(platforms, dict) else {}
+        )
+        configured = api_server.get("port") if isinstance(api_server, dict) else None
+        if configured is not None:
+            port = int(configured)
+    except (OSError, TypeError, ValueError, yaml.YAMLError):
+        pass
+    return port
+
+
+def _local_port_is_listening(port: int) -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", int(port)), timeout=0.2):
+            return True
+    except OSError:
+        return False
+
+
 def install_service(identity: ServiceIdentity, runner: Runner = _run) -> int:
     identity.data_home.mkdir(parents=True, exist_ok=True)
     (identity.data_home / "logs").mkdir(parents=True, exist_ok=True)
@@ -144,6 +175,11 @@ def install_service(identity: ServiceIdentity, runner: Runner = _run) -> int:
         from honeyos.gateway.status import get_running_pid
 
         old_pid = get_running_pid(identity.data_home / "gateway.pid")
+        gateway_port = _configured_gateway_port(identity)
+        old_port_was_listening = (
+            (identity.data_home / "config.yaml").is_file()
+            and _local_port_is_listening(gateway_port)
+        )
         runner(["launchctl", "bootout", f"{domain}/{identity.macos_label}"])
         if old_pid is not None:
             for attempt in range(120):
@@ -156,6 +192,17 @@ def install_service(identity: ServiceIdentity, runner: Runner = _run) -> int:
                 if attempt == 119:
                     print(
                         f"HoneyOS gateway process {old_pid} did not stop.",
+                        file=sys.stderr,
+                    )
+                    return 1
+                time.sleep(0.25)
+        if old_port_was_listening:
+            for attempt in range(120):
+                if not _local_port_is_listening(gateway_port):
+                    break
+                if attempt == 119:
+                    print(
+                        f"HoneyOS gateway port {gateway_port} did not become available.",
                         file=sys.stderr,
                     )
                     return 1
@@ -238,18 +285,7 @@ def service_status(identity: ServiceIdentity, runner: Runner = _run) -> int:
 def _gateway_health_probe(identity: ServiceIdentity) -> bool:
     """Probe the local gateway endpoint, never merely a service-manager state."""
 
-    port = 8642
-    try:
-        import yaml
-
-        config = yaml.safe_load((identity.data_home / "config.yaml").read_text(encoding="utf-8"))
-        platforms = config.get("platforms", {}) if isinstance(config, dict) else {}
-        api_server = platforms.get("api_server", {}) if isinstance(platforms, dict) else {}
-        configured = api_server.get("port") if isinstance(api_server, dict) else None
-        if configured is not None:
-            port = int(configured)
-    except (OSError, TypeError, ValueError, yaml.YAMLError):
-        pass
+    port = _configured_gateway_port(identity)
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1.0) as response:
             if not 200 <= int(response.status) < 300:
