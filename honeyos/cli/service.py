@@ -7,6 +7,7 @@ import json
 import platform
 import plistlib
 import shlex
+import socket
 import subprocess
 import sys
 import time
@@ -76,6 +77,54 @@ def _service_environment(identity: ServiceIdentity) -> dict[str, str]:
         # unchanged preserves all user dependencies and provider setup.
         environment["PYTHONPATH"] = str(source)
     return environment
+
+
+def _api_server_endpoint(identity: ServiceIdentity) -> tuple[str, int]:
+    """Read the local web endpoint from both current and legacy config shapes."""
+
+    host = "127.0.0.1"
+    port = 8642
+    try:
+        import yaml
+
+        config = yaml.safe_load(
+            (identity.data_home / "config.yaml").read_text(encoding="utf-8")
+        )
+        platforms = config.get("platforms", {}) if isinstance(config, dict) else {}
+        api_server = (
+            platforms.get("api_server", {}) if isinstance(platforms, dict) else {}
+        )
+        extra = api_server.get("extra", {}) if isinstance(api_server, dict) else {}
+        configured_host = (
+            extra.get("host", api_server.get("host"))
+            if isinstance(extra, dict) and isinstance(api_server, dict)
+            else None
+        )
+        configured_port = (
+            extra.get("port", api_server.get("port"))
+            if isinstance(extra, dict) and isinstance(api_server, dict)
+            else None
+        )
+        if configured_host:
+            host = str(configured_host)
+        if configured_port is not None:
+            port = int(configured_port)
+    except (OSError, TypeError, ValueError, yaml.YAMLError):
+        pass
+    return host, port
+
+
+def _api_server_port_available(identity: ServiceIdentity) -> bool:
+    """Return whether a fresh gateway can bind its configured local port."""
+
+    host, port = _api_server_endpoint(identity)
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            probe.bind((host, port))
+    except OSError:
+        return False
+    return True
 
 
 def render_launchd_plist(identity: ServiceIdentity) -> str:
@@ -160,6 +209,18 @@ def install_service(identity: ServiceIdentity, runner: Runner = _run) -> int:
                     )
                     return 1
                 time.sleep(0.25)
+        if (identity.data_home / "config.yaml").is_file():
+            for attempt in range(120):
+                if _api_server_port_available(identity):
+                    break
+                if attempt == 119:
+                    _host, port = _api_server_endpoint(identity)
+                    print(
+                        f"HoneyOS web port {port} did not become available.",
+                        file=sys.stderr,
+                    )
+                    return 1
+                time.sleep(0.25)
         for attempt in range(40):
             result = _returncode(
                 runner(["launchctl", "bootstrap", domain, str(path)])
@@ -238,20 +299,12 @@ def service_status(identity: ServiceIdentity, runner: Runner = _run) -> int:
 def _gateway_health_probe(identity: ServiceIdentity) -> bool:
     """Probe the local gateway endpoint, never merely a service-manager state."""
 
-    port = 8642
+    host, port = _api_server_endpoint(identity)
+    connect_host = "127.0.0.1" if host in {"0.0.0.0", "::"} else host
     try:
-        import yaml
-
-        config = yaml.safe_load((identity.data_home / "config.yaml").read_text(encoding="utf-8"))
-        platforms = config.get("platforms", {}) if isinstance(config, dict) else {}
-        api_server = platforms.get("api_server", {}) if isinstance(platforms, dict) else {}
-        configured = api_server.get("port") if isinstance(api_server, dict) else None
-        if configured is not None:
-            port = int(configured)
-    except (OSError, TypeError, ValueError, yaml.YAMLError):
-        pass
-    try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1.0) as response:
+        with urllib.request.urlopen(
+            f"http://{connect_host}:{port}/health", timeout=1.0
+        ) as response:
             if not 200 <= int(response.status) < 300:
                 return False
             payload = json.loads(response.read().decode("utf-8"))

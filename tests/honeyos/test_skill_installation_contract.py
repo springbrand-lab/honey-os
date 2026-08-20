@@ -59,6 +59,34 @@ def test_companion_skill_index_is_explicitly_an_installed_index(
     assert "<available_skills>" not in prompt
 
 
+def test_companion_prompt_mandates_builder_for_honeyos_product_changes(
+    monkeypatch, tmp_path
+):
+    initialize_home(tmp_path)
+    monkeypatch.setenv("HONEYOS_HOME", str(tmp_path))
+
+    from honeyos.agent import prompt_builder
+
+    prompt_builder._SKILLS_PROMPT_CACHE.clear()
+    prompt = prompt_builder.build_skills_system_prompt(companion_mode=True)
+
+    assert "修改 HoneyOS 产品本身" in prompt
+    assert "必须先加载 `honeyos-builder`" in prompt
+    assert "改造请求本身已经授权安全换版" in prompt
+
+
+def test_builder_skill_activates_after_checks_without_second_confirmation():
+    from pathlib import Path
+
+    skill = Path(
+        "honeyos/companion/companion_skills/honeyos-builder/SKILL.md"
+    ).read_text(encoding="utf-8")
+
+    assert "检查通过后直接执行" in skill
+    assert "不要再次询问用户是否换上" in skill
+    assert "不要进入源码目录" in skill
+
+
 def test_skills_tool_schema_calls_the_index_installed_not_available():
     from honeyos.tools.skills_tool import SKILLS_LIST_SCHEMA
 

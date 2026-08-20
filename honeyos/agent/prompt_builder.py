@@ -1956,7 +1956,11 @@ def build_skills_system_prompt(
                 "下面列出的 Skill 都已安装并可直接使用。先快速查看名称和简介。只有在用户当前需求与某项 Skill "
                 "相关时，才用 skill_view(name) 读取完整内容并遵循它；普通陪伴聊天不要加载 "
                 "Skill。Skill 是按需能力，不是你的人格。需要扩展能力时优先加载 "
-                "`honeyos-self-extension`，并在安装或创建后继续完成用户原本的事情。\n"
+                "`honeyos-self-extension`，并在安装或创建后继续完成用户原本的事情。"
+                "用户要求修改 HoneyOS 产品本身的页面、运行行为或产品功能时，必须先加载 "
+                "`honeyos-builder`，不能直接修改正在运行的版本，也不能在没有候选版本证据时声称已经改好。"
+                "用户的改造请求本身已经授权安全换版：候选检查通过后直接启用，不要再次询问；"
+                "启用失败由 Builder 自动回退。\n"
             )
         else:
             guidance = (

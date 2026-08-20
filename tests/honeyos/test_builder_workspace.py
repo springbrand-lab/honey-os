@@ -81,14 +81,31 @@ def test_prepare_builder_change_exposes_only_requested_mutable_files(tmp_path):
     assert not (prepared.workspace / "honeyos" / "runtime").exists()
     assert manifest["goal"] == "改善跨会话记忆"
     assert manifest["source_commit"] == _git(source, "rev-parse", "HEAD")
-    assert manifest["installation"]["mode"] == "user_confirmation_required"
-    assert manifest["installation"]["automatic"] is False
+    assert manifest["installation"]["mode"] == "automatic_after_preflight"
+    assert manifest["installation"]["automatic"] is True
     assert "honeyos/tools/permission_policy.py" in manifest["protected_paths"]
     assert (
         "honeyos/companion/builder_activation*.py"
         in manifest["protected_paths"]
     )
     assert live_file.read_text(encoding="utf-8") == "VALUE = 'live'\n"
+
+
+def test_prepare_builder_change_normalizes_package_directory_to_git_root(tmp_path):
+    from honeyos.companion.builder_workspace import prepare_builder_change
+
+    source = _source_repo(tmp_path)
+    prepared = prepare_builder_change(
+        source_repo=source / "honeyos",
+        goal="调整前端",
+        allowed_paths=("honeyos/companion/**",),
+        builder_root=tmp_path / "HoneyOS Builder",
+        change_id="frontend-root-001",
+    )
+    manifest = json.loads(prepared.manifest_path.read_text(encoding="utf-8"))
+
+    assert manifest["source_repo"] == str(source.resolve())
+    assert (prepared.workspace / "honeyos" / "companion" / "activity.py").is_file()
 
 
 def test_prepare_writes_private_authoritative_policy_outside_candidate_workspace(tmp_path):
@@ -199,6 +216,10 @@ def test_inspect_binds_review_to_candidate_digest(tmp_path):
     feature.write_text("VALUE = 'changed-after-review'\n", encoding="utf-8")
     second = inspect_builder_change(prepared.change_root)
 
+    assert first.status == "review_ready"
+    assert first.installable is True
+    assert report_json["installation"]["automatic"] is True
+    assert report_json["installation"]["installable"] is True
     assert first.candidate_digest
     assert second.candidate_digest != first.candidate_digest
     assert report_json["source_commit"]

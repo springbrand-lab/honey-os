@@ -208,6 +208,55 @@ def test_macos_install_waits_for_old_gateway_process_to_exit(
     assert [call[1] for call in calls] == ["bootout", "bootstrap"]
 
 
+def test_macos_install_waits_for_api_port_release_when_pidfile_is_gone(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import time
+    from honeyos.gateway import status
+
+    service = _service_module()
+    identity = service.ServiceIdentity.default(home=tmp_path / ".honeyos")
+    identity.data_home.mkdir()
+    (identity.data_home / "config.yaml").write_text(
+        "platforms:\n  api_server:\n    extra:\n      port: 8769\n",
+        encoding="utf-8",
+    )
+    plist_path = tmp_path / "ai.honeyos.gateway.plist"
+    calls: list[tuple[str, ...]] = []
+    delays: list[float] = []
+    availability = iter((False, False, True))
+
+    monkeypatch.setattr(service.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(service, "launchd_plist_path", lambda _identity: plist_path)
+    monkeypatch.setattr(status, "get_running_pid", lambda _path: None)
+    monkeypatch.setattr(
+        service, "_api_server_port_available", lambda _identity: next(availability)
+    )
+    monkeypatch.setattr(time, "sleep", delays.append)
+
+    assert service.install_service(
+        identity, runner=lambda argv, **_kwargs: calls.append(tuple(argv)) or 0
+    ) == 0
+    assert delays == [0.25, 0.25]
+    assert [call[1] for call in calls] == ["bootout", "bootstrap"]
+
+
+def test_api_server_endpoint_reads_nested_extra_config(tmp_path: Path) -> None:
+    service = _service_module()
+    home = tmp_path / ".honeyos"
+    home.mkdir()
+    (home / "config.yaml").write_text(
+        "platforms:\n  api_server:\n    enabled: true\n    extra:\n"
+        "      host: 127.0.0.1\n      port: 8769\n",
+        encoding="utf-8",
+    )
+
+    assert service._api_server_endpoint(service.ServiceIdentity.default(home)) == (
+        "127.0.0.1",
+        8769,
+    )
+
+
 def test_linux_restart_rerenders_active_slot_unit_then_reloads_and_restarts(
     monkeypatch, tmp_path: Path
 ) -> None:

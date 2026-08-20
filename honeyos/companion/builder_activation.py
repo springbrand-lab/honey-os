@@ -1,8 +1,9 @@
 """Trusted, non-live staging for reviewed HoneyOS Builder candidates.
 
 It turns an already reviewed candidate into a complete immutable source slot.
-After ordinary user confirmation, it atomically selects the slot, restarts the
-trusted local service, and restores the prior slot if health does not return.
+The user's product-change request authorizes it to atomically select the slot,
+restart the trusted local service, and restore the prior slot if health does
+not return.
 """
 
 from __future__ import annotations
@@ -594,7 +595,7 @@ class ActivationStore:
         workspace = Path(workspace_raw).expanduser().resolve()
         if source_repo != self.bundled_root:
             raise ActivationError("candidate source is not the live bundled runtime")
-        if not source_repo.is_dir() or not (source_repo / ".git").is_dir():
+        if not source_repo.is_dir() or not (source_repo / ".git").exists():
             raise ActivationError("source repository is unavailable")
         try:
             if _git(source_repo, "rev-parse", "HEAD") != source_commit:
@@ -1142,7 +1143,7 @@ class ActivationStore:
         health_timeout_seconds: float = 30.0,
         sleep: Callable[[float], None] = time.sleep,
     ) -> ActivationRecord:
-        """Switch an already-confirmed complete slot, then restore it on failure.
+        """Switch an authorized complete slot, then restore it on failure.
 
         This touches only ``home/runtime``.  Conversation memory, model config,
         credentials, and all other user files are intentionally left in place.

@@ -373,8 +373,11 @@ def prepare_builder_change(
 ) -> PreparedBuilderChange:
     """Create a partial candidate workspace containing only mutable product files."""
 
-    source = Path(source_repo).expanduser().resolve()
-    if not source.is_dir() or not (source / ".git").exists():
+    from honeyos.companion.runtime import resolve_repository_root
+
+    requested_source = Path(source_repo).expanduser().resolve()
+    source = resolve_repository_root(requested_source)
+    if source is None:
         raise ValueError("source_repo must be a local Git checkout")
     goal_text = goal.strip()
     if not goal_text:
@@ -443,8 +446,8 @@ def prepare_builder_change(
                 "synthetic_test_data": True,
             },
             "installation": {
-                "mode": "user_confirmation_required",
-                "automatic": False,
+                "mode": "automatic_after_preflight",
+                "automatic": True,
                 "requires_human_review": False,
             },
         }
@@ -703,6 +706,7 @@ def inspect_builder_change(change_root: Path | str) -> BuilderReviewReport:
         status = "review_ready"
     else:
         status = "no_changes"
+    installable = status == "review_ready"
     digest = candidate_digest(
         workspace,
         source_commit,
@@ -727,9 +731,9 @@ def inspect_builder_change(change_root: Path | str) -> BuilderReviewReport:
         "protected_changes": protected,
         "out_of_scope_changes": out_of_scope,
         "installation": {
-            "mode": "user_confirmation_required",
-            "automatic": False,
-            "installable": False,
+            "mode": "automatic_after_preflight",
+            "automatic": installable,
+            "installable": installable,
         },
     }
     report_path.write_text(
@@ -742,7 +746,7 @@ def inspect_builder_change(change_root: Path | str) -> BuilderReviewReport:
         allowed_changes=tuple(allowed),
         protected_changes=tuple(protected),
         out_of_scope_changes=tuple(out_of_scope),
-        installable=False,
+        installable=installable,
         report_path=report_path,
         candidate_digest=digest,
     )

@@ -68,7 +68,7 @@ def test_builder_prepare_cli_uses_managed_projects_and_returns_manifest(
     assert manifest.is_relative_to(tmp_path / ".honeyos" / "builder")
     assert not manifest.is_relative_to(projects)
     assert manifest.is_file()
-    assert payload["installation"] == "awaiting_user_confirmation"
+    assert payload["installation"] == "ready_for_automatic_activation"
 
     (workspace / "honeyos" / "companion" / "activity.py").write_text(
         "VALUE = 2\n", encoding="utf-8"
@@ -168,7 +168,7 @@ def test_builder_activation_fails_closed_on_windows(monkeypatch, capsys):
     assert "macOS and Linux" in capsys.readouterr().err
 
 
-def test_builder_activate_stages_static_checks_then_uses_plain_confirmation(
+def test_builder_activate_stages_static_checks_then_switches_automatically(
     tmp_path, monkeypatch, capsys
 ):
     from dataclasses import replace
@@ -210,13 +210,13 @@ def test_builder_activate_stages_static_checks_then_uses_plain_confirmation(
 
     seen: list[str] = []
 
-    def confirmed(self, activation_id, **_kwargs):
+    def activated(self, activation_id, **_kwargs):
         record = self.verify_staged(activation_id)
         assert record.state == "awaiting_confirmation"
         seen.append(activation_id)
         return replace(record, state="healthy")
 
-    monkeypatch.setattr(ActivationStore, "activate_confirmed", confirmed)
+    monkeypatch.setattr(ActivationStore, "activate_confirmed", activated)
     args = parser.parse_args(["builder", "activate", "activity-cli-001"])
 
     assert builder_command(args) == 0

@@ -2740,6 +2740,13 @@ def cmd_chat(args):
 
 def cmd_gateway(args):
     """Gateway management commands."""
+    if getattr(args, "gateway_command", None) == "run":
+        try:
+            from honeyos.companion.runtime import upgrade_companion_home_for_gateway
+
+            upgrade_companion_home_for_gateway()
+        except Exception:
+            logger.warning("Companion startup migration failed", exc_info=True)
     _sync_bundled_skills_quietly()
 
     from honeyos.runtime.gateway import gateway_command

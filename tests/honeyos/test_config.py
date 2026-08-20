@@ -506,3 +506,129 @@ def test_upgrade_invalidates_real_skill_prompt_snapshot_when_seeding(tmp_path):
 
     assert not snapshot.exists()
     assert (tmp_path / "skills" / "relationship-continuity" / "SKILL.md").is_file()
+
+
+def test_upgrade_seeding_builder_invalidates_existing_companion_session_prompt(tmp_path):
+    initialize_home(tmp_path)
+    shutil.rmtree(tmp_path / "skills" / "honeyos-builder")
+    state_path = tmp_path / "state.db"
+    with sqlite3.connect(state_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE system_prompts (hash TEXT PRIMARY KEY, prompt TEXT NOT NULL);
+            CREATE TABLE sessions (
+                id TEXT PRIMARY KEY,
+                session_key TEXT,
+                system_prompt TEXT,
+                system_prompt_hash TEXT
+            );
+            INSERT INTO system_prompts(hash, prompt)
+            VALUES ('old-builder-index', 'prompt without builder');
+            INSERT INTO sessions(id, session_key, system_prompt, system_prompt_hash)
+            VALUES (
+                'companion',
+                'agent:main:companion:dm:owner',
+                NULL,
+                'old-builder-index'
+            );
+            """
+        )
+
+    assert upgrade_companion_capabilities(tmp_path) is True
+
+    assert (tmp_path / "skills" / "honeyos-builder" / "SKILL.md").is_file()
+    with sqlite3.connect(state_path) as connection:
+        row = connection.execute(
+            "SELECT system_prompt, system_prompt_hash FROM sessions WHERE id = 'companion'"
+        ).fetchone()
+    assert row == (None, None)
+
+
+def test_upgrade_new_prompt_contract_invalidates_existing_companion_session(tmp_path):
+    initialize_home(tmp_path)
+    contract_marker = tmp_path / ".companion_prompt_contract"
+    contract_marker.write_text("legacy-contract\n", encoding="utf-8")
+    state_path = tmp_path / "state.db"
+    with sqlite3.connect(state_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE system_prompts (hash TEXT PRIMARY KEY, prompt TEXT NOT NULL);
+            CREATE TABLE sessions (
+                id TEXT PRIMARY KEY,
+                session_key TEXT,
+                system_prompt TEXT,
+                system_prompt_hash TEXT
+            );
+            INSERT INTO system_prompts(hash, prompt)
+            VALUES ('old-routing', 'prompt without mandatory builder routing');
+            INSERT INTO sessions(id, session_key, system_prompt, system_prompt_hash)
+            VALUES (
+                'companion',
+                'agent:main:companion:dm:owner',
+                NULL,
+                'old-routing'
+            );
+            """
+        )
+
+    assert upgrade_companion_capabilities(tmp_path) is True
+
+    assert contract_marker.read_text(encoding="utf-8") != "legacy-contract\n"
+    with sqlite3.connect(state_path) as connection:
+        row = connection.execute(
+            "SELECT system_prompt_hash FROM sessions WHERE id = 'companion'"
+        ).fetchone()
+    assert row == (None,)
+
+
+def test_upgrade_retries_prompt_refresh_after_transient_database_failure(
+    monkeypatch, tmp_path
+):
+    initialize_home(tmp_path)
+    contract_marker = tmp_path / ".companion_prompt_contract"
+    contract_marker.write_text("legacy-contract\n", encoding="utf-8")
+    original_invalidator = config_module._invalidate_companion_session_prompts
+    monkeypatch.setattr(
+        config_module,
+        "_invalidate_companion_session_prompts",
+        lambda _home: None,
+    )
+
+    assert upgrade_companion_capabilities(tmp_path) is True
+    assert contract_marker.read_text(encoding="utf-8") == "legacy-contract\n"
+    assert (tmp_path / ".companion_prompt_refresh_pending").is_file()
+
+    monkeypatch.setattr(
+        config_module,
+        "_invalidate_companion_session_prompts",
+        original_invalidator,
+    )
+    assert upgrade_companion_capabilities(tmp_path) is True
+    assert contract_marker.read_text(encoding="utf-8") != "legacy-contract\n"
+    assert not (tmp_path / ".companion_prompt_refresh_pending").exists()
+
+
+def test_upgrade_adds_builder_frontend_reference_to_existing_install(tmp_path):
+    initialize_home(tmp_path)
+    builder = tmp_path / "skills" / "honeyos-builder"
+    skill_path = builder / "SKILL.md"
+    skill_path.write_text(
+        skill_path.read_text(encoding="utf-8").split("## 前端改造", 1)[0].rstrip()
+        + "\n\nUser customization must survive.\n",
+        encoding="utf-8",
+    )
+    reference = builder / "references" / "frontend.md"
+    reference.unlink(missing_ok=True)
+
+    assert upgrade_companion_capabilities(tmp_path) is True
+
+    upgraded = skill_path.read_text(encoding="utf-8")
+    assert "## 前端改造" in upgraded
+    assert "references/frontend.md" in upgraded
+    assert "User customization must survive." in upgraded
+    assert reference.is_file()
+    reference_text = reference.read_text(encoding="utf-8")
+    assert "index.html" in reference_text
+    assert "app.js" in reference_text
+    assert "浏览器工具不可用" in reference_text
+    assert "用户实际验收" in reference_text

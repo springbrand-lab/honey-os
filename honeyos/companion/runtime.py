@@ -24,9 +24,38 @@ class RuntimeIdentity:
     honeyos_version: str
     source_revision: str
     python_executable: str
+    package_root: str
     repository_root: str
     data_directory: str
     initialized_at: str
+
+
+def resolve_repository_root(start: Path | str) -> Path | None:
+    """Return the Git top-level containing *start*, if one is available."""
+
+    candidate = Path(start).expanduser().resolve()
+    if candidate.is_file():
+        candidate = candidate.parent
+    if not candidate.is_dir():
+        return None
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(candidate), "rev-parse", "--show-toplevel"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    rendered = completed.stdout.strip()
+    if not rendered:
+        return None
+    root = Path(rendered).expanduser().resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return None
+    return root if root.is_dir() and (root / ".git").exists() else None
 
 
 def gateway_argv(command: str, arguments: tuple[str, ...] = ()) -> list[str]:
@@ -56,11 +85,14 @@ def write_runtime_identity(home: Path) -> RuntimeIdentity:
 
     resolved = home.expanduser().resolve()
     resolved.mkdir(parents=True, exist_ok=True)
+    package_root = Path(__file__).resolve().parent.parent
+    repository_root = resolve_repository_root(package_root)
     identity = RuntimeIdentity(
         honeyos_version=__version__,
         source_revision=SOURCE_REVISION,
         python_executable=sys.executable,
-        repository_root=str(Path(__file__).resolve().parent.parent),
+        package_root=str(package_root),
+        repository_root=str(repository_root) if repository_root is not None else "",
         data_directory=str(resolved),
         initialized_at=datetime.now(timezone.utc).isoformat(),
     )
@@ -79,6 +111,34 @@ def write_runtime_identity(home: Path) -> RuntimeIdentity:
         except FileNotFoundError:
             pass
     return identity
+
+
+def upgrade_companion_home_for_gateway(home: Path | None = None) -> bool:
+    """Apply idempotent companion migrations before a long-lived gateway starts."""
+
+    if home is None:
+        from honeyos.core.constants import get_honeyos_home
+
+        home = get_honeyos_home()
+    resolved = Path(home).expanduser().resolve()
+    config_path = resolved / "config.yaml"
+    if not config_path.is_file():
+        return False
+    try:
+        import yaml
+
+        config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return False
+    agent = config.get("agent", {}) if isinstance(config, dict) else {}
+    if not isinstance(agent, dict) or str(agent.get("mode", "")).lower() != "companion":
+        return False
+
+    from honeyos.companion.config import upgrade_companion_capabilities
+
+    changed = upgrade_companion_capabilities(resolved)
+    write_runtime_identity(resolved)
+    return changed
 
 
 def run_gateway_command(

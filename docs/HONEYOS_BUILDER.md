@@ -49,8 +49,7 @@ honeyos/companion/companion_skills/**
   → AI 只修改候选文件
   → inspect 检查范围和候选摘要
   → 静态 preflight
-  → 伴侣说明改动并询问“我改好了，现在换上吗？”
-  → 用户明确同意
+  → 检查通过后自动换上
   → 生成完整只读版本槽
   → 原子切换 current 指针
   → 重写服务定义并重启
@@ -59,7 +58,7 @@ honeyos/companion/companion_skills/**
       └─ 失败：恢复 previous 指针并重启旧版本
 ```
 
-确认使用普通对话确认，不存在独立 token、GitHub PR、飞书专用授权或隐藏回调系统。状态采用 CAS 更新，重复确认不会再次切换同一候选。
+用户提出产品改造本身就是本次安全换版的授权，不再在改完后重复询问。状态采用 CAS 更新，同一候选不会重复切换；用户验收不满意时可以继续改新候选，新版本启动或健康检查失败时会自动换回旧版本。
 
 ## CLI
 
@@ -71,7 +70,7 @@ honeyos builder status
 honeyos builder activate <短ID>
 ```
 
-`activate` 只能在用户对本次改造明确同意后调用。目前自动切换支持 macOS 和 Linux；Windows 会明确拒绝，不会误用 Linux 服务命令。
+`activate` 在候选审查和静态检查通过后直接调用。目前自动切换支持 macOS 和 Linux；Windows 会明确拒绝，不会误用 Linux 服务命令。
 
 ## 版本与数据
 

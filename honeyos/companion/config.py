@@ -59,6 +59,7 @@ _PROACTIVE_SOUL_END_MARKER = "<!-- honeyos:end-proactive-companion-v1 -->"
 _LEGACY_PROACTIVE_SOUL_PREFIX = "HoneyOS 也提供已经安装的短期 Topic Pool。"
 _TOPIC_SCOUT_CONTRACT_MARKER = "<!-- honeyos:topic-scout-runtime-v2 -->"
 _TOPIC_SCOUT_CONTRACT_END_MARKER = "<!-- honeyos:end-topic-scout-runtime-v2 -->"
+_COMPANION_PROMPT_CONTRACT_VERSION = "companion-builder-routing-v1"
 
 _COMPANION_SKILLS = (
     ("relationship-continuity", "honeyos", None),
@@ -123,7 +124,7 @@ def _without_managed_proactive_soul_contract(soul: str) -> str:
     return soul
 
 
-def _invalidate_companion_session_prompts(home: Path) -> bool:
+def _invalidate_companion_session_prompts(home: Path) -> bool | None:
     """Force old companion sessions to rebuild capabilities without losing chat."""
 
     state_path = home / "state.db"
@@ -159,7 +160,7 @@ def _invalidate_companion_session_prompts(home: Path) -> bool:
                 )
             return cursor.rowcount > 0
     except sqlite3.Error:
-        return False
+        return None
 
 
 def seed_companion_skills(home: Path) -> tuple[Path, ...]:
@@ -413,6 +414,11 @@ def initialize_home(home: Path, *, platform: str | None = None) -> InitResult:
             f"Managed by {PRODUCT_NAME}. Upstream bundled skills are disabled.\n",
             0o644,
         ),
+        (
+            resolved / ".companion_prompt_contract",
+            _COMPANION_PROMPT_CONTRACT_VERSION + "\n",
+            0o600,
+        ),
     )
     created_files = tuple(
         path for path, content, mode in candidates if _create_file(path, content, mode=mode)
@@ -593,6 +599,19 @@ def upgrade_companion_capabilities(home: Path) -> bool:
     if changed:
         _atomic_replace(config_path, rendered_config, mode=0o600)
 
+    prompt_contract_path = resolved / ".companion_prompt_contract"
+    prompt_refresh_pending = resolved / ".companion_prompt_refresh_pending"
+    try:
+        installed_prompt_contract = prompt_contract_path.read_text(encoding="utf-8").strip()
+    except OSError:
+        installed_prompt_contract = ""
+    prompt_contract_version_changed = (
+        installed_prompt_contract != _COMPANION_PROMPT_CONTRACT_VERSION
+    )
+    if prompt_contract_version_changed or prompt_refresh_pending.is_file():
+        changed = True
+        prompt_contract_changed = True
+
     if _ensure_local_web_secret(resolved):
         changed = True
 
@@ -629,7 +648,7 @@ def upgrade_companion_capabilities(home: Path) -> bool:
     seeded_skills = seed_companion_skills(resolved)
     if seeded_skills:
         changed = True
-        prompt_contract_changed = any(path.name == "topic-scout" for path in seeded_skills)
+        prompt_contract_changed = True
     if record_companion_bundled_skills(resolved):
         changed = True
 
@@ -747,6 +766,41 @@ def upgrade_companion_capabilities(home: Path) -> bool:
                 changed = True
         if extension_text != extension_skill.read_text(encoding="utf-8"):
             _atomic_replace(extension_skill, extension_text, mode=0o644)
+            prompt_contract_changed = True
+
+    builder_source = (
+        Path(__file__).parent / "companion_skills" / "honeyos-builder"
+    )
+    builder_skill = resolved / "skills" / "honeyos-builder" / "SKILL.md"
+    if builder_skill.is_file():
+        builder_text = builder_skill.read_text(encoding="utf-8")
+        source_text = (builder_source / "SKILL.md").read_text(encoding="utf-8")
+        marker = "## 前端改造"
+        if marker not in builder_text:
+            _prefix, separator, managed_section = source_text.partition(marker)
+            if separator:
+                builder_text = (
+                    builder_text.rstrip()
+                    + "\n\n"
+                    + marker
+                    + managed_section.split("\n## ", 1)[0].rstrip()
+                    + "\n"
+                )
+                _atomic_replace(builder_skill, builder_text, mode=0o644)
+                changed = True
+                prompt_contract_changed = True
+        reference_source = builder_source / "references" / "frontend.md"
+        reference_destination = builder_skill.parent / "references" / "frontend.md"
+        reference_text = reference_source.read_text(encoding="utf-8")
+        try:
+            installed_reference = reference_destination.read_text(encoding="utf-8")
+        except OSError:
+            installed_reference = ""
+        if installed_reference != reference_text:
+            reference_destination.parent.mkdir(parents=True, exist_ok=True)
+            _atomic_replace(reference_destination, reference_text, mode=0o644)
+            changed = True
+            prompt_contract_changed = True
 
     marker = resolved / ".no-bundled-skills"
     if marker.is_file():
@@ -759,7 +813,21 @@ def upgrade_companion_capabilities(home: Path) -> bool:
             _atomic_replace(marker, branded_marker, mode=0o644)
             changed = True
 
-    if prompt_contract_changed and _invalidate_companion_session_prompts(resolved):
-        changed = True
+    if prompt_contract_changed:
+        if not prompt_refresh_pending.is_file():
+            _atomic_replace(prompt_refresh_pending, "pending\n", mode=0o600)
+            changed = True
+        invalidated = _invalidate_companion_session_prompts(resolved)
+        if invalidated is not None:
+            if prompt_contract_version_changed:
+                _atomic_replace(
+                    prompt_contract_path,
+                    _COMPANION_PROMPT_CONTRACT_VERSION + "\n",
+                    mode=0o600,
+                )
+                changed = True
+            prompt_refresh_pending.unlink(missing_ok=True)
+            if invalidated:
+                changed = True
 
     return changed

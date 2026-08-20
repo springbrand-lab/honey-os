@@ -26,8 +26,8 @@ def build_parser(
         help="Prepare, review, and enable a companion product change",
         description=(
             "Create a partial candidate workspace under HoneyOS Projects. "
-            "After a user explicitly confirms it, Builder can switch to a checked slot "
-            "and automatically roll back if it does not become healthy."
+            "A product-change request authorizes Builder to switch a checked slot "
+            "automatically and roll back if it does not become healthy."
         ),
     )
     sub = parser.add_subparsers(dest="builder_action")
@@ -52,7 +52,7 @@ def build_parser(
     inspect.add_argument("change_id", help="Identifier returned by builder prepare")
     activate = sub.add_parser(
         "activate",
-        help="Enable a reviewed change after the user has said to switch it on",
+        help="Enable a reviewed change after static checks pass",
     )
     activate.add_argument("change_id", help="Identifier returned by builder prepare")
     sub.add_parser("status", help="Show Builder records without changing HoneyOS data")
@@ -81,7 +81,7 @@ def builder_command(args: argparse.Namespace, *, home: Path | None = None) -> in
                 "change_id": prepared.change_id,
                 "workspace": str(prepared.workspace),
                 "manifest": str(prepared.manifest_path),
-                "installation": "awaiting_user_confirmation",
+                "installation": "ready_for_automatic_activation",
             }
         elif action == "inspect":
             report = inspect_builder_change(
@@ -117,7 +117,7 @@ def builder_command(args: argparse.Namespace, *, home: Path | None = None) -> in
                 staged.activation_id,
                 "staged",
                 "awaiting_confirmation",
-                detail="user confirmed product switch",
+                detail="product change request authorized automatic switch",
             )
             activated = store.activate_confirmed(staged.activation_id)
             payload = {
