@@ -423,7 +423,7 @@ def test_model_validation_rejects_string_instead_of_openai_response(monkeypatch)
         raise AssertionError("invalid provider response was accepted")
 
 
-def test_setup_defaults_to_weixin_and_feishu_before_start(tmp_path):
+def test_setup_defaults_to_local_web_before_start(tmp_path):
     initialize_home(tmp_path)
     events = []
     answers = iter(["", ""])
@@ -449,8 +449,6 @@ def test_setup_defaults_to_weixin_and_feishu_before_start(tmp_path):
     assert result == 0
     assert events == [
         ("validate", "openai-api", "valid-key"),
-        ("weixin", tmp_path.resolve()),
-        ("feishu", tmp_path.resolve()),
         ("gateway", "install", ("--no-start-now",), tmp_path.resolve()),
         ("gateway", "start", (), tmp_path.resolve()),
         ("ready", tmp_path.resolve()),
@@ -485,7 +483,7 @@ def test_setup_stops_before_weixin_when_key_validation_fails(tmp_path, capsys):
 def test_setup_can_select_feishu_only(tmp_path):
     initialize_home(tmp_path)
     events = []
-    answers = iter(["3", "2"])
+    answers = iter(["3", "3"])
 
     result = run_setup(
         tmp_path,
@@ -507,7 +505,7 @@ def test_setup_can_select_feishu_only(tmp_path):
 def test_setup_can_start_with_local_web_only(tmp_path):
     initialize_home(tmp_path)
     events = []
-    answers = iter(["2", "4"])
+    answers = iter(["2", "1"])
 
     result = run_setup(
         tmp_path,
@@ -537,7 +535,7 @@ def test_custom_setup_falls_back_to_manual_model_when_catalog_is_unavailable(
     tmp_path,
 ):
     initialize_home(tmp_path)
-    answers = iter(["4", "https://models.example/v1", "deployment-name", "4"])
+    answers = iter(["4", "https://models.example/v1", "deployment-name", "1"])
     observed = []
 
     result = run_setup(

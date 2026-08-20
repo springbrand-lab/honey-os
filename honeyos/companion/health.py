@@ -56,8 +56,13 @@ def _env_values(path: Path) -> dict[str, str]:
 def _model_key_env(config: dict) -> str:
     model = config.get("model") if isinstance(config.get("model"), dict) else {}
     provider = str(model.get("provider") or "")
-    if provider == "openrouter":
-        return "OPENROUTER_API_KEY"
+    builtin_key_envs = {
+        "openai-api": "OPENAI_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",
+        "deepseek": "DEEPSEEK_API_KEY",
+    }
+    if provider in builtin_key_envs:
+        return builtin_key_envs[provider]
     providers = config.get("providers") if isinstance(config.get("providers"), dict) else {}
     provider_config = providers.get(provider) if isinstance(providers.get(provider), dict) else {}
     return str(provider_config.get("key_env") or "")

@@ -402,17 +402,15 @@ def _has_feishu_credentials(home: Path) -> bool:
 
 def _choose_im_platforms(input_fn: Callable[[str], str]) -> tuple[str, ...]:
     choice = input_fn(
-        "连接渠道：1) 微信  2) 飞书  3) 微信 + 飞书（默认）  4) 暂时只用网页 [3]: "
+        "连接渠道：1) 本地网页（默认）  2) 微信  3) 飞书 [1]: "
     ).strip()
-    if choice in {"", "3"}:
-        return ("weixin", "feishu")
-    if choice == "1":
-        return ("weixin",)
-    if choice == "2":
-        return ("feishu",)
-    if choice == "4":
+    if choice in {"", "1"}:
         return ()
-    raise ValueError("请选择 1、2、3 或 4")
+    if choice == "2":
+        return ("weixin",)
+    if choice == "3":
+        return ("feishu",)
+    raise ValueError("请选择 1、2 或 3")
 
 
 def run_setup(

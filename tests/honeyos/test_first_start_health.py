@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from honeyos.companion.config import initialize_home
 from honeyos.companion.health import first_start_report
 from honeyos.companion.setup import ModelChoice, configure_model
@@ -55,6 +57,35 @@ def test_first_start_report_accepts_local_web_without_im(tmp_path):
     assert report.ready is True
     assert "本地网页聊天可用" in report.render()
     assert "微信和飞书均未连接" in report.render()
+
+
+@pytest.mark.parametrize(
+    ("provider", "key_env", "base_url"),
+    [
+        ("openai-api", "OPENAI_API_KEY", "https://api.openai.com/v1"),
+        ("openrouter", "OPENROUTER_API_KEY", "https://openrouter.ai/api/v1"),
+        ("deepseek", "DEEPSEEK_API_KEY", "https://api.deepseek.com/v1"),
+    ],
+)
+def test_first_start_report_accepts_builtin_provider_keys(
+    tmp_path, provider, key_env, base_url
+):
+    initialize_home(tmp_path)
+    configure_model(
+        tmp_path,
+        ModelChoice(
+            provider=provider,
+            model="test-model",
+            base_url=base_url,
+            key_env=key_env,
+        ),
+        "saved-key",
+    )
+
+    report = first_start_report(tmp_path, command_lookup=lambda _name: None)
+
+    assert report.ready is True
+    assert "模型与 API Key 已验证" in report.render()
 
 
 def test_first_start_report_accepts_feishu_as_the_only_im(tmp_path):

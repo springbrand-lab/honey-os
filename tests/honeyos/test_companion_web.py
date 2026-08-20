@@ -327,8 +327,28 @@ def test_wait_for_companion_web_bypasses_http_proxy(monkeypatch):
         thread.join()
 
 
-def test_setup_can_skip_im_and_start_with_web_only():
-    assert _choose_im_platforms(lambda _prompt: "4") == ()
+@pytest.mark.parametrize(
+    ("answer", "platforms"),
+    [
+        ("", ()),
+        ("1", ()),
+        ("2", ("weixin",)),
+        ("3", ("feishu",)),
+    ],
+)
+def test_setup_defaults_to_web_and_offers_each_im_separately(answer, platforms):
+    prompts = []
+
+    assert _choose_im_platforms(lambda prompt: prompts.append(prompt) or answer) == platforms
+    assert "1) 本地网页（默认）" in prompts[0]
+    assert "2) 微信" in prompts[0]
+    assert "3) 飞书" in prompts[0]
+    assert "微信 + 飞书" not in prompts[0]
+
+
+def test_setup_rejects_removed_combined_im_option():
+    with pytest.raises(ValueError, match="请选择 1、2 或 3"):
+        _choose_im_platforms(lambda _prompt: "4")
 
 
 def test_cli_exposes_web_as_a_public_command():
