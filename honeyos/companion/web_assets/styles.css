@@ -2835,7 +2835,7 @@ input:focus-visible, textarea:focus-visible {
   .app-content { grid-row: 1; height: calc(100dvh - 62px); }
   .app-navigation {
     position: fixed; inset: auto 0 0; z-index: 20; width: 100%;
-    height: calc(62px + env(safe-area-inset-bottom)); padding: 6px 8px env(safe-area-inset-bottom);
+    min-height: 0; height: calc(62px + env(safe-area-inset-bottom)); padding: 6px 8px env(safe-area-inset-bottom);
     display: block; border-top: 1px solid var(--line); border-right: 0;
     background: rgba(247,246,242,.95); backdrop-filter: blur(16px);
   }

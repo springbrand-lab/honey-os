@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -147,6 +148,19 @@ def test_companion_component_styles_cover_tokens_accessibility_and_responsivenes
     assert ":focus-visible" in styles
     assert "@media (prefers-reduced-motion: reduce)" in styles
     assert "@media (max-width: 720px)" in styles
+
+
+def test_mobile_navigation_does_not_cover_the_content_view():
+    styles = (ASSETS / "styles.css").read_text(encoding="utf-8")
+
+    mobile_navigation = re.search(
+        r"\.app-navigation \{\s*position: fixed; inset: auto 0 0;(?P<rule>.*?)\n  \}",
+        styles,
+        re.DOTALL,
+    )
+
+    assert mobile_navigation is not None
+    assert "min-height: 0" in mobile_navigation.group("rule")
 
 
 def test_settings_page_edits_model_and_connects_both_im_channels_by_qr():
